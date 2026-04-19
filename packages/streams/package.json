@@ -21,7 +21,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@ygoe/msgpack": "^1.0.3"
+    "@ygoe/msgpack": "catalog:"
   },
   "devDependencies": {
     "tsdown": "catalog:",

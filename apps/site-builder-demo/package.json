@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@statewalker/webrun-files-mem": "0.7.2",
+    "@statewalker/webrun-files-mem": "catalog:",
     "@statewalker/webrun-http-browser": "workspace:*",
     "@statewalker/webrun-site-builder": "workspace:*",
     "@statewalker/webrun-site-host": "workspace:*"
@@ -19,7 +19,7 @@
   "devDependencies": {
     "@statewalker/webrun-files": "catalog:",
     "typescript": "catalog:",
-    "vite": "^6.0.0",
-    "vite-plugin-static-copy": "^2.1.0"
+    "vite": "catalog:",
+    "vite-plugin-static-copy": "catalog:"
   }
 }
