@@ -51,7 +51,8 @@ beyond other `@statewalker/webrun-*` packages in the same workspace.
 ## Dependency graph
 
 ```
-webrun-streams        (foundation — iterator + stream + error primitives)
+webrun-streams        (foundation — iterator + stream + error + text/jsonl/lines primitives)
+webrun-msgpack        (foundation — length-prefixed MessagePack frame codec)
     ▲
     ├── webrun-ports              (MessagePort RPC)
     │       ▲
@@ -67,7 +68,8 @@ webrun-streams        (foundation — iterator + stream + error primitives)
     │       └── webrun-site-host  (SiteBuilder + SwHttpAdapter wired up in one call)
     │           (peer: @statewalker/webrun-files for the FilesApi interface)
     │
-    └── (all of the above use webrun-streams for chunks + errors)
+    └── (all of the above use webrun-streams for chunks + errors;
+         scanners / chat pipelines additionally use webrun-msgpack for framing)
 ```
 
 Every arrow is a `workspace:*` dep. Nothing deeper than
@@ -79,18 +81,28 @@ SW restarts.
 
 ### [`@statewalker/webrun-streams`](./packages/webrun-streams)
 
-Tiny async-iterator and `ReadableStream` primitives:
+Async-iterator and `ReadableStream` primitives:
 
-- `newAsyncGenerator` — backpressure-aware queue generator that turns
-  imperative `next`/`done` callbacks into an async generator.
-- `sendIterator` / `recieveIterator` — a `{done, value, error}` chunk
-  protocol for shipping an async iterator across any transport.
-- `toReadableStream` / `fromReadableStream` — one-way converters between
-  `AsyncIterator<Uint8Array>` and `ReadableStream<Uint8Array>`.
-- `serializeError` / `deserializeError` — preserve `Error` stack and
-  custom fields across JSON / structured-clone boundaries.
+- `collect` / `collectBytes` / `collectString` — drain an async iterable into an array / `Uint8Array` / `string` (zero-copy when possible).
+- `encodeText` / `decodeText` — UTF-8 `string` ↔ `Uint8Array` streams.
+- `splitLines` / `joinLines` — line splitting over `string` streams (cross-chunk safe) and reverse.
+- `encodeJsonl` / `decodeJsonl` — JSON values ↔ `\n`-delimited string stream.
+- `map` — stream-map over an `AsyncIterable<T>`.
+- `newAsyncGenerator` — backpressure-aware queue generator that turns imperative `next`/`done` callbacks into an async generator.
+- `sendIterator` / `recieveIterator` — a `{done, value, error}` chunk protocol for shipping an async iterator across any transport.
+- `toReadableStream` / `fromReadableStream` — one-way converters between `AsyncIterator<Uint8Array>` and `ReadableStream<Uint8Array>`.
+- `serializeError` / `deserializeError` — preserve `Error` stack and custom fields across JSON / structured-clone boundaries.
 
 Zero runtime deps. Every other package in the workspace depends on it.
+
+### [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack)
+
+Length-prefixed MessagePack frame codec for async iterables:
+
+- `encodeMsgpack` / `decodeMsgpack` — stream arbitrary values as `[4-byte BE length][msgpack payload]` frames; decoder buffers across chunk boundaries and never yields a partial trailing frame.
+- `encodeFloat32Arrays` / `decodeFloat32Arrays` — zero-copy specialisation for `Float32Array` streams (the msgpack `bin` payload is reinterpreted as floats).
+
+One runtime dep: `@ygoe/msgpack`. Used by downstream scanners and chat pipelines for value framing over any byte transport.
 
 ### [`@statewalker/webrun-ports`](./packages/webrun-ports)
 

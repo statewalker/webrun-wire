@@ -17,9 +17,7 @@ describe("collect", () => {
 
 describe("collectBytes", () => {
   it("concatenates chunks", async () => {
-    const result = await collectBytes(
-      from([new Uint8Array([1, 2]), new Uint8Array([3, 4])]),
-    );
+    const result = await collectBytes(from([new Uint8Array([1, 2]), new Uint8Array([3, 4])]));
     expect(Array.from(result)).toEqual([1, 2, 3, 4]);
   });
 
@@ -37,9 +35,7 @@ describe("collectBytes", () => {
 
 describe("collectString", () => {
   it("concatenates strings", async () => {
-    expect(await collectString(from(["hello", " ", "world"]))).toBe(
-      "hello world",
-    );
+    expect(await collectString(from(["hello", " ", "world"]))).toBe("hello world");
   });
 
   it("handles empty stream", async () => {

@@ -14,9 +14,7 @@ describe("JSONL", () => {
   });
 
   it("decodes JSON lines to objects", async () => {
-    const result = await collect(
-      decodeJsonl<{ a: number }>(from(['{"a":1}\n{"a":2}\n'])),
-    );
+    const result = await collect(decodeJsonl<{ a: number }>(from(['{"a":1}\n{"a":2}\n'])));
     expect(result).toEqual([{ a: 1 }, { a: 2 }]);
   });
 

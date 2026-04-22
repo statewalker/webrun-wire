@@ -13,9 +13,7 @@ describe("map", () => {
   });
 
   it("applies async function", async () => {
-    const result = await collect(
-      map(from(["a", "b"]), async (x) => x.toUpperCase()),
-    );
+    const result = await collect(map(from(["a", "b"]), async (x) => x.toUpperCase()));
     expect(result).toEqual(["A", "B"]);
   });
 

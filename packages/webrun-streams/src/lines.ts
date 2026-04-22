@@ -1,7 +1,5 @@
 /** Split a stream of string chunks into individual lines (delimited by \n). */
-export async function* splitLines(
-  input: AsyncIterable<string>,
-): AsyncGenerator<string> {
+export async function* splitLines(input: AsyncIterable<string>): AsyncGenerator<string> {
   let buffer = "";
   for await (const chunk of input) {
     buffer += chunk;
@@ -16,9 +14,7 @@ export async function* splitLines(
 }
 
 /** Append \n to each string in the stream. */
-export async function* joinLines(
-  input: AsyncIterable<string>,
-): AsyncGenerator<string> {
+export async function* joinLines(input: AsyncIterable<string>): AsyncGenerator<string> {
   for await (const line of input) {
     yield `${line}\n`;
   }

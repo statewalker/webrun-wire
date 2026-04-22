@@ -1,31 +1,19 @@
 # @statewalker/webrun-streams
 
-Tiny async-iterator and `ReadableStream` primitives: a backpressure-aware
-queue-based generator, a chunk protocol for pushing iterators across
-transports, conversions between async iterators and WHATWG
-`ReadableStream<Uint8Array>`, and serialisable `Error` objects.
+Async-iterator and `ReadableStream` primitives: `collect` / `collectBytes` / `collectString`, text and JSONL codecs, line splitting/joining, a backpressure-aware queue-based generator, a chunk protocol for pushing iterators across transports, conversions between async iterators and WHATWG `ReadableStream<Uint8Array>`, and serialisable `Error` objects.
 
 ## Why it exists
 
-Every higher-level package in the `webrun-*` family needs the same four
-building blocks:
+Every higher-level package in the `webrun-*` family (and its consumers — scanners, indexers, chat pipelines) needs the same small set of building blocks:
 
-1. A **callback-to-async-iterator** bridge — turn incoming
-   `{done, value, error}` callbacks into a `for await` loop, with proper
-   backpressure so producers know when consumers have stopped listening.
-2. A **chunk protocol** — a tiny `{done: boolean, value?, error?}`
-   envelope that can travel across any transport (MessagePort, WebSocket,
-   process pipe, in-memory queue) and rebuild the original iterator on
-   the other side.
-3. **WHATWG ↔ async-iterator conversions** for body bytes, so code that
-   works natively in `fetch` (`ReadableStream<Uint8Array>`) can hand off
-   to code that works in `for await … of` loops and back.
-4. **Error (de)serialisation** for passing exceptions across structured-
-   clone / JSON boundaries without losing stacks or extra fields.
+1. **Collectors** — turn any async iterable into a concrete array / `Uint8Array` / `string` without boilerplate; zero-copy short-circuit when a single chunk is produced.
+2. A **callback-to-async-iterator** bridge — turn incoming `{done, value, error}` callbacks into a `for await` loop, with backpressure so producers know when consumers have stopped listening.
+3. A **chunk protocol** — a tiny `{done, value?, error?}` envelope that can travel across any transport (MessagePort, WebSocket, IPC, in-memory) and rebuild the original iterator on the other side.
+4. **WHATWG ↔ async-iterator** conversions for body bytes, so code written against `fetch` (`ReadableStream<Uint8Array>`) can interoperate with `for await` code and back.
+5. **Error (de)serialisation** for passing exceptions across structured-clone / JSON boundaries without losing stacks or extra fields.
+6. **Line / JSONL / text codecs** so stream-processing code doesn't re-invent split/join/encode/decode in every consumer.
 
-These used to be duplicated across `webrun-ports`, `webrun-http`, and
-`webrun-http-browser`. This package is the canonical home; the other
-three depend on it.
+The MessagePack codec that previously rode along here is split out to [`@statewalker/webrun-msgpack`](../webrun-msgpack) so consumers that don't need framing don't pull in `@ygoe/msgpack`.
 
 ## How to use
 
@@ -33,11 +21,16 @@ three depend on it.
 npm install @statewalker/webrun-streams
 ```
 
-Five exports:
-
 | Export | Purpose |
 | --- | --- |
-| `newAsyncGenerator(init, skipValues?)` | Bridge imperative `next/done` callbacks into an `AsyncGenerator<T>`. Each `next(value)` returns `Promise<boolean>` for backpressure. |
+| `collect(it)` | Drain `AsyncIterable<T>` into `T[]`. |
+| `collectBytes(it)` | Concatenate `AsyncIterable<Uint8Array>` into one `Uint8Array` (zero-copy when a single chunk). |
+| `collectString(it)` | Concatenate `AsyncIterable<string>` into one `string`. |
+| `encodeText(it)` / `decodeText(it)` | UTF-8 `AsyncIterable<string>` ↔ `AsyncIterable<Uint8Array>`. |
+| `splitLines(it)` / `joinLines(it)` | Line splitting over `string` streams (handles cross-chunk lines) and reverse. |
+| `encodeJsonl(it)` / `decodeJsonl(it)` | JSON values ↔ `\n`-delimited JSON string stream. |
+| `map(it, fn)` | Stream-map an `AsyncIterable<T>` through `fn: T => U \| Promise<U>`. |
+| `newAsyncGenerator(init, skipValues?)` | Bridge imperative `next/done` callbacks into an `AsyncGenerator<T>`; returns `Promise<boolean>` for backpressure. |
 | `sendIterator(send, iterable)` | Drain an (async) iterable into `send({done, value, error})` chunk calls; completes with one trailing `{done: true}` chunk. |
 | `recieveIterator(installer)` | Inverse of `sendIterator`: wire an installer's chunk callback into a new `AsyncGenerator<T>`. |
 | `toReadableStream(it)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
@@ -46,6 +39,48 @@ Five exports:
 | `deserializeError(obj \| string)` | Reconstruct an `Error` from a serialised form, restoring extra fields. |
 
 ## Examples
+
+### Collectors
+
+```ts
+import { collect, collectBytes, collectString } from "@statewalker/webrun-streams";
+
+async function* numbers() { yield 1; yield 2; yield 3; }
+await collect(numbers());              // [1, 2, 3]
+
+async function* bytes() {
+  yield new Uint8Array([1, 2]);
+  yield new Uint8Array([3]);
+}
+await collectBytes(bytes());           // Uint8Array(3) [1, 2, 3]
+
+async function* strings() { yield "a"; yield "bc"; }
+await collectString(strings());        // "abc"
+```
+
+### Text / JSONL / lines codecs
+
+```ts
+import {
+  decodeJsonl,
+  decodeText,
+  encodeJsonl,
+  encodeText,
+  joinLines,
+  splitLines,
+} from "@statewalker/webrun-streams";
+
+async function* chunks() {
+  yield new Uint8Array([0x7b, 0x22, 0x61]);  // partial
+  yield new Uint8Array([0x22, 0x3a, 0x31, 0x7d, 0x0a]);
+}
+
+const values = decodeJsonl<{ a: number }>(splitLines(decodeText(chunks())));
+for await (const v of values) console.log(v); // { a: 1 }
+
+// inverse
+const jsonl = encodeText(joinLines(encodeJsonl([{ a: 1 }, { a: 2 }])));
+```
 
 ### Callback → AsyncGenerator bridge
 
@@ -192,14 +227,14 @@ strict one-way converters: no queuing strategy tricks, no transform.
 
 **Zero runtime dependencies.**
 
-Dev: TypeScript, vitest, rolldown, rimraf, `@types/node`
+Dev: TypeScript, vitest, tsdown, rimraf, `@types/node`
 (catalog versions from the monorepo root).
 
 ## Scripts
 
 ```sh
 pnpm test        # vitest run
-pnpm run build   # rolldown + tsc --emitDeclarationOnly
+pnpm run build   # tsdown (publishes src + compiled dist)
 pnpm lint        # biome check
 ```
 

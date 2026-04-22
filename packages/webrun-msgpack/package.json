@@ -1,9 +1,9 @@
 {
-  "name": "@statewalker/webrun-streams",
+  "name": "@statewalker/webrun-msgpack",
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Async-iterator / ReadableStream primitives: collect, text/jsonl codecs, lines, backpressure generators, serialisable errors.",
+  "description": "Length-prefixed MessagePack frame codec for async iterables. Streams-safe encode/decode for values and Float32Arrays.",
   "homepage": "https://github.com/statewalker/webrun-wire",
   "author": {
     "name": "Mikhail Kotelnikov",
@@ -13,7 +13,7 @@
   "repository": {
     "type": "git",
     "url": "git@github.com:statewalker/webrun-wire.git",
-    "directory": "packages/webrun-streams"
+    "directory": "packages/webrun-msgpack"
   },
   "exports": {
     ".": "./src/index.ts"
@@ -32,8 +32,10 @@
     "lint": "biome check --write .",
     "format": "biome format --write ."
   },
+  "dependencies": {
+    "@ygoe/msgpack": "catalog:"
+  },
   "devDependencies": {
-    "@types/node": "catalog:",
     "rimraf": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

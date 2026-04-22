@@ -6,9 +6,7 @@ export async function collect<T>(input: AsyncIterable<T>): Promise<T[]> {
 }
 
 /** Concatenate all Uint8Array chunks into a single Uint8Array. */
-export async function collectBytes(
-  input: AsyncIterable<Uint8Array>,
-): Promise<Uint8Array> {
+export async function collectBytes(input: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const chunk of input) {
@@ -26,9 +24,7 @@ export async function collectBytes(
 }
 
 /** Concatenate all string chunks into a single string. */
-export async function collectString(
-  input: AsyncIterable<string>,
-): Promise<string> {
+export async function collectString(input: AsyncIterable<string>): Promise<string> {
   let result = "";
   for await (const chunk of input) result += chunk;
   return result;
