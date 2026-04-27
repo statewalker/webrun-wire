@@ -11,6 +11,30 @@ export interface ServeFilesOptions {
    * `"index.html"` to get the conventional static-site behaviour.
    */
   directoryIndex?: string;
+  /**
+   * Optional response filter applied after `newServeFiles` produces its
+   * `Response`. Receives the original `Request` and the would-be `Response`,
+   * returns the `Response` to actually serve.
+   *
+   * - **Pass-through:** `return response;`
+   * - **Substitution:** `return new Response(...);`
+   *
+   * The filter is invoked once per dispatched request — for `200`, `206`,
+   * `404`, `405`, and `416` responses, and for `HEAD`. `newServeFiles` does
+   * NOT post-process the substituted response: it does not reconcile
+   * `Content-Range`, merge headers, or rewrite the status. Filters that
+   * substitute the body for ranged or `HEAD` requests are responsible for
+   * matching `status` / `Content-Length` themselves.
+   *
+   * Errors thrown synchronously or via promise rejection propagate out of
+   * `newServeFiles` and are routed to the surrounding `SiteBuilder` error
+   * handler.
+   *
+   * Filters dispatch on `request.url` — there is no separate `path`
+   * argument. A typical script transform reads `new URL(request.url).pathname`
+   * and returns `response` unchanged for paths it does not handle.
+   */
+  transform?: (request: Request, response: Response) => Response | Promise<Response>;
 }
 
 /**
@@ -22,32 +46,43 @@ export interface ServeFilesOptions {
  */
 export function newServeFiles(
   filesApi: FilesApi,
-  { getMimeType: resolveMime = getMimeType, directoryIndex }: ServeFilesOptions = {},
+  { getMimeType: resolveMime = getMimeType, directoryIndex, transform }: ServeFilesOptions = {},
 ): (request: Request, path: string) => Promise<Response> {
+  const apply = transform
+    ? (request: Request, response: Response): Response | Promise<Response> =>
+        transform(request, response)
+    : (_request: Request, response: Response): Response => response;
+
   return async (request: Request, path: string): Promise<Response> => {
     const method = request.method.toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
-      return new Response("Method not allowed", {
-        status: 405,
-        headers: { Allow: "GET, HEAD" },
-      });
+      return apply(
+        request,
+        new Response("Method not allowed", {
+          status: 405,
+          headers: { Allow: "GET, HEAD" },
+        }),
+      );
     }
 
     const resolved = await resolvePath(filesApi, path, directoryIndex);
-    if (!resolved) return new Response("Not Found", { status: 404 });
+    if (!resolved) return apply(request, new Response("Not Found", { status: 404 }));
     const { path: filePath, size } = resolved;
 
     const range = parseRangeHeader(request.headers.get("Range"), size);
     const contentType = resolveMime(filePath);
 
     if (range === "invalid") {
-      return new Response("Range Not Satisfiable", {
-        status: 416,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          ...(size !== undefined ? { "Content-Range": `bytes */${size}` } : {}),
-        },
-      });
+      return apply(
+        request,
+        new Response("Range Not Satisfiable", {
+          status: 416,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            ...(size !== undefined ? { "Content-Range": `bytes */${size}` } : {}),
+          },
+        }),
+      );
     }
 
     const headers: Record<string, string> = { "Content-Type": contentType };
@@ -64,10 +99,10 @@ export function newServeFiles(
     }
     if (size !== undefined) headers["Accept-Ranges"] = "bytes";
 
-    if (method === "HEAD") return new Response(null, { status, headers });
+    if (method === "HEAD") return apply(request, new Response(null, { status, headers }));
 
     const body = asReadableStream(filesApi.read(filePath, readOpts));
-    return new Response(body, { status, headers });
+    return apply(request, new Response(body, { status, headers }));
   };
 }
 

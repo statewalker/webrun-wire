@@ -141,4 +141,123 @@ describe("newServeFiles", () => {
     const response = await serve(new Request("http://x/"), "/weird.abc");
     expect(response.headers.get("Content-Type")).toBe("application/x-test");
   });
+
+  describe("transform", () => {
+    it("returning the response unchanged is a no-op (passes through Range/HEAD/200)", async () => {
+      await populate(api, { "/a.txt": "hello" });
+      const serve = newServeFiles(api, { transform: (_req, res) => res });
+
+      const ok = await serve(new Request("http://x/"), "/a.txt");
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+      expect(ok.headers.get("Accept-Ranges")).toBe("bytes");
+      expect(await ok.text()).toBe("hello");
+
+      const ranged = await serve(
+        new Request("http://x/", { headers: { Range: "bytes=0-2" } }),
+        "/a.txt",
+      );
+      expect(ranged.status).toBe(206);
+      expect(ranged.headers.get("Content-Range")).toBe("bytes 0-2/5");
+    });
+
+    it("substitutes body and Content-Type when filter returns a new response", async () => {
+      await populate(api, { "/main.tsx": "const x: number = 1; export {};" });
+      const serve = newServeFiles(api, {
+        transform: async (_req, res) => {
+          if (res.status !== 200) return res;
+          const src = await res.text();
+          return new Response(`/* transformed */ ${src}`, {
+            status: 200,
+            headers: { "Content-Type": "text/javascript" },
+          });
+        },
+      });
+      const response = await serve(new Request("http://x/"), "/main.tsx");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("text/javascript");
+      expect(response.headers.get("Content-Range")).toBeNull();
+      expect(await response.text()).toBe("/* transformed */ const x: number = 1; export {};");
+    });
+
+    it("filter sees the original Request (URL + method)", async () => {
+      await populate(api, { "/x.txt": "hi" });
+      let seenUrl = "";
+      let seenMethod = "";
+      const serve = newServeFiles(api, {
+        transform: (req, res) => {
+          seenUrl = req.url;
+          seenMethod = req.method;
+          return res;
+        },
+      });
+      await serve(new Request("http://example/req-url", { method: "GET" }), "/x.txt");
+      expect(seenUrl).toBe("http://example/req-url");
+      expect(seenMethod).toBe("GET");
+    });
+
+    it("synchronous throw propagates", async () => {
+      await populate(api, { "/a.txt": "hello" });
+      const serve = newServeFiles(api, {
+        transform: () => {
+          throw new Error("boom");
+        },
+      });
+      await expect(serve(new Request("http://x/"), "/a.txt")).rejects.toThrow("boom");
+    });
+
+    it("rejected promise propagates", async () => {
+      await populate(api, { "/a.txt": "hello" });
+      const serve = newServeFiles(api, {
+        transform: () => Promise.reject(new Error("boom")),
+      });
+      await expect(serve(new Request("http://x/"), "/a.txt")).rejects.toThrow("boom");
+    });
+
+    it("invokes filter for 405 (filter can pass through)", async () => {
+      const calls: number[] = [];
+      const serve = newServeFiles(api, {
+        transform: (_req, res) => {
+          calls.push(res.status);
+          return res;
+        },
+      });
+      const response = await serve(new Request("http://x/", { method: "POST" }), "/a.txt");
+      expect(response.status).toBe(405);
+      expect(response.headers.get("Allow")).toBe("GET, HEAD");
+      expect(calls).toEqual([405]);
+    });
+
+    it("invokes filter for 416 (filter can pass through)", async () => {
+      await populate(api, { "/data.bin": new Uint8Array([1, 2, 3]) });
+      const calls: number[] = [];
+      const serve = newServeFiles(api, {
+        transform: (_req, res) => {
+          calls.push(res.status);
+          return res;
+        },
+      });
+      const response = await serve(
+        new Request("http://x/", { headers: { Range: "bytes=10-20" } }),
+        "/data.bin",
+      );
+      expect(response.status).toBe(416);
+      expect(calls).toEqual([416]);
+    });
+
+    it("invokes filter for HEAD", async () => {
+      await populate(api, { "/a.txt": "hello" });
+      let invoked = false;
+      const serve = newServeFiles(api, {
+        transform: (_req, res) => {
+          invoked = true;
+          return res;
+        },
+      });
+      const response = await serve(new Request("http://x/", { method: "HEAD" }), "/a.txt");
+      expect(invoked).toBe(true);
+      expect(response.status).toBe(200);
+      expect(response.body).toBeNull();
+    });
+  });
 });

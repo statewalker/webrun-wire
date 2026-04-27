@@ -177,6 +177,29 @@ describe("HostedSiteBuilder", () => {
     expect(captured?.removed).toBe(true);
   });
 
+  it("forwards ServeFilesOptions.transform to the underlying mount", async () => {
+    const { builder, getAdapter } = newBuilder();
+    builder.setFiles(
+      "/client",
+      { "/main.tsx": "const x: number = 1; export {};" },
+      {
+        transform: async (_req, res) => {
+          if (res.status !== 200) return res;
+          const src = await res.text();
+          return new Response(`/* t */ ${src}`, {
+            status: 200,
+            headers: { "Content-Type": "text/javascript" },
+          });
+        },
+      },
+    );
+    await builder.build();
+    const response = await getAdapter().dispatch("/client/main.tsx");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/javascript");
+    expect(await response.text()).toBe("/* t */ const x: number = 1; export {};");
+  });
+
   it("calls the adapter factory with the resolved key + swUrl", async () => {
     let seen: { key: string; serviceWorkerUrl: string } | undefined;
     await new HostedSiteBuilder({
