@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>site-builder-tsx-spike — TS/TSX served via sucrase transform</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 70rem; }
+      h1 { margin-top: 0; }
+      code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }
+      .panel { display: flex; gap: 1rem; margin-top: 1rem; }
+      iframe { flex: 1; height: 26rem; border: 1px solid #e5e5e5; }
+      .log {
+        width: 22rem; border: 1px solid #e5e5e5; padding: 0.5rem 1rem;
+        font-family: monospace; font-size: 0.85rem; overflow: auto;
+      }
+      .log p { margin: 0.25rem 0; }
+      .log .err { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <h1>HostedSiteBuilder + sucrase transform</h1>
+    <p>
+      The hosted site mounts a <code>.tsx</code> source file. The
+      <code>ServeFilesOptions.transform</code> filter intercepts each
+      response and, for paths ending in <code>.ts</code>/<code>.tsx</code>,
+      transpiles via <code>sucrase</code> and substitutes the response with
+      <code>Content-Type: text/javascript</code>. The browser's native
+      module loader executes the transpiled JS.
+    </p>
+
+    <div class="panel">
+      <iframe title="Hosted client" id="preview"></iframe>
+      <div class="log" id="log"><p>Loading…</p></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

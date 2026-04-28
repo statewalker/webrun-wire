@@ -1,0 +1,25 @@
+{
+  "name": "@statewalker/site-builder-tsx-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Spike: HostedSiteBuilder serving .tsx source transpiled on-the-fly via sucrase + ServeFilesOptions.transform filter",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5174",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:*",
+    "@statewalker/webrun-site-host": "workspace:*",
+    "sucrase": "catalog:"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-files": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
