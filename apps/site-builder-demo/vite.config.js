@@ -1,21 +1,40 @@
+import { copyFileSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import { viteStaticCopy } from "vite-plugin-static-copy";
 
-// Same-origin ServiceWorker mode (no relay): copy webrun-http-browser's
-// pre-built SW runtime to `/sw-worker.js` at the site root. Its default
-// scope is the site root (`/`), so the outer page sits under SW control —
-// required by `SwHttpAdapter.start()` which waits for the controller.
+// Same-origin ServiceWorker mode (no relay): serve the pre-built SW runtime
+// at `/sw-worker.js` so its scope is the site root (`/`) — required by
+// `SwHttpAdapter.start()` which waits for the controller.
+//
+// This was previously done with `vite-plugin-static-copy`, but its dev-mode
+// middleware does not register correctly when `src` is an absolute path
+// (the file lands at `dist/node_modules/...` instead of `dist/sw-worker.js`,
+// and dev mode returns the SPA fallback for `/sw-worker.js`). A 10-line
+// inline plugin sidesteps both bugs.
 const swRuntime = fileURLToPath(
   new URL("./node_modules/@statewalker/webrun-http-browser/dist/sw-worker.js", import.meta.url),
 );
 
+function serveSwWorker() {
+  return {
+    name: "serve-sw-worker",
+    configureServer(server) {
+      server.middlewares.use("/sw-worker.js", (_req, res) => {
+        res.setHeader("Content-Type", "text/javascript");
+        res.setHeader("Service-Worker-Allowed", "/");
+        res.end(readFileSync(swRuntime));
+      });
+    },
+    writeBundle(options) {
+      const dest = resolve(options.dir ?? "dist", "sw-worker.js");
+      copyFileSync(swRuntime, dest);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [
-    viteStaticCopy({
-      targets: [{ src: swRuntime, dest: "." }],
-    }),
-  ],
+  plugins: [serveSwWorker()],
   build: {
     // src/main.ts uses top-level await; modern target lets esbuild keep it.
     target: "esnext",
