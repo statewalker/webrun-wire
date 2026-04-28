@@ -100,10 +100,10 @@ interface ApiResponse {
   now: string;
   receivedName: string;
 }
-
 export default async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const name: string = url.searchParams.get("name") ?? "anonymous";
+  console.log("[tsx-spike] Received API request for name:", name, "at path:", url.pathname);
   const payload: ApiResponse = {
     message: \`Hello from the typed server, \${name}!\`,
     at: url.pathname,

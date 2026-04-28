@@ -40,10 +40,12 @@ export const serverResources: Record<string, string> = {
   "/api/index.js": `export default async function handleRequest(request) {
   const url = new URL(request.url);
   const name = url.searchParams.get("name") ?? "anonymous";
+  const now = new Date().toISOString();
+  console.log("Received API request for name:", name, "at path:", url.pathname, "at time:", now);
   return Response.json({
     message: "Hello from the dynamically-imported server, " + name + "!",
     at: url.pathname,
-    now: new Date().toISOString(),
+    now,
   });
 }`,
 };
