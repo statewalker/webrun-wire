@@ -1,6 +1,6 @@
 import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
 import { newScriptTransform } from "./script-transform.js";
-import { clientResources } from "./site.js";
+import { clientResources, serverResources } from "./site.js";
 
 const logEl = document.querySelector<HTMLDivElement>("#log");
 const previewEl = document.querySelector<HTMLIFrameElement>("#preview");
@@ -16,9 +16,16 @@ function log(message: string, isError = false): void {
 try {
   logEl.innerHTML = "";
 
+  // One transform instance, applied to both mounts. The transform's cache
+  // is module-scoped, so reuse vs. fresh instances does not matter for
+  // correctness — but reusing makes the intent clear.
+  const scriptTransform = newScriptTransform();
+
   const site = await new HostedSiteBuilder()
     .setSiteKey("tsx-spike")
-    .setFiles("/client", clientResources, { transform: newScriptTransform() })
+    .setFiles("/client", clientResources, { transform: scriptTransform })
+    .setFiles("/server", serverResources, { transform: scriptTransform })
+    .setServerRunner("/api", "/server/api/index.ts")
     .setErrorHandler((error, request) => {
       log(`Error in ${request.method} ${request.url}: ${error}`, true);
       return new Response(String(error), { status: 500 });
