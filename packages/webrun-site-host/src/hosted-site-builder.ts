@@ -230,8 +230,13 @@ function newServerRunner(modulePath: string, getBaseUrl: () => string): Endpoint
   const trimmed = modulePath.startsWith("/") ? modulePath.slice(1) : modulePath;
   return async (request) => {
     try {
-      const moduleUrl = `${getBaseUrl()}${trimmed}`;
-      const mod = (await import(/* @vite-ignore */ moduleUrl)) as {
+      // Inline template literal — keep `/* @vite-ignore */` directly inside
+      // `import(...)` so rolldown does not separate the comment from the
+      // dynamic specifier when bundling. (Pulling the URL into a variable
+      // and importing the variable causes rolldown to inline it without
+      // the comment, re-triggering the vite:import-analysis warning in
+      // downstream consumers.)
+      const mod = (await import(/* @vite-ignore */ `${getBaseUrl()}${trimmed}`)) as {
         default?: (request: Request) => Response | Promise<Response>;
       };
       if (typeof mod.default !== "function") {
