@@ -1,21 +1,30 @@
 # site-builder-tsx-spike
 
-Proof-of-life for **Step 1** of the in-browser build pipeline described in
-[notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md](../../../../notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md).
+A spike on top of [`site-builder-demo`](../site-builder-demo) that
+adds one thing: source-level transpilation of `.ts` and `.tsx` files
+served from the in-memory site, so the browser's native module loader
+can run them as-is.
 
-## What it proves
+## Main demonstration point
 
-- `ServeFilesOptions.transform` is a per-mount Response filter that runs
-  after `newServeFiles` produces its response.
-- A single sucrase-backed filter applied to **both** the `/client` and
-  `/server` mounts is enough to:
-  - serve client `.tsx` (typed + JSX) as `text/javascript` so the browser's
-    native module loader runs it,
-  - serve server `.ts` (typed `Request → Response` handler) the same way,
-    so `setServerRunner("/api", "/server/api/index.ts")` can dynamic-import
-    a TypeScript file directly.
-- No bundler, no service-side build step, no service-worker-internal wasm —
-  sucrase is pure JS, runs on the main thread, the SW just relays.
+**`ServeFilesOptions.transform` is a per-mount Response filter, and a
+single sucrase-backed instance applied to both the `/client` and
+`/server` mounts is all you need to serve `.ts` / `.tsx` source
+directly to the browser as `text/javascript` — including the
+dynamic-imported server handler.**
+
+The same filter handles three cases uniformly:
+
+- `client/main.tsx` — typed + JSX (transforms: `typescript` + `jsx`)
+- `client/format.ts` — typed helper imported by `main.tsx` via
+  explicit `.ts` extension
+- `server/api/index.ts` — typed `Request → Response` handler,
+  loaded via `setServerRunner("/api", "/server/api/index.ts")` and
+  dynamic-imported through the same SW + transform pipeline
+
+No bundler, no service-side build step, no SW-internal wasm. sucrase
+is pure JS, runs on the main thread; the SW just relays. Output is
+cached by source SHA-256 so repeated fetches don't re-transpile.
 
 ## What's served
 
@@ -24,44 +33,50 @@ Proof-of-life for **Step 1** of the in-browser build pipeline described in
 /client/style.css        static
 /client/format.ts        TS  → transpiled by transform
 /client/main.tsx         TSX → transpiled by transform (typescript + jsx)
-/server/api/index.ts     TS  → transpiled by transform; loaded via setServerRunner
-/api                     setServerRunner endpoint → dynamic-imports server/api/index.ts
+/server/api/index.ts     TS  → transpiled by transform
+/api                     setServerRunner endpoint → dynamic-imports
+                         /server/api/index.ts as a module
 ```
 
-The client form's input fires `fetch("../api?name=…")` on every keystroke;
-the endpoint runs the typed server handler and returns JSON; the client
-renders it through a typed `formatResponse` helper imported from a sibling
-`.ts` file.
+Wiring is in [`src/main.ts`](./src/main.ts); the transform is in
+[`src/script-transform.ts`](./src/script-transform.ts).
 
-## What it doesn't do
+## What it does not do
 
-Everything that's Step 2+:
+Everything that's Step 2+ of the in-browser build pipeline:
 
 - No `external/<pkg>@<v>/...` virtual mount, no CDN fetching of bare
   specifiers.
 - No `uri-graph` integration, no `ContentRouter`, no multi-FS layering.
 - No `es-module-lexer`, no import rewriting, no source maps, no HMR.
-- No persistent or content-addressed caching — only an in-memory
-  `Map<sha256(source), code>` keyed by content hash.
+- No persistent cache — only an in-memory `Map<sha256, code>`.
+
+Step 1 spec:
+[notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md](../../../../notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md).
 
 ## Run
 
-```bash
+```sh
 pnpm --filter @statewalker/site-builder-tsx-spike dev
 ```
 
-Open <http://localhost:5174>. The right panel logs the mounted site URL;
-the iframe shows the served client. Type in the Name field — every
-keystroke fetches `/api`, runs the typed server handler, and renders the
-formatted response.
+Open <http://localhost:5174>. Type in the Name field — every
+keystroke fetches `/api`, runs the typed server handler, and renders
+the formatted response.
 
-In DevTools → Network, response `Content-Type` for `client/main.tsx`,
-`client/format.ts`, and `server/api/index.ts` is `text/javascript`; their
-bodies are transpiled JS (no `interface`, no `: type` annotations).
+## Verify in DevTools
 
-## Stale Service Worker?
+In Network, the response `Content-Type` for `client/main.tsx`,
+`client/format.ts`, and `server/api/index.ts` is `text/javascript`,
+and their bodies are transpiled JS (no `interface`, no `: type`
+annotations).
 
-If the spike behaves as if old code is running, you have a stale SW from a
-previous session. **DevTools → Application → Service Workers → Unregister**,
-then **Storage → Clear site data**, then hard reload — or just open the
-spike in a fresh Incognito/Private window.
+In Console, `[script-transform]` logs once per script fetch — useful
+for catching a stale-SW scenario where the filter never runs.
+
+## Stale ServiceWorker?
+
+If the spike behaves as if old code is running, you have a stale SW
+from a previous session. **DevTools → Application → Service Workers
+→ Unregister**, then **Storage → Clear site data**, then hard reload.
+Or just open the spike in a fresh Incognito/Private window.
