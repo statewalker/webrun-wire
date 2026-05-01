@@ -22,8 +22,17 @@ try {
   //   every call (alongside the URL params)
   // - `.build()` registers the SW, awaits activation, and returns a
   //   ready-to-use `HostedSite { baseUrl, stop }` handle.
+  //
+  // Resolve `sw-worker.js` against `document.baseURI` (the page URL) so
+  // the build is portable across sub-paths: works at `/`, `/dist/`,
+  // `/some/sub/path/`, etc. — the SW is always co-located with the
+  // page that loaded it. The default would be origin-absolute
+  // (`/sw-worker.js`) and 404 outside the root.
+  const swUrl = new URL("./sw-worker.js", document.baseURI).href;
+
   const site = await new HostedSiteBuilder()
     .setSiteKey("demo")
+    .setServiceWorkerUrl(swUrl)
     .setFiles("/client", clientResources)
     .setFiles("/server", serverResources)
     .setServerRunner("/api", "/server/api/index.js", {

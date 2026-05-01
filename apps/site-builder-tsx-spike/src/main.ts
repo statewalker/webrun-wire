@@ -21,8 +21,15 @@ try {
   // correctness — but reusing makes the intent clear.
   const scriptTransform = newScriptTransform();
 
+  // Resolve `sw-worker.js` against `document.baseURI` (the page URL) so
+  // the build is portable across sub-paths: works at `/`, `/dist/`,
+  // `/some/sub/path/`, etc. The default would be origin-absolute
+  // (`/sw-worker.js`) and 404 outside the root.
+  const swUrl = new URL("./sw-worker.js", document.baseURI).href;
+
   const site = await new HostedSiteBuilder()
     .setSiteKey("tsx-spike")
+    .setServiceWorkerUrl(swUrl)
     .setFiles("/client", clientResources, { transform: scriptTransform })
     .setFiles("/server", serverResources, { transform: scriptTransform })
     .setServerRunner("/api", "/server/api/index.ts", {

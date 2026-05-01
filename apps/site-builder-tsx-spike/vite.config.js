@@ -31,6 +31,10 @@ function serveSwWorker() {
 
 export default defineConfig({
   plugins: [serveSwWorker()],
+  // Emit relative asset paths (`./assets/…`) instead of origin-absolute
+  // (`/assets/…`) so the built `dist/` folder works when hosted under an
+  // arbitrary sub-path or opened with `file://`.
+  base: "./",
   build: {
     target: "esnext",
   },
