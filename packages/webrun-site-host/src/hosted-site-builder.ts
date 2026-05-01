@@ -1,6 +1,7 @@
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 import {
   type AuthPredicate,
+  type EndpointEnv,
   type EndpointHandler,
   type ErrorHandler,
   type ServeFilesOptions,
@@ -35,6 +36,7 @@ interface ServerRunner {
   pattern: string;
   modulePath: string;
   method: string | undefined;
+  env: Record<string, unknown> | undefined;
 }
 
 interface AuthDef {
@@ -128,9 +130,20 @@ export class HostedSiteBuilder {
    * files mount serves it as JS), then evaluated by the browser's native
    * module loader. Each invocation re-imports — the module cache lives in
    * the browser, so repeated imports of the same URL are cheap.
+   *
+   * `options` carries the environment values forwarded to the server
+   * module: anything not named `method` becomes part of the `env` bag
+   * the handler receives alongside `params` (DB connections, FilesApi
+   * instances, secrets, …). `options.method` (if set) restricts the
+   * endpoint to a single HTTP verb.
    */
-  setServerRunner(pattern: string, modulePath: string, method?: string): this {
-    this.#serverRunners.push({ pattern, modulePath, method });
+  setServerRunner(
+    pattern: string,
+    modulePath: string,
+    options: Record<string, unknown> & { method?: string } = {},
+  ): this {
+    const { method, ...env } = options;
+    this.#serverRunners.push({ pattern, modulePath, method, env });
     return this;
   }
 
@@ -195,8 +208,8 @@ export class HostedSiteBuilder {
       if (method !== undefined) sb.setEndpoint(pattern, method, handler);
       else sb.setEndpoint(pattern, handler);
     }
-    for (const { pattern, modulePath, method } of this.#serverRunners) {
-      const runner = newServerRunner(modulePath, getBaseUrl);
+    for (const { pattern, modulePath, method, env } of this.#serverRunners) {
+      const runner = newServerRunner(modulePath, getBaseUrl, env);
       if (method !== undefined) sb.setEndpoint(pattern, method, runner);
       else sb.setEndpoint(pattern, runner);
     }
@@ -223,12 +236,20 @@ function defaultSwUrl(): string {
 
 /**
  * Build a handler that dynamic-imports `${baseUrl}${modulePath}` and
- * delegates to its default export. Errors surface as `500` responses so
- * the SW never crashes on a missing / broken module.
+ * delegates to its default export. The default export receives the
+ * original `Request` plus an `env` bag merging the runner-level values
+ * passed through `options` with the per-request `params`. Errors
+ * surface as `500` responses so the SW never crashes on a missing /
+ * broken module.
  */
-function newServerRunner(modulePath: string, getBaseUrl: () => string): EndpointHandler {
+export function newServerRunner(
+  modulePath: string,
+  getBaseUrl: () => string,
+  env?: Record<string, unknown>,
+): EndpointHandler {
   const trimmed = modulePath.startsWith("/") ? modulePath.slice(1) : modulePath;
-  return async (request) => {
+  const runnerEnv = env ?? {};
+  return async (request, incoming) => {
     try {
       // Inline template literal — keep `/* @vite-ignore */` directly inside
       // `import(...)` so rolldown does not separate the comment from the
@@ -237,12 +258,16 @@ function newServerRunner(modulePath: string, getBaseUrl: () => string): Endpoint
       // the comment, re-triggering the vite:import-analysis warning in
       // downstream consumers.)
       const mod = (await import(/* @vite-ignore */ `${getBaseUrl()}${trimmed}`)) as {
-        default?: (request: Request) => Response | Promise<Response>;
+        default?: (request: Request, env: EndpointEnv) => Response | Promise<Response>;
       };
       if (typeof mod.default !== "function") {
         return new Response(`Module ${modulePath} has no default export`, { status: 500 });
       }
-      return await mod.default(request);
+      // Merge order (least → most specific): SiteBuilder env (already in
+      // `incoming`), runner-level env, per-request `params`. Runner-level
+      // values win over site-level for this endpoint; `params` always wins.
+      const merged: EndpointEnv = { ...incoming, ...runnerEnv, params: incoming.params };
+      return await mod.default(request, merged);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return new Response(message, { status: 500 });

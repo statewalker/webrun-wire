@@ -1,7 +1,7 @@
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { newBasicAuth } from "@statewalker/webrun-site-builder";
 import { describe, expect, it } from "vitest";
-import { HostedSiteBuilder } from "../src/hosted-site-builder.js";
+import { HostedSiteBuilder, newServerRunner } from "../src/hosted-site-builder.js";
 import type { SiteAdapter } from "../src/types.js";
 import { FakeAdapter } from "./fake-adapter.js";
 
@@ -68,8 +68,8 @@ describe("HostedSiteBuilder", () => {
   it("passes setEndpoint through with params and method", async () => {
     const { builder, getAdapter } = newBuilder();
     builder
-      .setEndpoint("/echo/:name", "GET", (_request, params) =>
-        Response.json({ hello: params.name }),
+      .setEndpoint("/echo/:name", "GET", (_request, env) =>
+        Response.json({ hello: env.params.name }),
       )
       .setEndpoint("/any", (request) => new Response(request.method));
     await builder.build();
@@ -133,6 +133,44 @@ describe("HostedSiteBuilder", () => {
     // The endpoint matches — its handler will `import()` on invocation. We
     // don't invoke here because jsdom's module loader can't resolve the URL.
     expect(getAdapter().handler).toBeDefined();
+  });
+
+  it("newServerRunner: imported module receives runner env + per-request params", async () => {
+    // Drive `newServerRunner` directly with a `data:` URL so the dynamic
+    // import resolves under Node — covers the merge of runner-level env
+    // (passed to setServerRunner) with the per-request params.
+    const moduleSrc = `export default (request, env) => Response.json({
+      params: env.params,
+      db: env.db,
+      region: env.region,
+      url: request.url,
+    });`;
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(moduleSrc).toString("base64")}`;
+    const runner = newServerRunner("", () => dataUrl, { db: "main", region: "eu" });
+
+    const response = await runner(new Request("http://site.local/items/42"), {
+      params: { id: "42" },
+    });
+    expect(await response.json()).toEqual({
+      params: { id: "42" },
+      db: "main",
+      region: "eu",
+      url: "http://site.local/items/42",
+    });
+  });
+
+  it("newServerRunner: per-request params win over runner env keyed `params`", async () => {
+    // Defends the merge order — even if a caller sneaks `params` into the
+    // runner env, the per-request `params` must take precedence.
+    const moduleSrc = "export default (_req, env) => Response.json({ params: env.params });";
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(moduleSrc).toString("base64")}`;
+    const runner = newServerRunner("", () => dataUrl, {
+      params: { id: "should-be-overwritten" },
+    });
+    const response = await runner(new Request("http://x/items/9"), {
+      params: { id: "9" },
+    });
+    expect(await response.json()).toEqual({ params: { id: "9" } });
   });
 
   it("HostedSite.stop() removes the registration AND stops the adapter", async () => {

@@ -11,16 +11,20 @@ backend, no disk, nothing leaves the tab.
 **The whole site — client assets, server module, and the `/api`
 endpoint that wires them together — is one fluent `.build()` call,
 and the server handler is a JS module served by the same site and
-dynamic-imported per request.**
+dynamic-imported per request, called with `(request, env)`.**
 
 That second part is the unusual one: the API endpoint isn't a
 function passed to the builder. It's a URL —
 `/server/api/index.js` — registered via
-`setServerRunner("/api", "/server/api/index.js")`. At request time
-the builder dynamic-imports that URL through the same ServiceWorker
-that's serving everything else, evaluates the JS as a module, and
-delegates to its `default` export. Edit the module body and the next
-request picks it up.
+`setServerRunner("/api", "/server/api/index.js", { greeting, service })`.
+At request time the builder dynamic-imports that URL through the same
+ServiceWorker that's serving everything else, evaluates the JS as a
+module, and invokes its `default` export with the `Request` plus an
+`env` bag. `env` carries the URL `params` plus the values passed as
+the third `setServerRunner` argument — that's how shared dependencies
+(DB connections, FilesApi instances, secrets) reach a server module
+that lives in a string. Edit the module body and the next request
+picks it up.
 
 The complete wiring is ~40 lines of TypeScript in
 [`src/main.ts`](./src/main.ts).

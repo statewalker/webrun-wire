@@ -25,7 +25,10 @@ try {
     .setSiteKey("tsx-spike")
     .setFiles("/client", clientResources, { transform: scriptTransform })
     .setFiles("/server", serverResources, { transform: scriptTransform })
-    .setServerRunner("/api", "/server/api/index.ts")
+    .setServerRunner("/api", "/server/api/index.ts", {
+      greeting: "Hello from the typed server",
+      service: "site-builder-tsx-spike",
+    })
     .setErrorHandler((error, request) => {
       log(`Error in ${request.method} ${request.url}: ${error}`, true);
       return new Response(String(error), { status: 500 });

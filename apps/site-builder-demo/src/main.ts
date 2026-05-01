@@ -17,14 +17,19 @@ try {
 
   // `HostedSiteBuilder` wraps `SiteBuilder` + `SwHttpAdapter`:
   // - records pass straight in; they're auto-wrapped in `MemFilesApi`
-  // - `setServerRunner` generates the dynamic-import /api endpoint
+  // - `setServerRunner` generates the dynamic-import /api endpoint;
+  //   the third arg is the env bag passed to the imported module on
+  //   every call (alongside the URL params)
   // - `.build()` registers the SW, awaits activation, and returns a
   //   ready-to-use `HostedSite { baseUrl, stop }` handle.
   const site = await new HostedSiteBuilder()
     .setSiteKey("demo")
     .setFiles("/client", clientResources)
     .setFiles("/server", serverResources)
-    .setServerRunner("/api", "/server/api/index.js")
+    .setServerRunner("/api", "/server/api/index.js", {
+      greeting: "Hello",
+      service: "site-builder-demo",
+    })
     .setErrorHandler((error, request) => {
       log(`Error in ${request.method} ${request.url}: ${error}`, true);
       return new Response(String(error), { status: 500 });

@@ -7,8 +7,10 @@ Compose a `(Request) ⇒ Response` handler from three ingredients:
   S3, the browser's File System Access API, or a `CompositeFilesApi`
   stitching several together.
 - **Dynamic endpoints** registered as
-  `(Request, params) ⇒ Response` functions with URLPattern-based
-  matching (`/todo/:id`, `/api/*`, …).
+  `(Request, env) ⇒ Response` functions with URLPattern-based
+  matching (`/todo/:id`, `/api/*`, …). `env` carries the per-request
+  `params` plus any builder-level values registered via `setEnv`
+  (DB connections, FilesApi instances, secrets, …).
 - **Auth hooks** — pluggable predicates running before routing. Ships
   with an HTTP basic-auth factory; anything fetch-shaped can be
   layered on top.
@@ -46,12 +48,12 @@ npm install @statewalker/webrun-site-builder @statewalker/webrun-files
 
 | Export | Purpose |
 | --- | --- |
-| `SiteBuilder` | Fluent builder. Chain `setFiles` / `setEndpoint` / `setAuth` / `setErrorHandler` then `build()` to get a `SiteHandler`. |
+| `SiteBuilder` | Fluent builder. Chain `setFiles` / `setEndpoint` / `setAuth` / `setEnv` / `setErrorHandler` then `build()` to get a `SiteHandler`. |
 | `newBasicAuth(credentials, opts?)` | Factory producing an `AuthPredicate` that checks HTTP basic credentials and challenges with `401 WWW-Authenticate: Basic`. |
 | `newServeFiles(filesApi, opts?)` | Standalone file-serving function: `(request, path) ⇒ Response`. Used internally by `.setFiles`, exposed for advanced composition. |
 | `getMimeType(path)` | Resolve a `Content-Type` from a file extension; falls back to `application/octet-stream`. |
 | `newRouteMatcher(pattern, method?)` | Thin `URLPattern` wrapper returning extracted groups or `null`. Exposed for building custom layers. |
-| `SiteHandler`, `EndpointHandler`, `AuthPredicate`, `ErrorHandler` | Type aliases for the contract surface. |
+| `SiteHandler`, `EndpointHandler`, `EndpointEnv`, `AuthPredicate`, `ErrorHandler` | Type aliases for the contract surface. |
 
 ## Examples
 
@@ -77,14 +79,34 @@ import { SiteBuilder } from "@statewalker/webrun-site-builder";
 
 const handler = new SiteBuilder()
   .setFiles("/", files)
-  .setEndpoint("/api/todo/:id", "GET", async (_req, params) =>
-    Response.json({ id: params.id, title: "buy milk" }),
+  .setEndpoint("/api/todo/:id", "GET", async (_req, env) =>
+    Response.json({ id: env.params.id, title: "buy milk" }),
   )
   .build();
 ```
 
 Endpoints are checked **before** files, so an endpoint at `/api/...`
 will answer even if `files` contains an `api/` folder.
+
+### Sharing values across endpoints with `setEnv`
+
+`setEnv` merges values into the `env` bag every endpoint receives,
+so handlers don't have to close over module-level state:
+
+```ts
+const handler = new SiteBuilder()
+  .setEnv({ db, secrets, files })
+  .setEndpoint("/api/todo/:id", "GET", async (_req, env) => {
+    const row = await env.db.todo.get(env.params.id);
+    return Response.json(row);
+  })
+  .build();
+```
+
+`env` is `{ ...registeredValues, params }` — `params` always wins, so
+there is no "what if a key is named `params`" foot-gun. The bag is
+snapshotted at `build()` time; later `setEnv` calls don't leak into
+already-built handlers.
 
 ### Multiple file roots
 
@@ -227,10 +249,12 @@ verb.
   at root". Matching only accepts a prefix if the URL path either
   equals it or starts with `prefix + "/"` — so `/server` doesn't
   accidentally match `/serverless`.
-- **Params as a separate argument.** Endpoint handlers receive
-  `(request, params)` rather than having params grafted onto the
-  request. Keeps the `Request` contract untouched so handlers
-  double as standalone fetch handlers.
+- **Env as a separate argument.** Endpoint handlers receive
+  `(request, env)` rather than having params grafted onto the request.
+  `env` always carries the URL `params` plus any builder-level values
+  from `setEnv`, so handlers can read shared dependencies without
+  closing over module state. The `Request` contract stays untouched,
+  so handlers still double as standalone fetch handlers.
 - **Auth is a hook, not a class.** Basic auth is one line —
   `.setAuth("/x", newBasicAuth({...}))`. JWT / bearer / API keys
   are just other predicate functions. No plugin architecture.

@@ -8,13 +8,20 @@ import { newServeFiles, type ServeFilesOptions } from "./serve-files.js";
 export type SiteHandler = (request: Request) => Promise<Response>;
 
 /**
- * An endpoint handler receives the original `Request` and the parameters
- * extracted from the URL pattern.
+ * Shared environment passed to every endpoint handler. Carries
+ * builder-level values (DB connections, secrets, FilesApi instances, …)
+ * plus the `params` extracted from the URL pattern for this request.
  */
-export type EndpointHandler = (
-  request: Request,
-  params: Record<string, string>,
-) => Response | Promise<Response>;
+export type EndpointEnv = Record<string, unknown> & {
+  params: Record<string, string>;
+};
+
+/**
+ * An endpoint handler receives the original `Request` and an `env` bag
+ * combining builder-level values (set via `setEnv`) with per-request
+ * `params` extracted from the URL pattern.
+ */
+export type EndpointHandler = (request: Request, env: EndpointEnv) => Response | Promise<Response>;
 
 /**
  * An auth predicate inspects the request and decides whether to let it
@@ -67,6 +74,7 @@ export class SiteBuilder {
   #files: FilesRoute[] = [];
   #endpoints: EndpointRoute[] = [];
   #auths: AuthRoute[] = [];
+  #env: Record<string, unknown> = {};
   #errorHandler: ErrorHandler = defaultErrorHandler;
 
   /**
@@ -131,12 +139,25 @@ export class SiteBuilder {
   }
 
   /**
+   * Merge `values` into the shared environment passed to every endpoint
+   * handler. Callers receive the bag as `env` along with the per-request
+   * `params`, so handlers can read DB connections, FilesApi instances,
+   * secrets, etc. without closing over module-level state. Successive
+   * calls merge — later keys win.
+   */
+  setEnv(values: Record<string, unknown>): this {
+    this.#env = { ...this.#env, ...values };
+    return this;
+  }
+
+  /**
    * Produce the composed `(Request) ⇒ Response` handler.
    */
   build(): SiteHandler {
     const auths = [...this.#auths];
     const endpoints = [...this.#endpoints];
     const files = [...this.#files];
+    const env = { ...this.#env };
     const errorHandler = this.#errorHandler;
 
     return async (request: Request): Promise<Response> => {
@@ -152,7 +173,7 @@ export class SiteBuilder {
         // Endpoints first (explicit routes beat static paths).
         for (const { matcher, handler } of endpoints) {
           const params = matcher.match(request);
-          if (params) return await handler(request, params);
+          if (params) return await handler(request, { ...env, params });
         }
 
         // Static files.

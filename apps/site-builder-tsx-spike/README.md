@@ -18,9 +18,11 @@ The same filter handles three cases uniformly:
 - `client/main.tsx` — typed + JSX (transforms: `typescript` + `jsx`)
 - `client/format.ts` — typed helper imported by `main.tsx` via
   explicit `.ts` extension
-- `server/api/index.ts` — typed `Request → Response` handler,
-  loaded via `setServerRunner("/api", "/server/api/index.ts")` and
-  dynamic-imported through the same SW + transform pipeline
+- `server/api/index.ts` — typed `(Request, env) → Response` handler,
+  loaded via `setServerRunner("/api", "/server/api/index.ts", { greeting, service })`
+  and dynamic-imported through the same SW + transform pipeline. The
+  third `setServerRunner` argument is the env bag the module receives
+  alongside the URL params on every call.
 
 No bundler, no service-side build step, no SW-internal wasm. sucrase
 is pure JS, runs on the main thread; the SW just relays. Output is

@@ -42,7 +42,7 @@ describe("SiteBuilder", () => {
     const files = await withFiles({ "/about.html": "static-about" });
     const handler = new SiteBuilder()
       .setFiles("/", files)
-      .setEndpoint("/todo/:id", "GET", async (_req, params) => Response.json({ id: params.id }))
+      .setEndpoint("/todo/:id", "GET", async (_req, env) => Response.json({ id: env.params.id }))
       .build();
 
     // Endpoint matches a parametric path and beats anything files could serve.
@@ -132,12 +132,34 @@ describe("SiteBuilder", () => {
     // Exercises the shape used in the webrun-http-browser demo: an endpoint
     // that asynchronously resolves a handler function per-call.
     const handler = new SiteBuilder()
-      .setEndpoint("/api/*", async (request, params) => {
-        const subHandler = async (_req: Request) => Response.json({ tail: params["0"] ?? "" });
+      .setEndpoint("/api/*", async (request, env) => {
+        const subHandler = async (_req: Request) => Response.json({ tail: env.params["0"] ?? "" });
         return subHandler(request);
       })
       .build();
     const response = await handler(new Request("http://x/api/users/1"));
     expect(await response.json()).toEqual({ tail: "users/1" });
+  });
+
+  it("setEnv values are merged into env alongside params on every call", async () => {
+    const handler = new SiteBuilder()
+      .setEnv({ db: "main", region: "eu" })
+      .setEnv({ region: "us" }) // later call wins for shared keys
+      .setEndpoint("/items/:id", async (_req, env) =>
+        Response.json({ id: env.params.id, db: env.db, region: env.region }),
+      )
+      .build();
+    const response = await handler(new Request("http://x/items/42"));
+    expect(await response.json()).toEqual({ id: "42", db: "main", region: "us" });
+  });
+
+  it("env snapshot is taken at build() time; later setEnv calls do not leak in", async () => {
+    const builder = new SiteBuilder()
+      .setEnv({ flag: "before-build" })
+      .setEndpoint("/probe", async (_req, env) => Response.json({ flag: env.flag }));
+    const handler = builder.build();
+    builder.setEnv({ flag: "after-build" });
+    const response = await handler(new Request("http://x/probe"));
+    expect(await response.json()).toEqual({ flag: "before-build" });
   });
 });

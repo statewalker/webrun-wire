@@ -2,7 +2,10 @@
 //
 // - `clientResources` — HTML/CSS/JS served under the site's `/client` prefix.
 // - `serverResources` — server-side modules served under `/server`;
-//   the main site's `/api` endpoint dynamic-imports them per request.
+//   the main site's `/api` endpoint dynamic-imports them per request and
+//   invokes the default export with `(request, env)`. `env` carries
+//   `params` from the URL pattern plus whatever was passed as the third
+//   `setServerRunner` argument (here: `greeting`, `service`).
 
 export const clientResources: Record<string, string> = {
   "/index.html": `<!doctype html>
@@ -15,8 +18,10 @@ export const clientResources: Record<string, string> = {
   <p>Served from an in-memory <code>FilesApi</code> via a same-origin
   ServiceWorker and <code>SiteBuilder</code>. The form below fetches
   <code>/demo/api?name=…</code>; the endpoint dynamically imports
-  <code>/demo/server/api/index.js</code> and delegates to its default
-  export.</p>
+  <code>/demo/server/api/index.js</code> and invokes its default
+  export with the <code>Request</code> and an <code>env</code> bag
+  carrying URL params plus the values passed to
+  <code>setServerRunner</code>.</p>
   <label>Name: <input id="name" value="World"></label>
   <pre id="out">…</pre>
   <script type="module" src="./main.js"></script>
@@ -37,13 +42,17 @@ refresh();`,
 };
 
 export const serverResources: Record<string, string> = {
-  "/api/index.js": `export default async function handleRequest(request) {
+  "/api/index.js": `// (request, env) — env carries URL params plus whatever was passed as
+// the third arg to setServerRunner ({ greeting, service } here).
+export default async function handleRequest(request, env) {
   const url = new URL(request.url);
   const name = url.searchParams.get("name") ?? "anonymous";
   const now = new Date().toISOString();
-  console.log("Received API request for name:", name, "at path:", url.pathname, "at time:", now);
+  console.log("[api] env=", env, "name=", name, "path=", url.pathname, "at=", now);
   return Response.json({
-    message: "Hello from the dynamically-imported server, " + name + "!",
+    message: env.greeting + " from " + env.service + ", " + name + "!",
+    params: env.params,
+    service: env.service,
     at: url.pathname,
     now,
   });

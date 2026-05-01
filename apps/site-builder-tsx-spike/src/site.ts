@@ -89,23 +89,33 @@ console.log("[tsx-spike] client wired");
 };
 
 export const serverResources: Record<string, string> = {
-  "/api/index.ts": `// Typed Request → Response handler. Loaded via setServerRunner, which
-// dynamic-imports this module's URL through the SW + transform pipeline.
-// The .ts extension is irrelevant to the browser — it follows the
-// Content-Type response header (text/javascript) emitted by the transform.
+  "/api/index.ts": `// Typed (Request, env) → Response handler. Loaded via setServerRunner,
+// which dynamic-imports this module's URL through the SW + transform
+// pipeline. The .ts extension is irrelevant to the browser — it follows
+// the Content-Type response header (text/javascript) emitted by the
+// transform. The \`env\` bag carries URL params plus the values passed
+// as the third arg to setServerRunner (\`greeting\`, \`service\`).
 
+interface ServerEnv {
+  params: Record<string, string>;
+  greeting: string;
+  service: string;
+}
 interface ApiResponse {
   message: string;
   at: string;
   now: string;
   receivedName: string;
 }
-export default async function handleRequest(request: Request): Promise<Response> {
+export default async function handleRequest(
+  request: Request,
+  env: ServerEnv,
+): Promise<Response> {
   const url = new URL(request.url);
   const name: string = url.searchParams.get("name") ?? "anonymous";
-  console.log("[tsx-spike] Received API request for name:", name, "at path:", url.pathname);
+  console.log("[tsx-spike] env=", env, "name=", name, "path=", url.pathname);
   const payload: ApiResponse = {
-    message: \`Hello from the typed server, \${name}!\`,
+    message: \`\${env.greeting}, \${name}! (service=\${env.service})\`,
     at: url.pathname,
     now: new Date().toISOString(),
     receivedName: name,
