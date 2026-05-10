@@ -1,0 +1,16 @@
+# DuckDB-WASM lives in the outer page; the `HostedSiteBuilder` runner consumes it via `env`
+
+For workloads that need SQL over CSV/Parquet served by `HostedSiteBuilder`, the DuckDB-WASM instance is constructed once in the page that calls `await builder.build()` and passed into the runner module via `setServerRunner`'s third-arg env (e.g. `{ db, siteInfo }`). The runner module — fetched as raw text via `MemFilesApi`, sucrase-transpiled, and dynamically imported by URL — contains zero npm imports and reads `env.db` and `env.siteInfo.url` from its second argument. Source files of static-served runners cannot resolve bare specifiers (Vite's import-analysis never sees them, and the browser has no document-level importmap to fall back on), so the outer page must do the resolution and inject ready-made handles.
+
+The runner reads source files via the site-scoped URL (e.g. `${siteInfo.url}data/sales.csv`); DuckDB-WASM's worker `fetch()` is intercepted by the same-origin ServiceWorker and round-tripped back through the site's `FilesApi`. This loop — DuckDB → SW → `FilesApi` → DuckDB — is the property the pattern exists to demonstrate and reuse.
+
+## Considered alternatives
+
+- **DuckDB in the iframe.** Rejected: the iframe's only job is presentation, and putting SQL in the client both leaks query shape and forces re-init per iframe load. The runner runs on the page's main thread (the SW dispatches handler invocations back to the registering page), so a single DuckDB instance amortises WASM startup over many calls.
+- **`import { newBrowserDuckDb } from "@statewalker/db-duckdb-browser"` inside the runner.** Rejected: the runner is served as raw text via `MemFilesApi`. Vite never sees its source, sucrase doesn't rewrite specifiers, and the browser has no importmap to resolve bare specifiers against, so the import fails at runtime. Outer-page injection sidesteps this entirely.
+- **Patching `db-duckdb-browser` to expose `registerFile(name, url)`.** Not needed: DuckDB-WASM accepts HTTP URLs directly inside SQL (`read_csv_auto('https://…')`, `SELECT * FROM 'https://…'`), so the package's existing `{ query, exec, close }` surface is sufficient. Reconsider only if direct-URL CSV reads turn out to require explicit registration in some bundle.
+- **`setEndpoint` with a closure (no runner module).** Equally functional and one file shorter, but collapses the "API surface as separate module" structure that runners exist to provide. Env-injection keeps the runner shape intact and the pattern scales to multiple runners.
+
+## How the runner learns the absolute URL
+
+`HostedSiteBuilder` does not yet inject `baseUrl` into runner env, and `setEnv` materialises values at call time, before `build()` resolves. The bridge is a mutable object passed as part of the runner-env third arg (e.g. `siteInfo: { url: "" }`). The outer page mutates `siteInfo.url = site.baseUrl` synchronously after `build()` resolves; `newServerRunner` spreads `runnerEnv` at *request* time, so the runner observes the populated value on every call. The `siteInfo` wrapper is preferred over a flat `baseUrl` field so additional site metadata (e.g. siteKey) can be added later without churning runner type signatures.
