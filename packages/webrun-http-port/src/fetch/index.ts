@@ -15,13 +15,28 @@ async function* readableToAsyncIterable(
 ): AsyncGenerator<Uint8Array> {
   if (!stream) return;
   const reader = stream.getReader();
+  let consumed = false;
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) return;
+      if (done) {
+        consumed = true;
+        return;
+      }
       if (value) yield value;
     }
   } finally {
+    // On early termination (iter.return() before the body finishes), cancel
+    // the upstream stream so its source's `cancel()` callback fires. Critical
+    // for long-running response bodies (SSE, streamed AI output) that need
+    // a signal to stop generating once the consumer goes away.
+    if (!consumed) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       reader.releaseLock();
     } catch {

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>p2p-site-server</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 64rem; }
+      h1 { margin-top: 0; }
+      code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+      pre { padding: 0.5rem; overflow-x: auto; }
+      .row { margin: 0.75rem 0; }
+      .row label { display: inline-block; min-width: 8rem; font-weight: 600; }
+      button { padding: 0.25rem 0.6rem; cursor: pointer; }
+      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>p2p-site-server</h1>
+    <p>
+      Browser-side libp2p peer. Defines a <code>SiteHandler</code>
+      (<code>GET /</code>, <code>GET /api/time</code>, <code>GET /api/events</code>
+      SSE) and hosts it on every accepted <code>/webrun/port-bytes/1.0.0</code>
+      stream. Pair with a <a href="../p2p-site-client/">p2p-site-client</a> tab.
+    </p>
+
+    <div class="row">
+      <label>peer id:</label>
+      <code id="peer-id">(initialising…)</code>
+      <button type="button" id="copy-peer-id" disabled>Copy</button>
+    </div>
+    <div class="row">
+      <label>dial-able address:</label>
+      <code id="dial-addr">(initialising…)</code>
+      <button type="button" id="copy-dial-addr" disabled>Copy</button>
+    </div>
+
+    <div class="row">
+      <label>status:</label>
+      <div id="status">starting up…</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

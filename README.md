@@ -234,6 +234,7 @@ builder generates a dynamic-import endpoint under the hood.
 | Demo | Path | What it shows |
 | --- | --- | --- |
 | **site-builder-demo** | [`apps/site-builder-demo`](./apps/site-builder-demo) | Vite + TypeScript app; `HostedSiteBuilder` mounts a full site (static client + `/api` dynamic-import endpoint + iframe preview) in ~40 lines. Highest-level wrapping; server-side code is a JS file served by the site itself. |
+| **p2p cross-app HTTP demo** | [`apps/p2p-relay`](./apps/p2p-relay), [`apps/p2p-site-server`](./apps/p2p-site-server), [`apps/p2p-site-client`](./apps/p2p-site-client) | Two browser apps exchange HTTP (including SSE) over a direct libp2p WebRTC link, bootstrapped through a tiny localhost Circuit Relay v2. No domains, no TLS certs at the application layer. |
 | Hono dynamic site | [`packages/webrun-http-browser/demo/demo-1.html`](./packages/webrun-http-browser/demo/demo-1.html) | A Hono router running in the browser as the back-end for a relay-SW-hosted site. Demonstrates relay mode + full-framework compatibility. |
 | Local-disk file server | [`packages/webrun-http-browser/demo/demo-2.html`](./packages/webrun-http-browser/demo/demo-2.html) | User picks a folder via `showDirectoryPicker`; the relay SW exposes its contents as a browsable in-browser HTTP site. ~20-line handler. |
 | Minimal same-origin SW | [`packages/webrun-http-browser/public/index.html`](./packages/webrun-http-browser/public/index.html) | The unwrapped `SwHttpAdapter` pattern, ~40 lines of inline JS. Good baseline for debugging the SW lifecycle. |

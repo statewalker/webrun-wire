@@ -1,0 +1,31 @@
+{
+  "name": "@statewalker/p2p-site-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser app that dials a p2p-site-server peer through the relay and proxies HTTP fetches (including SSE) through the libp2p connection via HostedSiteBuilder.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5176",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^16.0.0",
+    "@chainsafe/libp2p-yamux": "^7.0.0",
+    "@libp2p/circuit-relay-v2": "^3.0.0",
+    "@libp2p/identify": "^3.0.0",
+    "@libp2p/webrtc": "^5.0.0",
+    "@libp2p/websockets": "^9.0.0",
+    "@multiformats/multiaddr": "^12.0.0",
+    "@statewalker/webrun-http-port": "workspace:*",
+    "@statewalker/webrun-port-libp2p": "workspace:*",
+    "@statewalker/webrun-site-host": "workspace:*",
+    "libp2p": "^2.4.0"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-http-browser": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
