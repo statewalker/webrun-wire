@@ -1,4 +1,6 @@
-import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
+import { MemFilesApi } from "@statewalker/webrun-files-mem";
+import { SiteBuilder } from "@statewalker/webrun-site-builder";
+import { HostedSiteBuilder, newServerRunner } from "@statewalker/webrun-site-host";
 import { clientResources, serverResources } from "./site.js";
 
 const logEl = document.querySelector<HTMLDivElement>("#log");
@@ -12,42 +14,54 @@ function log(message: string, isError = false): void {
   logEl?.appendChild(p);
 }
 
+async function recordToFilesApi(record: Record<string, string | Uint8Array>): Promise<MemFilesApi> {
+  const files = new MemFilesApi();
+  for (const [path, content] of Object.entries(record)) {
+    const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
+    await files.write(path, [bytes]);
+  }
+  return files;
+}
+
 try {
   logEl.innerHTML = "";
 
-  // `HostedSiteBuilder` wraps `SiteBuilder` + `SwHttpAdapter`:
-  // - records pass straight in; they're auto-wrapped in `MemFilesApi`
-  // - `setServerRunner` generates the dynamic-import /api endpoint;
-  //   the third arg is the env bag passed to the imported module on
-  //   every call (alongside the URL params)
-  // - `.build()` registers the SW, awaits activation, and returns a
-  //   ready-to-use `HostedSite { baseUrl, stop }` handle.
-  //
-  // Resolve `sw-worker.js` against `document.baseURI` (the page URL) so
-  // the build is portable across sub-paths: works at `/`, `/dist/`,
-  // `/some/sub/path/`, etc. — the SW is always co-located with the
-  // page that loaded it. The default would be origin-absolute
-  // (`/sw-worker.js`) and 404 outside the root.
+  // `SiteBuilder` defines the site (files + endpoints). `HostedSiteBuilder`
+  // just hosts the resulting `SiteHandler` behind the same-origin SW.
+  // `newServerRunner` is the standalone utility that handles the
+  // dynamic-import /api endpoint pattern; it needs the live `baseUrl` to
+  // build absolute import URLs, so we close over a mutable ref and
+  // assign it after the site is built.
   const swUrl = new URL("./sw-worker.js", document.baseURI).href;
 
-  const site = await new HostedSiteBuilder()
-    .setSiteKey("demo")
-    .setServiceWorkerUrl(swUrl)
-    .setFiles("/client", clientResources)
-    .setFiles("/server", serverResources)
-    .setServerRunner("/api", "/server/api/index.js", {
-      greeting: "Hello",
-      service: "site-builder-demo",
-    })
+  let baseUrl = "";
+  const clientFiles = await recordToFilesApi(clientResources);
+  const serverFiles = await recordToFilesApi(serverResources);
+
+  const handler = new SiteBuilder()
+    .setFiles("/client", clientFiles)
+    .setFiles("/server", serverFiles)
+    .setEndpoint(
+      "/api",
+      newServerRunner("/server/api/index.js", () => baseUrl, {
+        greeting: "Hello",
+        service: "site-builder-demo",
+      }),
+    )
     .setErrorHandler((error, request) => {
       log(`Error in ${request.method} ${request.url}: ${error}`, true);
       return new Response(String(error), { status: 500 });
     })
     .build();
+
+  const site = await new HostedSiteBuilder()
+    .setSiteKey("demo")
+    .setServiceWorkerUrl(swUrl)
+    .setHandler(handler)
+    .build();
+  baseUrl = site.baseUrl;
   log(`Site mounted at ${site.baseUrl}`);
 
-  // Full path, not a directory URL — SiteBuilder only serves exact-match
-  // files unless `directoryIndex` is explicitly configured.
   previewEl.src = `${site.baseUrl}client/index.html`;
   log(`iframe → ${previewEl.src}`);
 } catch (error) {

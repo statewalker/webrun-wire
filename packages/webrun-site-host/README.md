@@ -1,282 +1,126 @@
 # @statewalker/webrun-site-host
 
-Host a composable `SiteBuilder` site behind a same-origin
-ServiceWorker in one fluent call. Wraps
-[`@statewalker/webrun-site-builder`](../webrun-site-builder) and
-[`@statewalker/webrun-http-browser/sw`](../webrun-http-browser) — you
-register files, endpoints, and auth hooks the same way, but don't
-write a single line of ServiceWorker plumbing yourself.
+Browser-side host for a `SiteHandler`. Registers a same-origin ServiceWorker,
+mounts the handler under a virtual path, and rewrites incoming requests to
+site-relative form before dispatching.
+
+This package owns *where* a site runs (browser + SW). It does NOT own *what*
+the site does — endpoints, files, auth, and routing live in
+[`@statewalker/webrun-site-builder`](../webrun-site-builder) (or anywhere
+else that produces a `SiteHandler = (Request) => Promise<Response>`).
 
 ```ts
-const site = await new HostedSiteBuilder()
-  .setSiteKey("demo")
-  .setFiles("/client", clientFiles)
-  .setFiles("/server", serverFiles)
-  .setServerRunner("/api", "/server/api/index.js")
-  .build();
-
-iframe.src = `${site.baseUrl}client/index.html`;
-```
-
-That's the whole demo. The `/sw-worker.js` registration, `await
-adapter.start()`, SW-scope URL rewrites, and dynamic-import scaffold
-for `/api` all happen inside `.build()`.
-
-A runnable version lives at
-[`apps/site-builder-demo`](../../apps/site-builder-demo) — a Vite +
-TypeScript app that stands up an in-browser site (static client, `/api`
-endpoint, iframe preview) from a single `HostedSiteBuilder` call. Open
-its [README](../../apps/site-builder-demo/README.md) for the full
-architecture diagram and walkthrough.
-
-## Why it exists
-
-`SiteBuilder` builds a transport-neutral `(Request) ⇒ Response`
-handler — useful on its own for Node / Deno / Cloudflare / any fetch
-consumer. In the browser, to make that handler actually answer
-`fetch()` calls, you need three more things:
-
-1. Register `/sw-worker.js` with the right scope and wait for it to
-   activate (`SwHttpAdapter.start()`).
-2. `adapter.register(...)` the handler under a site key, capturing
-   the resulting `baseUrl`.
-3. Rewrite `request.url` before dispatching — the SW gives you
-   `https://host/<key>/...` URLs, and the builder's pattern matchers
-   expect site-local paths like `/client/...`.
-
-That's six predictable lines that every app repeats and that this
-package boils down to one builder call. On top, `setServerRunner`
-inlines the common pattern of "the `/api` endpoint is a module served
-by my own site" — you just say *which module*, and the builder
-generates the dynamic-import bridge.
-
-## How to use
-
-```sh
-npm install @statewalker/webrun-site-host @statewalker/webrun-files
-```
-
-You'll also need a concrete `FilesApi` for any static content —
-e.g. `@statewalker/webrun-files-mem`, `@statewalker/webrun-files-node`,
-or `@statewalker/webrun-files-browser` (File System Access API).
-
-### Exports
-
-| Export | Purpose |
-| --- | --- |
-| `HostedSiteBuilder` | Fluent builder. Chain `setSiteKey` / `setFiles` / `setEndpoint` / `setServerRunner` / `setAuth` / `setEnv` / `setErrorHandler`, then `await .build()` for a `HostedSite`. |
-| `HostedSite` | Handle returned from `.build()`: `{ siteKey, baseUrl, stop() }`. |
-| `FilesSource` | `FilesApi \| Record<string, string \| Uint8Array>` — what `.setFiles` accepts. |
-| `SiteAdapter`, `SiteAdapterRegistration`, `AdapterFactory` | Minimal adapter contract (for tests or non-SW transports). |
-| `resolveFilesSource` | Helper that wraps a `FilesSource` into a `FilesApi`. |
-| `newServerRunner(modulePath, getBaseUrl, env?)` | Standalone factory used internally by `setServerRunner`. Returns an `EndpointHandler` that dynamic-imports `${baseUrl}${modulePath}` and invokes its default export with `(request, { ...env, params })`. Exposed for advanced composition. |
-
-## Examples
-
-### Static site
-
-```ts
+import { SiteBuilder } from "@statewalker/webrun-site-builder";
 import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
-import { MemFilesApi } from "@statewalker/webrun-files-mem";
 
-const files = new MemFilesApi();
-await files.write("/index.html", [new TextEncoder().encode("<h1>hi</h1>")]);
-
-const site = await new HostedSiteBuilder()
-  .setSiteKey("hello")
-  .setFiles("/", files)
+const handler = new SiteBuilder()
+  .setEndpoint("/api/time", () => new Response(new Date().toISOString()))
+  .setFiles("/", clientFiles)
   .build();
-// site.baseUrl → http://localhost:5173/hello/
-```
 
-### Static + dynamic API via a server module
-
-```ts
 const site = await new HostedSiteBuilder()
   .setSiteKey("demo")
-  .setFiles("/client", {
-    "/index.html": "<!doctype html>…",
-    "/main.js": `fetch("../api?name=World").then(r => r.json()).then(console.log)`,
-  })
-  .setFiles("/server", {
-    "/api/index.js": `
-      export default async (request, env) => Response.json({
-        hello: new URL(request.url).searchParams.get("name"),
-        service: env.service,
-        params: env.params,
-      });
-    `,
-  })
-  .setServerRunner("/api", "/server/api/index.js", { service: "demo" })
+  .setHandler(handler)
   .build();
+
+iframe.src = site.baseUrl;
 ```
 
-The `/api` endpoint isn't a hand-written handler — it's generated by
-`setServerRunner`. On each request it dynamic-imports the module
-served at `${baseUrl}server/api/index.js` (resolved through the same
-handler, so the `/server` files mount serves it as JavaScript), then
-invokes the module's `default` export with `(request, env)`. The
-`env` bag carries the URL `params` plus everything passed as the
-third `setServerRunner` argument — DB connections, FilesApi
-instances, secrets, service identifiers, anything the module needs
-without closing over outer scope. `options.method` (if set) restricts
-the endpoint to a single HTTP verb; every other key becomes part of
-the env bag.
+The split is intentional: the same `SiteHandler` works in every host
+(browser+SW via `HostedSiteBuilder`, `MessagePort` via
+[`PortSiteBuilder`](../webrun-http-port), Node via a future `NodeSiteBuilder`,
+…). Configuration lives in one place.
 
-Swap the file content and the next request sees the new module; the
-browser's import cache dedupes repeated fetches of the same URL.
+## Cross-application HTTP (no domains, no certificates)
 
-### Auth, custom endpoint, custom error handler
+Because the handler is just a function, you can point it at a remote peer over
+any transport that produces a `MessagePort` (WebSocket, WebRTC, libp2p,
+LiveKit, …). The browser-side host doesn't care:
 
 ```ts
-import { newBasicAuth } from "@statewalker/webrun-site-builder";
+import { fetchOverPort } from "@statewalker/webrun-http-port/fetch";
 
+const port = await connectToPeer(); // any webrun-port-* adapter
 const site = await new HostedSiteBuilder()
-  .setSiteKey("admin")
-  .setFiles("/", files)
-  .setAuth("/admin/*", newBasicAuth({ tom: "!jerry!" }))
-  .setEndpoint("/api/ping", (_request) => Response.json({ pong: Date.now() }))
-  .setErrorHandler((error, request) => {
-    console.error(`[${request.method} ${request.url}]`, error);
-    return new Response("failed", { status: 500 });
-  })
+  .setHandler((request) => fetchOverPort(port, request))
   .build();
+
+iframe.src = site.baseUrl;
+// Every fetch inside the iframe is now proxied across the peer connection.
 ```
 
-All three `set*` methods forward their arguments to `SiteBuilder` —
-the contract is identical.
-
-### Stop the site
+## API
 
 ```ts
-await site.stop();
-```
+class HostedSiteBuilder {
+  constructor(options?: HostedSiteBuilderOptions);
+  setSiteKey(key: string): this;
+  setServiceWorkerUrl(url: string): this;
+  setHandler(handler: SiteHandler): this;
+  build(): Promise<HostedSite>;
+}
 
-Removes the handler from the adapter's routing table. The SW stays
-registered (a second `HostedSiteBuilder` on the same origin can
-co-exist); unregistering the SW outright is a separate concern the
-package deliberately leaves to the caller.
+interface HostedSite {
+  readonly siteKey: string;
+  readonly baseUrl: string;
+  stop(): Promise<void>;
+}
 
-### Testing with a fake adapter
-
-```ts
-import { HostedSiteBuilder, type SiteAdapter } from "@statewalker/webrun-site-host";
-
-class FakeAdapter implements SiteAdapter { /* … see tests/ … */ }
-
-const site = await new HostedSiteBuilder({
-  adapterFactory: (options) => new FakeAdapter(options),
-}).setSiteKey("test").setFiles("/", {"/x.txt": "hi"}).build();
-
-// Invoke the captured handler directly — no ServiceWorker needed.
-```
-
-The default adapter factory returns `new SwHttpAdapter(...)`; passing
-a custom factory lets tests run in Node/jsdom.
-
-## Internals
-
-### What `.build()` does
-
-1. Resolves the site key (explicit via `setSiteKey` or
-   `crypto.randomUUID()` otherwise).
-2. Resolves the SW URL (explicit via `setServiceWorkerUrl` or
-   `/sw-worker.js` on the current origin — the default is only
-   consumed by the default adapter factory).
-3. Calls `adapterFactory({ key, serviceWorkerUrl })` and `await
-   adapter.start()` — registers the SW, waits for it to claim the
-   page.
-4. Resolves every `FilesSource` (records → `MemFilesApi`, `FilesApi`
-   instances pass through) and feeds all the collected config into a
-   `SiteBuilder`. `setServerRunner` entries become
-   `SiteBuilder.setEndpoint` handlers whose body is the dynamic-import
-   bridge.
-5. `await adapter.register(\`${siteKey}/\`, wrappedHandler)` — the
-   wrapper rewrites each incoming `request.url` from SW-scope form
-   (`<origin>/<key>/...`) to site-local form
-   (`http://site.local/...`) so the inner handler sees plain paths.
-6. Returns `{ siteKey, baseUrl, stop }`. `stop()` is
-   `registration.remove()`.
-
-### URL rewrite
-
-The SW emits requests with the full origin prefix and site-key segment
-(e.g. `http://host/demo/client/index.html`). `SiteBuilder`'s
-`setFiles("/client", …)` would never match that pathname. The builder
-strips the baseUrl prefix — yielding `/client/index.html` — and
-wraps it in a fresh Request with a synthetic origin so downstream
-pattern matchers see clean site-local paths.
-
-Method, headers, and body (on non-GET/HEAD) are preserved.
-`duplex: "half"` is set on the rewritten Request because recent Fetch
-specs require it for streaming bodies.
-
-### `setServerRunner`
-
-Each entry produces one endpoint of shape:
-
-```ts
-async (request, incoming) => {
-  const moduleUrl = `${getBaseUrl()}${stripLeadingSlash(modulePath)}`;
-  const mod = await import(moduleUrl);
-  return mod.default(request, { ...incoming, ...runnerEnv, params: incoming.params });
+interface HostedSiteBuilderOptions {
+  adapterFactory?: AdapterFactory;
 }
 ```
 
-The `moduleUrl` is a site URL — so the import fetch goes through the
-site's ServiceWorker, matches the `/server/...` files mount, and is
-returned as `text/javascript` (thanks to `serve-files`' MIME lookup).
-The browser's native module loader evaluates it and caches by URL;
-repeated requests share the same module.
+Plus a standalone utility for the "endpoint is a JS module dynamically
+imported from the site itself" pattern:
 
-The merge order — site-level env (already in `incoming`) → runner-level
-env (from `setServerRunner` options) → per-request `params` — means
-runner-level values override site-level for that one endpoint, and
-`params` always wins. This lets each `/api` endpoint declare its own
-DB pool, secrets, or feature flags while still inheriting site-wide
-defaults set on the builder.
+```ts
+export function newServerRunner(
+  modulePath: string,
+  getBaseUrl: () => string,
+  env?: Record<string, unknown>,
+): EndpointHandler;
+```
 
-### Design notes
+Use it with `SiteBuilder.setEndpoint`:
 
-- **Single fluent surface.** No separate adapter, no manual `start()`,
-  no manual `register()`. If you need finer control, use `SiteBuilder`
-  and `SwHttpAdapter` directly.
-- **`adapterFactory` injection.** Only used for testing or for
-  plugging in a non-SW transport (MessagePort bridge, WebSocket via
-  `webrun-ports-ws`, …). Defaults to `new SwHttpAdapter(...)`.
-- **No SW unregister.** `stop()` only unhooks THIS site's handler.
-  Tearing down the ServiceWorker itself affects every registered site
-  on the origin; the caller decides whether to do that.
-- **FilesSource polymorphism.** Duck-typed on `.read` + `.write`.
-  Arbitrary `FilesApi` implementations pass through; records are
-  auto-wrapped at `.build()` time.
+```ts
+let getBaseUrl = () => "";
+const handler = new SiteBuilder()
+  .setFiles("/server", serverFiles)
+  .setEndpoint("/api", newServerRunner("/server/api/index.js", () => getBaseUrl()))
+  .build();
 
-### Constraints
+const site = await new HostedSiteBuilder().setHandler(handler).build();
+getBaseUrl = () => site.baseUrl;
+```
 
-- **Browser only.** The package imports `SwHttpAdapter`, which uses
-  `navigator.serviceWorker`. In Node/jsdom you must inject an
-  `adapterFactory`.
-- **Same-origin ServiceWorker only.** Cross-origin relay mode (via
-  `@statewalker/webrun-http-browser`'s `newRemoteRelayChannel`) isn't
-  covered here — build it directly on `SiteBuilder` if you need it.
-- **SW scope must cover the page.** `SwHttpAdapter.start()` waits for
-  the page to be controlled, which only happens when its URL is inside
-  the SW's scope. The default SW at `/sw-worker.js` has scope `/` — if
-  you relocate the SW, make sure its scope still covers the page.
+## What `build()` does
 
-### Dependencies
+1. Resolve `siteKey` (generated UUID if not set) and `swUrl` (`/sw-worker.js`
+   if not set).
+2. Construct and start the adapter (`SwHttpAdapter` by default — registers
+   the ServiceWorker and awaits activation).
+3. Register a fetch interceptor under `<origin>/<siteKey>/` that:
+   - Strips the SW prefix from the incoming `Request.url`.
+   - Dispatches to your handler.
+4. Return a `HostedSite` with the resolved `baseUrl` and a `stop()` for
+   teardown.
 
-Runtime:
-- `@statewalker/webrun-site-builder` (workspace)
-- `@statewalker/webrun-http-browser` (workspace)
-- `@statewalker/webrun-files-mem` (catalog) — used to auto-wrap record file sources
-- `@statewalker/webrun-files` (peer, type only)
+## See also
 
-Dev: TypeScript, vitest, rolldown, rimraf, `@types/node`.
+- [`@statewalker/webrun-site-builder`](../webrun-site-builder) — produces a
+  `SiteHandler` from endpoints + files + auth + routing.
+- [`@statewalker/webrun-http-port`](../webrun-http-port) — `PortSiteBuilder`
+  sibling host, plus `fetchOverPort` / `serveFetchOverPort` for routing
+  over `MessagePort`.
+- [`apps/site-builder-demo`](../../apps/site-builder-demo) and
+  [`apps/site-builder-tsx-spike`](../../apps/site-builder-tsx-spike) —
+  runnable examples.
 
-## Scripts
+## Development
 
-```sh
+```bash
 pnpm test        # vitest run
 pnpm run build   # rolldown + tsc --emitDeclarationOnly
 pnpm lint        # biome check src tests
@@ -284,4 +128,4 @@ pnpm lint        # biome check src tests
 
 ## License
 
-MIT © statewalker
+MIT

@@ -1,6 +1,6 @@
 # @statewalker/webrun-site-builder
 
-Compose a `(Request) ⇒ Response` handler from three ingredients:
+Compose a **`SiteHandler = (Request) ⇒ Promise<Response>`** from three ingredients:
 
 - **Static files** from any [`@statewalker/webrun-files`](../../..
   /webrun-files/packages/webrun-files) source — memory, Node FS,
@@ -15,9 +15,25 @@ Compose a `(Request) ⇒ Response` handler from three ingredients:
   with an HTTP basic-auth factory; anything fetch-shaped can be
   layered on top.
 
-The builder returns a plain fetch handler, so you drop it into
-`@statewalker/webrun-http-browser`, `@statewalker/webrun-http`,
-a Node / Deno / Bun server, or a Cloudflare Worker — same code.
+The builder returns a `SiteHandler` — the **canonical seam** between site
+definition and platform hosting. The same handler drops into every host:
+
+| Host | Package |
+| --- | --- |
+| Browser + ServiceWorker | [`HostedSiteBuilder`](../webrun-site-host) |
+| MessagePort (any `webrun-port-*` transport) | [`PortSiteBuilder`](../webrun-http-port) |
+| Node / Deno / Bun | (future `*SiteBuilder` siblings — same shape) |
+
+```ts
+const handler: SiteHandler = new SiteBuilder()
+  .setEndpoint("/api/time", () => new Response(new Date().toISOString()))
+  .setFiles("/", clientFiles)
+  .build();
+
+// Host it wherever — every *SiteBuilder takes a SiteHandler.
+await new HostedSiteBuilder().setHandler(handler).build();           // browser + SW
+new PortSiteBuilder(remotePort).setHandler(handler).start();          // MessagePort peer
+```
 
 ## Why it exists
 
