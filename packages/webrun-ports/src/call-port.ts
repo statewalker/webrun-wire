@@ -9,6 +9,12 @@ export interface CallPortOptions {
   log?: (...args: unknown[]) => void;
   /** Override the call ID generator (default: `call-<timestamp>-<random>`). */
   newCallId?: () => string;
+  /**
+   * Optional cancellation signal. Firing it rejects the pending call
+   * immediately (without waiting for the timeout) and cleans up the message
+   * listener. Use the signal's `reason` for the rejection if present.
+   */
+  signal?: AbortSignal;
 }
 
 type ResponseEnvelope<T> =
@@ -30,13 +36,19 @@ export function callPort<TResult = unknown, TParams = unknown>(
     channelName = "",
     log = () => {},
     newCallId = () => `call-${Date.now()}-${String(Math.random()).substring(2)}`,
+    signal,
   }: CallPortOptions = {},
 ): Promise<TResult> {
   const callId = newCallId();
   log("[callPort]", { channelName, callId, params });
   let timerId: ReturnType<typeof setTimeout> | undefined;
   let onMessage: ((event: MessageEvent) => void) | undefined;
+  let onAbort: (() => void) | undefined;
   const promise = new Promise<TResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
     timerId = setTimeout(() => reject(new Error(`Call timeout. CallId: "${callId}".`)), timeout);
     onMessage = (event: MessageEvent) => {
       const data = event.data as ResponseEnvelope<TResult> | undefined;
@@ -47,6 +59,10 @@ export function callPort<TResult = unknown, TParams = unknown>(
       else if (data.type === "response:result") resolve(data.result);
     };
     port.addEventListener("message", onMessage);
+    if (signal) {
+      onAbort = () => reject(abortReason(signal));
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
   // Swallow rejection on this side-branch so the cleanup .finally doesn't
   // surface an unhandled rejection. The original `promise` keeps its
@@ -56,7 +72,16 @@ export function callPort<TResult = unknown, TParams = unknown>(
     .finally(() => {
       if (timerId !== undefined) clearTimeout(timerId);
       if (onMessage) port.removeEventListener("message", onMessage);
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
     });
   port.postMessage({ type: "request", channelName, callId, params });
   return promise;
+}
+
+function abortReason(signal: AbortSignal): Error {
+  const reason = (signal as { reason?: unknown }).reason;
+  if (reason instanceof Error) return reason;
+  const err = new Error(reason === undefined ? "Aborted" : String(reason));
+  err.name = "AbortError";
+  return err;
 }

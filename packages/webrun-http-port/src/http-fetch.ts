@@ -38,10 +38,12 @@ export async function httpFetch(
 
   // `protocol: "http"` tags the call so the server can filter for HTTP traffic.
   // `options.timeout` is large so paused HTTP streams (e.g. SSE) don't time
-  // out per-chunk; the user-supplied AbortSignal is the cancellation primitive.
+  // out per-chunk; the user-supplied AbortSignal is plumbed into the outer
+  // callPort, whose rejection triggers callBidi's internal cancel of the
+  // inner ioSend recieveIterator.
   const callIter = callBidi<unknown, Uint8Array>(port, encodeMessage(env, body), {
     protocol: "http",
-    options: { timeout: 2147483647 },
+    options: { timeout: 2147483647, signal },
   });
 
   let aborted = false;
@@ -50,7 +52,6 @@ export async function httpFetch(
   };
   const onAbort = () => {
     aborted = true;
-    void (callIter as AsyncGenerator<unknown, void, undefined>).return?.(undefined);
   };
   signal?.addEventListener("abort", onAbort, { once: true });
 

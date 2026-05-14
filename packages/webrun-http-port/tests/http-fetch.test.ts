@@ -171,10 +171,7 @@ describe("httpFetch / httpServe", () => {
     }
   });
 
-  // TODO (follow-up): wire callBidi's outer-callPort failure into the inner
-  // ioSend so an abort or server-side error propagates to the body iterator.
-  // Currently requires extending webrun-ports' bidi primitives.
-  it.skip("AbortSignal pre-resolve — rejects with AbortError", async () => {
+  it("AbortSignal pre-resolve — rejects with AbortError", async () => {
     const { a, b, close } = loopback();
     try {
       // Handler never resolves — keeps the call pending.
@@ -198,10 +195,7 @@ describe("httpFetch / httpServe", () => {
     }
   });
 
-  // TODO (follow-up): same callBidi limitation — server-side handler errors
-  // surface as a "response:error" on the outer callPort, but the inner
-  // ioSend recieveIterator stays pending.
-  it.skip("handler throws before envelope — httpFetch rejects", async () => {
+  it("handler throws before envelope — httpFetch rejects", async () => {
     const { a, b, close } = loopback();
     try {
       const unsubscribe = httpServe(b, async () => {

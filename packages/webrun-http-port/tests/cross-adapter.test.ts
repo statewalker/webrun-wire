@@ -38,8 +38,12 @@ async function makeWsPortPair(): Promise<PortPair> {
   clientWs.binaryType = "nodebuffer";
   serverWs.binaryType = "nodebuffer";
 
-  const client = createWebSocketPort(clientWs as unknown as Parameters<typeof createWebSocketPort>[0]);
-  const server = createWebSocketPort(serverWs as unknown as Parameters<typeof createWebSocketPort>[0]);
+  const client = createWebSocketPort(
+    clientWs as unknown as Parameters<typeof createWebSocketPort>[0],
+  );
+  const server = createWebSocketPort(
+    serverWs as unknown as Parameters<typeof createWebSocketPort>[0],
+  );
 
   return {
     client,
