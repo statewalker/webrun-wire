@@ -190,6 +190,31 @@ importers:
         specifier: 'catalog:'
         version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.9.0))
 
+  packages/webrun-http-port:
+    dependencies:
+      '@statewalker/webrun-ports':
+        specifier: workspace:*
+        version: link:../webrun-ports
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.9.0))
+
   packages/webrun-msgpack:
     dependencies:
       '@ygoe/msgpack':

@@ -38,6 +38,15 @@ async function httpFromIterator<Options>(
   return { options, content };
 }
 
+/**
+ * @deprecated For new code, prefer the `MessagePort`-based stack from
+ * `@statewalker/webrun-http-port`. Once a `MessagePort` is established between
+ * page and worker, `httpServe(port, handler)` provides equivalent semantics
+ * with `callBidi` multiplexing, full-duplex streaming, and `AbortSignal`.
+ * This helper remains for existing ServiceWorker setups that still consume the
+ * `MessageTarget` surface; it will be reimplemented on top of
+ * `webrun-http-port` in a follow-up release.
+ */
 export function handleHttpRequests(
   communicationPort: MessageTarget,
   handler: HttpHandler,
@@ -50,6 +59,15 @@ export function handleHttpRequests(
   });
 }
 
+/**
+ * @deprecated For new code, prefer the `MessagePort`-based stack from
+ * `@statewalker/webrun-http-port/fetch`. Once the page and SW share a
+ * `MessagePort`, `fetchOverPort(port, request)` provides the same
+ * `Request → Response` semantics with multiplexing via `callBidi`, JSONL
+ * envelope framing, and native `AbortSignal` support. This helper remains for
+ * existing ServiceWorker setups; it will be reimplemented on top of
+ * `webrun-http-port` in a follow-up release.
+ */
 export async function sendHttpRequest(
   communicationPort: MessageTarget,
   request: Request,

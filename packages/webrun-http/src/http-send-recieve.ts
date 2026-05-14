@@ -40,6 +40,12 @@ async function httpFromIterator<Options>(
  * Returns a server-side pipe: given an incoming stream of serialized-request
  * bytes, yields the serialized-response bytes. Drop this onto any transport
  * that can pipe bytes between two endpoints.
+ *
+ * @deprecated Prefer `httpServe` from `@statewalker/webrun-http-port` for new
+ * code. That layer carries the same HTTP-over-bytes idea but multiplexes
+ * concurrent calls via `callBidi`, supports full-duplex streaming and
+ * `AbortSignal` natively, and uses JSONL envelope framing that survives any
+ * chunk boundary.
  */
 export function newHttpServer(
   handler: HttpHandler,
@@ -56,6 +62,11 @@ export function newHttpServer(
  * Returns a client-side handler: given an HTTP `Request`, it writes the
  * serialized form through `sendStream`, reads back the serialized
  * response, and resolves with a `Response`.
+ *
+ * @deprecated Prefer `fetchOverPort` from `@statewalker/webrun-http-port/fetch`
+ * for new code. That layer takes a `MessagePort` directly, supports multiple
+ * concurrent calls on the same port via `callBidi`, and ships full-duplex
+ * streaming + `AbortSignal` out of the box.
  */
 export function newHttpClient(
   sendStream: (input: AsyncIterable<Uint8Array>) => AsyncIterable<Uint8Array>,

@@ -1,5 +1,14 @@
 # @statewalker/webrun-http
 
+> [!WARNING]
+> **Deprecated.** Prefer [`@statewalker/webrun-http-port`](../webrun-http-port/)
+> for new code. That package speaks `MessagePort` directly, multiplexes
+> concurrent calls through `callBidi`, uses JSONL envelope framing that's
+> independent of chunk boundaries, and ships full-duplex streaming +
+> `AbortSignal` out of the box. The `newHttpClient` / `newHttpServer` exported
+> here remain functional for existing consumers; they will be removed in a
+> future release.
+
 Transport-agnostic HTTP `Request` / `Response` streaming over async iterators.
 Runs anywhere standard `Request` / `Response` / `ReadableStream` work — Node,
 Deno, browsers, ServiceWorkers.
