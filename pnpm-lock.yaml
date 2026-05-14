@@ -199,9 +199,15 @@ importers:
         specifier: workspace:*
         version: link:../webrun-streams
     devDependencies:
+      '@statewalker/webrun-port-ws':
+        specifier: workspace:*
+        version: link:../webrun-port-ws
       '@types/node':
         specifier: 'catalog:'
         version: 25.6.0
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       rimraf:
         specifier: 'catalog:'
         version: 6.1.3
@@ -214,6 +220,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.9.0))
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.1
 
   packages/webrun-msgpack:
     dependencies:
