@@ -17,6 +17,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
+    "demo:p2p": "pnpm --filter @statewalker/p2p-demo start",
     "lint": "biome check --write .",
     "lint:check": "biome check .",
     "lint:fix": "biome check --write --unsafe .",

@@ -1,0 +1,52 @@
+{
+  "name": "@statewalker/webrun-streams-peerjs",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "PeerJS DataConnection-backed Connect/Serve adapter in the webrun-streams-* family",
+  "homepage": "https://github.com/statewalker/webrun-wire",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:statewalker/webrun-wire.git"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:*"
+  },
+  "peerDependencies": {
+    "peerjs": "^1.5.5"
+  },
+  "devDependencies": {
+    "@roamhq/wrtc": "^0.8.0",
+    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@types/node": "catalog:",
+    "peer": "^1.0.2",
+    "peerjs": "^1.5.5",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}

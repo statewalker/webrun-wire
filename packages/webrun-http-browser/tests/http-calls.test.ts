@@ -1,4 +1,4 @@
-import { fromReadableStream, toReadableStream } from "@statewalker/webrun-http";
+import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import type { MessageTarget } from "../src/core/message-target.js";
 import { newRegistry } from "../src/core/registry.js";

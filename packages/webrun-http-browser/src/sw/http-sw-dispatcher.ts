@@ -1,4 +1,4 @@
-import type { HttpHandler } from "@statewalker/webrun-http";
+import type { HttpHandler } from "@statewalker/webrun-http-streams";
 import { handleHttpRequests, sendHttpRequest } from "../http/http-send-recieve.js";
 import {
   SwPortDispatcher,

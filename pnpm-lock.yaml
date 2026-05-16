@@ -84,27 +84,30 @@ importers:
         specifier: 'catalog:'
         version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
 
-  apps/p2p-relay:
+  apps/livekit-demo:
     dependencies:
-      '@chainsafe/libp2p-noise':
-        specifier: ^16.0.0
-        version: 16.1.5
-      '@chainsafe/libp2p-yamux':
-        specifier: ^7.0.0
-        version: 7.0.4
-      '@libp2p/circuit-relay-v2':
-        specifier: ^3.0.0
-        version: 3.2.24
-      '@libp2p/identify':
-        specifier: ^3.0.0
-        version: 3.0.39
-      '@libp2p/websockets':
-        specifier: ^9.0.0
-        version: 9.2.19
-      libp2p:
-        specifier: ^2.4.0
-        version: 2.10.0
+      '@statewalker/webrun-http-port':
+        specifier: workspace:*
+        version: link:../../packages/webrun-http-port
+      '@statewalker/webrun-port-livekit':
+        specifier: workspace:*
+        version: link:../../packages/webrun-port-livekit
+      '@statewalker/webrun-site-builder':
+        specifier: workspace:*
+        version: link:../../packages/webrun-site-builder
+      '@statewalker/webrun-site-host':
+        specifier: workspace:*
+        version: link:../../packages/webrun-site-host
+      livekit-client:
+        specifier: ^2.18.3
+        version: 2.19.0(@types/dom-mediacapture-record@1.0.22)
+      livekit-server-sdk:
+        specifier: ^2.10.0
+        version: 2.15.3
     devDependencies:
+      '@statewalker/webrun-http-browser':
+        specifier: workspace:*
+        version: link:../../packages/webrun-http-browser
       '@types/node':
         specifier: 'catalog:'
         version: 25.6.0
@@ -114,54 +117,11 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
-
-  apps/p2p-site-client:
-    dependencies:
-      '@chainsafe/libp2p-noise':
-        specifier: ^16.0.0
-        version: 16.1.5
-      '@chainsafe/libp2p-yamux':
-        specifier: ^7.0.0
-        version: 7.0.4
-      '@libp2p/circuit-relay-v2':
-        specifier: ^3.0.0
-        version: 3.2.24
-      '@libp2p/identify':
-        specifier: ^3.0.0
-        version: 3.0.39
-      '@libp2p/webrtc':
-        specifier: ^5.0.0
-        version: 5.2.24(react-native@0.85.3(@babel/core@7.29.0)(react@19.2.6))
-      '@libp2p/websockets':
-        specifier: ^9.0.0
-        version: 9.2.19
-      '@multiformats/multiaddr':
-        specifier: ^12.0.0
-        version: 12.5.1
-      '@statewalker/webrun-http-port':
-        specifier: workspace:*
-        version: link:../../packages/webrun-http-port
-      '@statewalker/webrun-port-libp2p':
-        specifier: workspace:*
-        version: link:../../packages/webrun-port-libp2p
-      '@statewalker/webrun-site-host':
-        specifier: workspace:*
-        version: link:../../packages/webrun-site-host
-      libp2p:
-        specifier: ^2.4.0
-        version: 2.10.0
-    devDependencies:
-      '@statewalker/webrun-http-browser':
-        specifier: workspace:*
-        version: link:../../packages/webrun-http-browser
-      typescript:
-        specifier: 'catalog:'
-        version: 6.0.3
       vite:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0)
 
-  apps/p2p-site-server:
+  apps/p2p-demo:
     dependencies:
       '@chainsafe/libp2p-noise':
         specifier: ^16.0.0
@@ -193,10 +153,22 @@ importers:
       '@statewalker/webrun-site-builder':
         specifier: workspace:*
         version: link:../../packages/webrun-site-builder
+      '@statewalker/webrun-site-host':
+        specifier: workspace:*
+        version: link:../../packages/webrun-site-host
       libp2p:
         specifier: ^2.4.0
         version: 2.10.0
     devDependencies:
+      '@statewalker/webrun-http-browser':
+        specifier: workspace:*
+        version: link:../../packages/webrun-http-browser
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -343,6 +315,28 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.20.1
+
+  packages/webrun-http-streams:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/webrun-msgpack:
     dependencies:
@@ -597,6 +591,9 @@ importers:
 
   packages/webrun-ports:
     dependencies:
+      '@statewalker/webrun-port-core':
+        specifier: workspace:*
+        version: link:../webrun-port-core
       '@statewalker/webrun-streams':
         specifier: workspace:*
         version: link:../webrun-streams
@@ -711,6 +708,223 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-conformance:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+
+  packages/webrun-streams-libp2p:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@chainsafe/libp2p-noise':
+        specifier: ^16.0.0
+        version: 16.1.5
+      '@chainsafe/libp2p-yamux':
+        specifier: ^7.0.0
+        version: 7.0.4
+      '@libp2p/interface':
+        specifier: ^2.2.0
+        version: 2.11.0
+      '@libp2p/tcp':
+        specifier: ^10.0.0
+        version: 10.1.19
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      libp2p:
+        specifier: ^2.4.0
+        version: 2.10.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-livekit:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      livekit-client:
+        specifier: ^2.18.3
+        version: 2.19.0(@types/dom-mediacapture-record@1.0.22)
+      livekit-server-sdk:
+        specifier: ^2.10.0
+        version: 2.15.3
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      testcontainers:
+        specifier: ^11.0.0
+        version: 11.14.0
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-peerjs:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@roamhq/wrtc':
+        specifier: ^0.8.0
+        version: 0.8.0
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      peer:
+        specifier: ^1.0.2
+        version: 1.0.2
+      peerjs:
+        specifier: ^1.5.5
+        version: 1.5.5
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-port:
+    dependencies:
+      '@statewalker/webrun-ports':
+        specifier: workspace:*
+        version: link:../webrun-ports
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-webrtc:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@roamhq/wrtc':
+        specifier: ^0.8.0
+        version: 0.8.0
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+
+  packages/webrun-streams-ws:
+    dependencies:
+      '@statewalker/webrun-streams':
+        specifier: workspace:*
+        version: link:../webrun-streams
+    devDependencies:
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:*
+        version: link:../webrun-streams-conformance
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.0
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      rimraf:
+        specifier: 'catalog:'
+        version: 6.1.3
+      rolldown:
+        specifier: 'catalog:'
+        version: 1.0.0-rc.16
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.1
 
 packages:
 

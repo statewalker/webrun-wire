@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>livekit-demo · client page</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 72rem; }
+      h1 { margin-top: 0; }
+      code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+      .row { margin: 0.75rem 0; }
+      .row label { display: inline-block; min-width: 8rem; font-weight: 600; vertical-align: top; }
+      button { padding: 0.25rem 0.6rem; cursor: pointer; }
+      .panel { display: flex; gap: 1rem; margin-top: 1rem; }
+      iframe { flex: 2; height: 22rem; border: 1px solid #e5e5e5; }
+      .log-panel { flex: 1; border: 1px solid #e5e5e5; padding: 0.5rem 1rem; min-width: 18rem; }
+      .log-panel h3 { margin: 0 0 0.4rem 0; font-size: 0.95rem; }
+      .log-panel .controls { margin-bottom: 0.4rem; }
+      .log-panel ul { font-family: monospace; font-size: 0.85rem; list-style: none; padding: 0; margin: 0; max-height: 18rem; overflow: auto; }
+      .log-panel li { margin: 0.1rem 0; }
+      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>livekit-demo · client page</h1>
+    <p>
+      Joins the same LiveKit room as the
+      <a href="http://localhost:5275/">server page</a>, opens a
+      <code>createLiveKitPort</code> against the server's identity, and
+      proxies every HTTP fetch through the LiveKit data channel. Iframe =
+      transparent SW-intercept path; SSE log = explicit consumer-side
+      iteration + cancellation.
+    </p>
+
+    <div class="row">
+      <label>identity:</label>
+      <code id="identity">(initialising…)</code>
+    </div>
+    <div class="row">
+      <label>room:</label>
+      <code id="room">(initialising…)</code>
+    </div>
+    <div class="row">
+      <label>status:</label>
+      <div id="status">starting up…</div>
+    </div>
+
+    <div class="panel">
+      <iframe id="preview" title="remote site"></iframe>
+      <div class="log-panel">
+        <h3>SSE: /api/events</h3>
+        <div class="controls">
+          <button type="button" id="sse-start" disabled>Subscribe</button>
+          <button type="button" id="sse-stop" disabled>Stop</button>
+        </div>
+        <ul id="sse-log"></ul>
+      </div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

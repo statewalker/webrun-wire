@@ -1,0 +1,39 @@
+{
+  "name": "@statewalker/p2p-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Merged p2p demo: Node libp2p Circuit Relay v2 + browser server page + browser client page, all bootable from one script.",
+  "scripts": {
+    "start": "bash scripts/start.sh",
+    "relay": "tsx relay/server.ts",
+    "server-page": "vite --config vite.server.config.ts --host",
+    "client-page": "vite --config vite.client.config.ts --host",
+    "build:server-page": "vite build --config vite.server.config.ts",
+    "build:client-page": "vite build --config vite.client.config.ts",
+    "build": "pnpm run build:server-page && pnpm run build:client-page",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^16.0.0",
+    "@chainsafe/libp2p-yamux": "^7.0.0",
+    "@libp2p/circuit-relay-v2": "^3.0.0",
+    "@libp2p/identify": "^3.0.0",
+    "@libp2p/webrtc": "^5.0.0",
+    "@libp2p/websockets": "^9.0.0",
+    "@multiformats/multiaddr": "^12.0.0",
+    "@statewalker/webrun-http-streams": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:*",
+    "@statewalker/webrun-site-host": "workspace:*",
+    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-streams-libp2p": "workspace:*",
+    "libp2p": "^2.4.0"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-http-browser": "workspace:*",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

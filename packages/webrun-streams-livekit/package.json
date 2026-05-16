@@ -1,0 +1,52 @@
+{
+  "name": "@statewalker/webrun-streams-livekit",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "LiveKit-backed Connect/Serve adapter in the webrun-streams-* family",
+  "homepage": "https://github.com/statewalker/webrun-wire",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:statewalker/webrun-wire.git"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:*"
+  },
+  "peerDependencies": {
+    "livekit-client": "^2.18.3"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@types/node": "catalog:",
+    "livekit-client": "^2.18.3",
+    "livekit-server-sdk": "^2.10.0",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "testcontainers": "^11.0.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}

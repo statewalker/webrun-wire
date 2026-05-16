@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>livekit-demo · server page</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 64rem; }
+      h1 { margin-top: 0; }
+      code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+      .row { margin: 0.75rem 0; }
+      .row label { display: inline-block; min-width: 8rem; font-weight: 600; }
+      button { padding: 0.25rem 0.6rem; cursor: pointer; }
+      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>livekit-demo · server page</h1>
+    <p>
+      Browser peer joined to a LiveKit room as identity
+      <code id="my-identity">site-server</code>. Hosts a
+      <code>SiteHandler</code> (<code>GET /</code>,
+      <code>GET /api/time</code>, <code>GET /api/events</code> SSE) on every
+      participant who joins, by wrapping their
+      <code>(room, identity)</code> in a <code>MessagePort</code> via
+      <code>@statewalker/webrun-port-livekit</code>. Pair with the
+      <a href="http://localhost:5276/">client page</a>.
+    </p>
+
+    <div class="row">
+      <label>identity:</label>
+      <code id="identity">site-server</code>
+    </div>
+    <div class="row">
+      <label>room:</label>
+      <code id="room">(initialising…)</code>
+    </div>
+    <div class="row">
+      <label>status:</label>
+      <div id="status">starting up…</div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

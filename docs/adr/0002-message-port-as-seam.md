@@ -4,7 +4,9 @@ Date: 2026-05-14
 
 ## Status
 
-Accepted.
+Superseded by [ADR-0004 — Duplex is the canonical adapter seam](./0004-duplex-as-seam.md) (2026-05-16).
+
+The decision below remains operationally valid for the legacy `webrun-port-*` family until those packages are deleted in a follow-up change. New adapters target the `Duplex` seam.
 
 ## Context
 

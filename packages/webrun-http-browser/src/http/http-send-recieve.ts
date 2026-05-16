@@ -5,7 +5,7 @@ import {
   type SerializedHttpEnvelope,
   type SerializedHttpRequest,
   type SerializedHttpResponse,
-} from "@statewalker/webrun-http";
+} from "@statewalker/webrun-http-streams";
 import { handleStreams, sendStream } from "../core/data-channels.js";
 import type { MessageTarget } from "../core/message-target.js";
 

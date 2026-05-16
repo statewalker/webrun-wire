@@ -1,4 +1,4 @@
-import { HttpError } from "@statewalker/webrun-http";
+import { HttpError } from "@statewalker/webrun-http-streams";
 import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls } from "../core/data-calls.js";
 import { newRegistry } from "../core/registry.js";

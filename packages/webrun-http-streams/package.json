@@ -1,0 +1,44 @@
+{
+  "name": "@statewalker/webrun-http-streams",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "HTTP request/response over Duplex — merge of webrun-http + webrun-http-port",
+  "homepage": "https://github.com/statewalker/webrun-wire",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:statewalker/webrun-wire.git"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}

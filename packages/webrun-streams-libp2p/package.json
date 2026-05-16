@@ -1,0 +1,61 @@
+{
+  "name": "@statewalker/webrun-streams-libp2p",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "libp2p native multi-stream Connect/Serve adapter in the webrun-streams-* family",
+  "homepage": "https://github.com/statewalker/webrun-wire",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:statewalker/webrun-wire.git"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:*"
+  },
+  "peerDependencies": {
+    "@libp2p/interface": "^2.0.0",
+    "@multiformats/multiaddr": "^12.0.0",
+    "libp2p": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "libp2p": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@chainsafe/libp2p-noise": "^16.0.0",
+    "@chainsafe/libp2p-yamux": "^7.0.0",
+    "@libp2p/interface": "^2.2.0",
+    "@libp2p/tcp": "^10.0.0",
+    "@multiformats/multiaddr": "^12.0.0",
+    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@types/node": "catalog:",
+    "libp2p": "^2.4.0",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}
