@@ -1,5 +1,5 @@
-import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p, PeerId, Stream } from "@libp2p/interface";
+import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
 import { duplexOverStream } from "./duplex-over-stream.js";
 
@@ -26,19 +26,55 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
   const proto = protocol ?? DEFAULT_PROTOCOL;
   const open = new Set<Stream>();
   const call: Duplex = (input) => {
-    return (async function* () {
+    let streamRef: Stream | null = null;
+    const gen = (async function* () {
       const stream = (await (
         node as unknown as {
           dialProtocol(p: PeerId | Multiaddr, protocols: string[]): Promise<Stream>;
         }
       ).dialProtocol(peer, [proto])) as Stream;
+      streamRef = stream;
       open.add(stream);
+      let sourceCompleted = false;
       try {
-        yield* duplexOverStream(stream, input);
+        yield* duplexOverStream(stream, input, {
+          onSourceCompleted: () => {
+            sourceCompleted = true;
+          },
+        });
       } finally {
         open.delete(stream);
+        if (sourceCompleted) {
+          // Natural end on both sides. Graceful close.
+          try {
+            await stream.close();
+          } catch {
+            /* ignore */
+          }
+        }
+        // Else: consumer cancelled. The .return override below has already
+        // called stream.abort to send RST; nothing more to do here.
       }
     })();
+
+    // Send a yamux RST to peer when the consumer cancels (i.e., calls .return
+    // on this generator). Doing it here is essential because by the time the
+    // generator's own finally runs, the for-await teardown chain has already
+    // marked the stream's status as `closed` — and AbstractStream.abort is a
+    // no-op on closed streams.
+    const origReturn = gen.return.bind(gen);
+    gen.return = async (value: unknown) => {
+      if (streamRef) {
+        try {
+          streamRef.abort(new Error("call cancelled"));
+        } catch {
+          /* ignore */
+        }
+      }
+      return origReturn(value as undefined);
+    };
+
+    return gen;
   };
   return {
     call,
@@ -64,11 +100,24 @@ export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handle
     void (async () => {
       const stream = data.stream;
       const inputQueue = makeInputQueue();
+      // Hand the handler an input queue we control. Signal end-of-input as
+      // soon as the peer's source ends — without this, the handler would hang
+      // forever waiting for input that never arrives.
       const output = handler(inputQueue.iter());
-      for await (const chunk of duplexOverStream(stream, output)) {
-        inputQueue.push(chunk);
+      try {
+        for await (const chunk of duplexOverStream(stream, output, {
+          onPeerInputEnd: (err) => inputQueue.done(err),
+        })) {
+          inputQueue.push(chunk);
+        }
+      } finally {
+        inputQueue.done();
+        try {
+          await stream.close();
+        } catch {
+          /* ignore */
+        }
       }
-      inputQueue.done();
     })();
   };
   await (
@@ -85,12 +134,15 @@ export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handle
   };
 };
 
-function makeInputQueue(): {
+interface InputQueue {
   iter(): AsyncGenerator<Uint8Array>;
   push(chunk: Uint8Array): void;
-  done(): void;
-} {
-  const slots: Array<{ type: "value"; value: Uint8Array } | { type: "done" }> = [];
+  done(err?: Error): void;
+}
+
+function makeInputQueue(): InputQueue {
+  type Slot = { type: "value"; value: Uint8Array } | { type: "done"; err?: Error };
+  const slots: Slot[] = [];
   let wake: (() => void) | null = null;
   let closed = false;
   return {
@@ -105,9 +157,11 @@ function makeInputQueue(): {
               wake = null;
               continue;
             }
-            const s = slots.shift();
-            if (!s) continue;
-            if (s.type === "done") return;
+            const s = slots.shift() as Slot;
+            if (s.type === "done") {
+              if (s.err) throw s.err;
+              return;
+            }
             yield s.value;
           }
         } finally {
@@ -120,9 +174,9 @@ function makeInputQueue(): {
       slots.push({ type: "value", value: chunk });
       wake?.();
     },
-    done(): void {
+    done(err?: Error): void {
       if (closed) return;
-      slots.push({ type: "done" });
+      slots.push({ type: "done", err });
       wake?.();
     },
   };
