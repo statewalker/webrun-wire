@@ -92,11 +92,25 @@ http://localhost:5176/#beta    ← client page in group "beta"  — sees only be
 URL fragment is chosen over a query string because it stays purely
 client-side (never sent in HTTP requests).
 
-**Both pages always display the active `groupId` and self peerId** in the
-status header — there's no way to be unsure which group a tab is in.
+**Both pages always display the active `groupId` and self synthetic id** in
+the status header (the H1 reads `Server: ab12-cd34` / `Client: 9f7e-0001`),
+plus a `SERVER` / `CLIENT` role badge — there's no way to be unsure which
+group a tab is in or what role it plays.
 
 Open additional server-page tabs to add more services to the same group;
 client-page tabs see the new services within one announcement interval (≤5s).
+
+### Synthetic peer ids
+
+libp2p peer ids (`12D3KooW…`) are long and visually indistinguishable at a
+glance. The demo derives a deterministic 8-hex-char synthetic id from the
+first 4 bytes of `SHA-1(peerId)`, formatted as `abcd-1234`. Same peer →
+same synth, in every tab. The full peer id stays available in the `title`
+attribute (hover for tooltip). All UI surfaces — status header, page H1,
+Services list, Peers list, Mounted iframe card headers, and the **HTML
+served by the server** (each page's `<title>` and `<h1>` includes the
+server's synth) — use the synth so multiple tabs of the same service are
+visually distinct.
 
 ## Examples
 
@@ -162,12 +176,16 @@ const GROUP_ID =
 // `peerDiscovery: [pubsubPeerDiscovery({topics: [peerDiscoveryTopic(groupId)]})]`
 // at node-creation time — pubsub and discovery services can't be added later.
 const node = await createBrowserLibp2pNode({ listen: ["/webrtc", "/p2p-circuit"], groupId: GROUP_ID });
+const selfSynth = await ensureSynth(node.peerId.toString());
 const group = await joinGroup({ node, groupId: GROUP_ID });
 
-// Same SiteHandler shape as today — see ADR-0004.
+// Same SiteHandler shape as today — see ADR-0004. The served HTML embeds
+// `selfSynth` in each page's <title>/<h1> so the rendered iframe content
+// is self-identifying ("Hello site · ab12-cd34") when multiple servers
+// run in the same group.
 const handler = new SiteBuilder()
-  .setEndpoint("/", "GET", () => /* ... */)
-  .setEndpoint("/news", "GET", () => /* ... */)
+  .setEndpoint("/", "GET", () => /* ... renders `Hello site · ${selfSynth}` ... */)
+  .setEndpoint("/news", "GET", () => /* ... renders `News feed · ${selfSynth}` ... */)
   .build();
 await serveLibp2p({ node, protocol: WEBRUN_STREAMS_LIBP2P_PROTOCOL },
                   serveFetchOverDuplex(handler));
@@ -185,6 +203,7 @@ their own group view.
 ```ts
 const GROUP_ID =
   location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
+const SHARED_ADAPTER_KEY = "p2p-demo-mounts";
 
 const node = await createBrowserLibp2pNode({ listen: ["/webrtc"], groupId: GROUP_ID });
 const group = await joinGroup({ node, groupId: GROUP_ID });
@@ -195,22 +214,41 @@ const group = await joinGroup({ node, groupId: GROUP_ID });
 // HTTP requests across iframes sharing the same handle.
 type CallHandle = { call: Duplex; close: () => Promise<void> };
 const handles = new Map<string, CallHandle>();
-const mounted = new Map<string /* peerId:serviceId */, { unmount: () => void }>();
+const mounted = new Map<string, MountedEntry>();   // key: peerId:serviceId
 
-// Prefer the /p2p-circuit/webrtc/... entry — that's the WebRTC-upgradable
-// form; libp2p will dial through the relay then upgrade to direct.
-function pickDialAddr(multiaddrs: string[]): string {
-  return multiaddrs.find((m) => m.includes("/webrtc")) ?? multiaddrs[0];
-}
+// ── Shared SwHttpAdapter ─────────────────────────────────────────────────
+// The SW dispatcher's handlersIndex is keyed by browser-client id — one
+// entry per tab. If every HostedSiteBuilder built its own SwHttpAdapter,
+// each new mount's UPDATE_COMMUNICATION_PORT would overwrite the previous
+// mount's entry and only the most-recent site would route.
+// Wire one adapter per tab; let HostedSiteBuilder add many handlers to its
+// internal _handlers map (which routes by URL prefix).
+const sharedAdapter = new SwHttpAdapter({
+  key: SHARED_ADAPTER_KEY,
+  serviceWorkerUrl: new URL("/sw-worker.js", location.href).toString(),
+});
+// Wrap so HostedSiteBuilder gets start/register but NOT stop. Per-mount
+// unmount calls HostedSite.stop() → adapter.stop?.() — and the SwHttpAdapter
+// inherits a stop() that unregisters the SW entirely, which would tear
+// down every other mount. Omitting `stop` keeps the SW alive for the tab.
+const sharedAdapterFactory = () => ({
+  start: () => sharedAdapter.start(),
+  register: (prefix, handler) => sharedAdapter.register(prefix, handler),
+});
 
-async function getHandle(peerId: string): Promise<CallHandle> {
+// ── Mount: open the dial, build a per-mount SiteHandler, render iframe ──
+async function getOrOpenHandle(peerId: string): Promise<CallHandle> {
   const existing = handles.get(peerId);
   if (existing) return existing;
-  // Multiaddrs come from libp2p's peerStore (populated by pubsub-peer-discovery),
-  // not from group state. Group state owns only the service catalog.
-  const peer = await node.peerStore.get(peerIdFromString(peerId));
-  const addrs = peer.addresses.map((a) => a.multiaddr.toString());
-  const peerMa = multiaddr(pickDialAddr(addrs));
+  // Construct the dial address from the known relay multiaddr. We do NOT
+  // rely on peerStore multiaddrs because pubsub-peer-discovery broadcasts
+  // whatever node.getMultiaddrs() returns at the moment — local-only on the
+  // server before its circuit-relay reservation lands — and libp2p's auto-
+  // dial may have already opened a *limited* relay-only connection that
+  // rejects custom protocols. The /webrtc segment tells libp2p to upgrade
+  // to a direct browser-to-browser WebRTC connection.
+  const peerMa = multiaddr(`${relayMultiaddr}/p2p-circuit/webrtc/p2p/${peerId}`);
+  await node.dial(peerMa);   // forces non-limited connection
   const handle = await connectLibp2p({ node, peer: peerMa, protocol: WEBRUN_STREAMS_LIBP2P_PROTOCOL });
   handles.set(peerId, handle);
   return handle;
@@ -218,23 +256,37 @@ async function getHandle(peerId: string): Promise<CallHandle> {
 
 async function mountService(peerId: string, service: HttpService): Promise<void> {
   const key = `${peerId}:${service.id}`;
-  if (mounted.has(key)) return;                                  // already mounted
-  const { call } = await getHandle(peerId);
+  if (mounted.has(key)) return;
+  const peerSynth = await ensureSynth(peerId);
 
-  const site = await new HostedSiteBuilder()
-    .setSiteKey(`${peerId.slice(0, 12)}-${service.id}`)
-    .setHandler((req) => fetchOverDuplex(call, req))
+  const site = await new HostedSiteBuilder({ adapterFactory: sharedAdapterFactory })
+    // Site key starts with SHARED_ADAPTER_KEY so the SW's first-path-segment
+    // lookup resolves to the shared adapter's port; the adapter's internal
+    // _handlers map then routes to the right per-mount handler.
+    .setSiteKey(`${SHARED_ADAPTER_KEY}/${peerSynth}-${service.id}`)
+    .setHandler(async (req) => {
+      // Look up the current handle on every request so a peer that evicts
+      // and rejoins (same peerId) transparently reconnects on the next fetch.
+      const h = await getOrOpenHandle(peerId).catch(() => undefined);
+      if (!h) return new Response("peer disconnected", { status: 503 });
+      return fetchOverDuplex(h.call, req);
+    })
     .build();
 
-  const iframe = appendIframe(site.baseUrl + (service.path ?? "/"), service.title);
-  mounted.set(key, { unmount: () => iframe.remove() });
+  // site.baseUrl already ends with "/", so strip the leading "/" from the
+  // service path; otherwise the iframe URL gets a `//` and relative hrefs
+  // resolve against the doubled-slash form, which the SW rejects.
+  const cleanPath = (service.path ?? "/").replace(/^\/+/, "");
+  const iframe = appendIframe(site.baseUrl + cleanPath, service.title);
+  mounted.set(key, { service, site, iframe });
 }
 
 async function unmountService(peerId: string, serviceId: string): Promise<void> {
   const key = `${peerId}:${serviceId}`;
   const entry = mounted.get(key);
   if (!entry) return;
-  entry.unmount();
+  entry.iframe.remove();
+  await entry.site.stop();   // removes this mount's handler from the shared adapter
   mounted.delete(key);
   // Last mount from this peer? Close the cached call handle.
   const stillUsed = [...mounted.keys()].some((k) => k.startsWith(`${peerId}:`));
@@ -253,7 +305,7 @@ group.on("change", (state) => {
   renderServiceList(state, mounted);   // includes ghost rows for evicted-but-mounted peers
   for (const [peerId, handle] of handles) {
     if (state.has(peerId)) continue;
-    // Peer evicted from group. The mounted iframes show "disconnected" until
+    // Peer evicted from group. Mounted iframes show "disconnected" until
     // the user clicks [Unmount] on their ghost rows; we don't auto-close,
     // because the same (peerId, serviceId) may reappear and we want the
     // handle to be reopenable lazily by the next mount.
@@ -268,47 +320,58 @@ group.on("change", (state) => {
 **Server page**
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ group: alpha · self: 12D3KooW1xY…ab    status: connected │  ← always visible
-├──────────────────────────────────────────────────────────┤
-│ My services (announced)                                  │
-│   • main-site  — Hello site  (/)                         │
-│   • news       — News feed   (/news)                     │
-├──────────────────────────────────────────────────────────┤
-│ Peers in group (live)                                    │
-│   12D3KooW2nQ…cd  ·  client      (0 services)  · 1s ago  │
-│   12D3KooW3rS…ef  ·  server      (1 service)   · 2s ago  │
-├──────────────────────────────────────────────────────────┤
-│ Activity log                                              │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Server: ab12-cd34                                                 │ ← H1 with role + synth
+├────────────────────────────────────────────────────────────────────┤
+│ group: alpha · self: ab12-cd34 [SERVER]    status: connected       │ ← always visible
+├────────────────────────────────────────────────────────────────────┤
+│ My services (announced)                                            │
+│   • main-site  — Hello site  (/)                                   │
+│   • news       — News feed   (/news)                               │
+├────────────────────────────────────────────────────────────────────┤
+│ Peers in group (live)                                              │
+│   9f7e-0001  [CLIENT]   0 services  · 1s ago                       │
+│   77a3-be19  [SERVER]   1 service   · 2s ago                       │
+├────────────────────────────────────────────────────────────────────┤
+│ Activity log                                                       │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 The **Peers in group** section is the visible artifact of the symmetric
 protocol — server pages see consumer-only peers (services=[]) too. It also
 visually confirms group isolation: a tab in `#alpha` never lists `#beta`'s
-peers.
+peers. The `SERVER` / `CLIENT` badge is derived from `entry.services.length`
+(non-empty → SERVER, empty → CLIENT).
 
 **Client page**
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ group: alpha · self: 12D3KooW9zX…uv    status: connected │  ← always visible
-├──────────────────────────────────────────────────────────┤
-│ Services in group (live)                                  │
-│   ▸ Hello site   12D3KooW1xY…ab  available    [Mount]   │
-│   ▸ News feed    12D3KooW1xY…ab  mounted      [Unmount] │
-│   ▸ Hello site   12D3KooW3rS…ef  disconnected [Unmount] │  ← evicted from group, iframe still up
-├──────────────────────────────────────────────────────────┤
-│ Mounted iframes (stacked)                                │
-│   ┌──────────────────────────────────────────────────┐   │
-│   │ News feed · 12D3KooW1xY…ab          [● connected]│   │
-│   │ <iframe>                                         │   │
-│   └──────────────────────────────────────────────────┘   │
-│   ┌──────────────────────────────────────────────────┐   │
-│   │ Hello site · 12D3KooW3rS…ef    [○ disconnected]  │   │
-│   │ <iframe (dimmed)>                                │   │
-│   └──────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Client: 9f7e-0001                                                 │ ← H1 with role + synth
+├────────────────────────────────────────────────────────────────────┤
+│ group: alpha · self: 9f7e-0001 [CLIENT]    status: connected       │ ← always visible
+├────────────────────────────────────────────────────────────────────┤
+│ Services in group (live)                                           │
+│   Hello site   from ab12-cd34 [SERVER]   available    [Mount]      │
+│   News feed    from ab12-cd34 [SERVER]   mounted      [Unmount]    │
+│   Hello site   from 77a3-be19 [SERVER]   disconnected [Unmount]    │ ← evicted, iframe still up
+├────────────────────────────────────────────────────────────────────┤
+│ Mounted (stacked)                                                  │
+│   ┌────────────────────────────────────────────────────────────┐   │
+│   │ News feed · ab12-cd34                       [● connected] │   │
+│   │ <iframe>                                                   │   │
+│   │   ┌─────────────────────────────────────────────┐          │   │
+│   │   │ News feed · ab12-cd34                       │ ← served │   │
+│   │   │ Group: alpha                                │   HTML   │   │
+│   │   │ · Server peer is online.                    │ embeds   │   │
+│   │   │ · …                                          │  synth  │   │
+│   │   └─────────────────────────────────────────────┘          │   │
+│   └────────────────────────────────────────────────────────────┘   │
+│   ┌────────────────────────────────────────────────────────────┐   │
+│   │ Hello site · 77a3-be19              [○ disconnected]      │   │
+│   │ <iframe (dimmed)>                                          │   │
+│   └────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 The **Services in group** list is the single control surface for mounting
@@ -351,15 +414,16 @@ apps/p2p-demo/
 │   ├── announcement.ts        # ServiceAnnouncement types + JSON encode/decode (services topic only)
 │   ├── group-state.ts         # pure receiver state machine (applyAnnouncement / applyLeave / evictStale)
 │   ├── join-group.ts          # joinGroup(): subscribe to services topic + tick (5s) + sweep (1s) + on-new-peer + beforeunload leave
+│   ├── peer-id-synth.ts       # SHA-1-derived synthetic id ("abcd-1234"); cached + async; onSynthCacheUpdate subscription
 │   └── browser-node.ts        # libp2p factory — registers pubsub: gossipsub() + peerDiscovery: [pubsubPeerDiscovery({topics:[peer-discovery]})]
 ├── relay/
 │   └── server.ts              # Node libp2p Circuit Relay v2 + gossipsub forwarder + auto-subscribe to webrun/* topics
 ├── server-page/
-│   ├── index.html             # status header + My services + Peers in group + Activity log
-│   └── main.ts                # SiteHandler (/, /news, /api/*), serveLibp2p, joinGroup, announceService×2
+│   ├── index.html             # H1 (Server: <synth>) + status header + My services + Peers in group + Activity log
+│   └── main.ts                # SiteHandler (/, /news, /api/*) with synth in served HTML titles; serveLibp2p; joinGroup; announceService×2
 ├── client-page/
-│   ├── index.html             # status header + Services in group (live) + Mounted (stacked) + Activity log
-│   └── main.ts                # cached call handles + peerStore lookup for multiaddrs + mount/unmount + ghost rows
+│   ├── index.html             # H1 (Client: <synth>) + status header + Services in group (live) + Mounted (stacked) + Activity log
+│   └── main.ts                # shared SwHttpAdapter + cached call handles + explicit relay→circuit→webrtc dial + mount/unmount + ghost rows
 └── scripts/
     └── start.sh               # boots relay, parses multiaddr, injects VITE_RELAY_MULTIADDR + VITE_GROUP_ID
 ```
@@ -401,6 +465,20 @@ Key invariants:
 - **The Services list is the single control surface** for mounting and
   unmounting. The Mounted-iframes section has no controls of its own.
   Ghost rows (peer evicted but iframe still up) provide the unmount path.
+- **One shared `SwHttpAdapter` per client tab** (key
+  `"p2p-demo-mounts"`). The SW dispatcher's `handlersIndex` is keyed by
+  browser-client id — one entry per tab — so each new mount's
+  `UPDATE_COMMUNICATION_PORT` would overwrite the previous mount's entry
+  if every `HostedSiteBuilder` constructed its own adapter. We wrap the
+  shared adapter to expose `start` / `register` but not `stop`, so
+  per-mount `HostedSite.stop()` only deletes its own handler from the
+  adapter's `_handlers` map and the SW stays alive for the tab.
+- **The client dial constructs `${relay}/p2p-circuit/webrtc/p2p/<peerId>`
+  unconditionally and calls `node.dial(peerMa)` before `connectLibp2p`.**
+  The `/webrtc` segment forces libp2p to upgrade to direct WebRTC;
+  without the explicit dial, an existing limited circuit-relay
+  connection (from libp2p's auto-dial via pubsub-peer-discovery) silently
+  rejects custom protocols.
 
 ### Constraints
 
