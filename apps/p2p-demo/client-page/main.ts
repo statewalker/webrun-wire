@@ -119,11 +119,12 @@ async function mountService(peerId: string, service: HttpService): Promise<void>
   setStatus(`mount ${service.id} from ${peerSynth}`);
 
   // All mounts in this tab go through the same shared SwHttpAdapter (see
-  // `getSharedAdapter` for the SW-dispatcher rationale). The site key has
-  // to start with the adapter's key so the SW's first-path-segment lookup
-  // resolves to the right port.
-  const adapter = getSharedAdapter();
-  const site = await new HostedSiteBuilder({ adapterFactory: () => adapter })
+  // `getSharedAdapter` for the SW-dispatcher rationale). `sharedAdapterFactory`
+  // hides the adapter's `stop` so per-mount unmount doesn't unregister the
+  // SW that other mounts depend on. The site key has to start with the
+  // adapter's key so the SW's first-path-segment lookup resolves to the
+  // right port.
+  const site = await new HostedSiteBuilder({ adapterFactory: sharedAdapterFactory })
     .setSiteKey(`${SHARED_ADAPTER_KEY}/${peerSynth}-${service.id}`)
     .setHandler(async (req) => {
       // Look up the current handle on every request so a peer that evicts
@@ -309,6 +310,25 @@ function getSharedAdapter(): SwHttpAdapter {
     sharedAdapter = new SwHttpAdapter({ key: SHARED_ADAPTER_KEY, serviceWorkerUrl: swUrl });
   }
   return sharedAdapter;
+}
+
+/**
+ * Wrap the shared adapter so HostedSiteBuilder gets `start` and `register`
+ * but NOT `stop`. `HostedSite.stop()` calls `adapter.stop?.()` after
+ * removing its own registration — and `SwHttpAdapter.stop()` (inherited
+ * from SwPortHandler) **unregisters the ServiceWorker entirely**, which
+ * would tear down every other mount that shares the adapter. Omitting
+ * `stop` here keeps the SW alive for the tab's lifetime.
+ */
+function sharedAdapterFactory(): {
+  start(): Promise<void>;
+  register: SwHttpAdapter["register"];
+} {
+  const adapter = getSharedAdapter();
+  return {
+    start: () => adapter.start(),
+    register: (prefix, handler) => adapter.register(prefix, handler),
+  };
 }
 
 async function start(): Promise<void> {
