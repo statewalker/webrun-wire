@@ -7,38 +7,40 @@
     <style>
       body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 64rem; }
       h1 { margin-top: 0; }
+      h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; }
       code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
       pre { padding: 0.5rem; overflow-x: auto; }
-      .row { margin: 0.75rem 0; }
-      .row label { display: inline-block; min-width: 8rem; font-weight: 600; }
-      button { padding: 0.25rem 0.6rem; cursor: pointer; }
-      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
+      #status-header { background: #eff6ff; padding: 0.6rem 0.8rem; border-radius: 0.3rem; border: 1px solid #bfdbfe; font-family: monospace; font-size: 0.9rem; }
+      #status-header span { margin-right: 0.4rem; }
+      #status-state { color: #1d4ed8; font-weight: 600; }
+      ul { list-style: none; padding: 0; margin: 0; }
+      li { padding: 0.3rem 0.6rem; border-bottom: 1px solid #f4f4f5; font-family: monospace; font-size: 0.9rem; }
+      li:last-child { border-bottom: none; }
+      .peer-id { color: #6b7280; }
+      .role-server { color: #047857; font-weight: 600; }
+      .role-client { color: #6b7280; }
+      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; max-height: 12rem; overflow-y: auto; }
     </style>
   </head>
   <body>
     <h1>p2p-demo · server page</h1>
-    <p>
-      Browser-side libp2p peer. Defines a <code>SiteHandler</code>
-      (<code>GET /</code>, <code>GET /api/time</code>, <code>GET /api/events</code>
-      SSE) and hosts it on every accepted <code>/webrun/port-bytes/1.0.0</code>
-      stream. Pair with the <a href="http://localhost:5176/">client page</a>.
-    </p>
 
-    <div class="row">
-      <label>peer id:</label>
-      <code id="peer-id">(initialising…)</code>
-      <button type="button" id="copy-peer-id" disabled>Copy</button>
-    </div>
-    <div class="row">
-      <label>dial-able address:</label>
-      <code id="dial-addr">(initialising…)</code>
-      <button type="button" id="copy-dial-addr" disabled>Copy</button>
+    <div id="status-header">
+      <span>group: <code id="group-id">…</code></span>
+      <span>·</span>
+      <span>self: <code id="peer-id">…</code></span>
+      <span>·</span>
+      <span id="status-state">starting up…</span>
     </div>
 
-    <div class="row">
-      <label>status:</label>
-      <div id="status">starting up…</div>
-    </div>
+    <h2>My services (announced)</h2>
+    <ul id="my-services"><li>(none yet)</li></ul>
+
+    <h2>Peers in group (live)</h2>
+    <ul id="peers"><li>(no peers yet)</li></ul>
+
+    <h2>Activity log</h2>
+    <div id="status">starting up…</div>
 
     <script type="module" src="./main.ts"></script>
   </body>

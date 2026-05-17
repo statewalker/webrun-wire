@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { multiaddr } from "@multiformats/multiaddr";
 import { serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
@@ -5,8 +6,11 @@ import {
   serve as serveLibp2p,
   DEFAULT_PROTOCOL as WEBRUN_STREAMS_LIBP2P_PROTOCOL,
 } from "@statewalker/webrun-streams-libp2p";
-import type { Libp2p } from "libp2p";
+import type { HttpService, PeerEntry } from "../lib/announcement.js";
 import { createBrowserLibp2pNode, readRelayMultiaddr } from "../lib/browser-node.js";
+import { joinGroup } from "../lib/join-group.js";
+
+const GROUP_ID = location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -14,37 +18,40 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
+const groupIdEl = $<HTMLElement>("#group-id");
 const peerIdEl = $<HTMLElement>("#peer-id");
-const dialAddrEl = $<HTMLElement>("#dial-addr");
+const statusStateEl = $<HTMLElement>("#status-state");
 const statusEl = $<HTMLDivElement>("#status");
-const copyPeerBtn = $<HTMLButtonElement>("#copy-peer-id");
-const copyDialBtn = $<HTMLButtonElement>("#copy-dial-addr");
+const myServicesEl = $<HTMLUListElement>("#my-services");
+const peersEl = $<HTMLUListElement>("#peers");
+
+groupIdEl.textContent = GROUP_ID;
 
 function setStatus(line: string): void {
   const t = new Date().toISOString().slice(11, 19);
   statusEl.textContent = `[${t}] ${line}\n${statusEl.textContent ?? ""}`.slice(0, 4000);
 }
 
-let nextSseId = 0;
+function setHeaderState(text: string): void {
+  statusStateEl.textContent = text;
+}
 
-// Tracks every still-running SSE stream so a libp2p stream close (or any
-// other transport-level teardown) can force them to stop even when the
-// graceful `cancel-channel` chain doesn't reach them (e.g., the consumer
-// peer disappeared without posting a cancel).
+let nextSseId = 0;
 const activeSseStops = new Set<(reason: string) => void>();
 
+const SERVICES: HttpService[] = [
+  { id: "main-site", kind: "http", title: "Hello site", path: "/" },
+  { id: "news", kind: "http", title: "News feed", path: "/news" },
+];
+
 function buildSiteHandler(): SiteHandler {
-  // NOTE: the inline script uses the relative path "api/time" (no leading
-  // slash) so it resolves against the iframe's full URL
-  // (`https://<origin>/<siteKey>/`), keeping the request inside the SW's
-  // intercept scope for this site. A leading slash would resolve to
-  // `/api/time` — outside the site key, so the SW would fall through to the
-  // dev server's SPA fallback and return HTML instead of JSON.
   const indexHtml = `<!doctype html>
 <html><head><meta charset="utf-8"><title>p2p site</title></head>
 <body>
   <h1>Hello from the p2p server</h1>
+  <p>Group: <code>${GROUP_ID}</code></p>
   <p>Current server time: <code id="t">…</code></p>
+  <p><a href="news">/news</a></p>
   <script>
     fetch("api/time").then((r) => r.json()).then((j) => {
       document.getElementById("t").textContent = j.now;
@@ -54,10 +61,29 @@ function buildSiteHandler(): SiteHandler {
   </script>
 </body></html>`;
 
+  const newsHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><title>news</title></head>
+<body>
+  <h1>News feed</h1>
+  <p>Group: <code>${GROUP_ID}</code></p>
+  <ul>
+    <li>Server peer is online.</li>
+    <li>Auto-discovery via gossipsub on topic <code>webrun/${GROUP_ID}/announce</code>.</li>
+    <li>This page is the second service announced by the server.</li>
+  </ul>
+</body></html>`;
+
   return new SiteBuilder()
     .setEndpoint("/", "GET", () =>
       Promise.resolve(
         new Response(indexHtml, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      ),
+    )
+    .setEndpoint("/news", "GET", () =>
+      Promise.resolve(
+        new Response(newsHtml, {
           headers: { "content-type": "text/html; charset=utf-8" },
         }),
       ),
@@ -78,14 +104,6 @@ function buildSiteHandler(): SiteHandler {
       let stopped = false;
       let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
 
-      // Unified teardown. Reached via any of three paths:
-      //   1. ReadableStream.cancel() — the graceful path: consumer cancelled,
-      //      readableToAsyncIterable's reader.cancel() bubbles up to here.
-      //   2. controller.enqueue() throws — the stream was closed/errored from
-      //      below the SSE source.
-      //   3. The libp2p stream this SSE rode on disappears — invoked via
-      //      `activeSseStops` from the connection close watchdog.
-      // Whichever fires first wins; the others become no-ops.
       const stop = (reason: string): void => {
         if (stopped) return;
         stopped = true;
@@ -94,15 +112,13 @@ function buildSiteHandler(): SiteHandler {
         tickTimer = null;
         heartbeatTimer = null;
         activeSseStops.delete(stop);
-        const message = `SSE #${sseId} stopped streaming after ${i} ticks (${reason})`;
+        const message = `SSE #${sseId} stopped after ${i} ticks (${reason})`;
         setStatus(message);
-        console.log("[p2p-demo:server]", message);
-        // Best-effort close on the controller — harmless if already closed.
         if (controllerRef) {
           try {
             controllerRef.close();
           } catch {
-            /* already closed/errored */
+            /* already closed */
           }
         }
       };
@@ -120,25 +136,7 @@ function buildSiteHandler(): SiteHandler {
         start(controller) {
           controllerRef = controller;
           activeSseStops.add(stop);
-          const message = `SSE #${sseId} started streaming /api/events`;
-          setStatus(message);
-          console.log("[p2p-demo:server]", message);
-
-          // Anti-buffering: SSE messages can be batched by intermediate layers
-          // (Firefox's fetch ReadableStream queueing, WebRTC SCTP small-message
-          // coalescing, libp2p yamux flow control). Two cooperating tricks:
-          //
-          //   1. Initial 2 KiB padding line — many buffer heuristics flush
-          //      once a stream's first byte run exceeds ~2 KB.
-          //   2. Heartbeat comment every 500 ms — keeps the stream
-          //      continuously active so the lower layers never sit on an
-          //      idle queue long enough for batching to feel justified.
-          //
-          // Comment lines (`:`-prefixed, no `data:`) are silently ignored by
-          // both EventSource and our manual parser, so they're free protocol
-          // bytes from the application's perspective.
-          // enqueue(`:${" ".repeat(2048)}\n\n`);
-
+          setStatus(`SSE #${sseId} started`);
           tickTimer = setInterval(() => {
             enqueue(`data: ${JSON.stringify({ tick: i++ })}\n\n`);
           }, 1000);
@@ -147,9 +145,6 @@ function buildSiteHandler(): SiteHandler {
           }, 500);
         },
         cancel(reason) {
-          // ReadableStream.cancel propagates the consumer's intent. The cancel
-          // reason is whatever the upstream reader.cancel(reason) passed —
-          // usually undefined, occasionally an AbortError.
           const tag =
             reason === undefined ? "consumer cancel" : `consumer cancel: ${String(reason)}`;
           stop(tag);
@@ -165,18 +160,40 @@ function buildSiteHandler(): SiteHandler {
     .build();
 }
 
-function updateAdvertisedAddr(node: Libp2p): void {
-  const peerIdStr = node.peerId.toString();
-  const addrs = node
-    .getMultiaddrs()
-    .map((m) => m.toString())
-    .filter((s) => s.includes("/p2p-circuit/") || s.includes("/webrtc"));
-  const dial = addrs[0] ?? `/p2p/${peerIdStr}`;
-  dialAddrEl.textContent = dial;
-  copyDialBtn.disabled = false;
-  copyDialBtn.onclick = () => {
-    void navigator.clipboard.writeText(dial);
-  };
+function renderMyServices(): void {
+  if (SERVICES.length === 0) {
+    myServicesEl.innerHTML = "<li>(none)</li>";
+    return;
+  }
+  myServicesEl.innerHTML = SERVICES.map(
+    (s) =>
+      `<li><strong>${s.id}</strong> — ${s.title} <span class="peer-id">(${s.path ?? "/"})</span></li>`,
+  ).join("");
+}
+
+function ageSecs(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  return `${s}s ago`;
+}
+
+function renderPeers(state: ReadonlyMap<string, PeerEntry>): void {
+  const entries = [...state.entries()];
+  if (entries.length === 0) {
+    peersEl.innerHTML = "<li>(no peers yet)</li>";
+    return;
+  }
+  peersEl.innerHTML = entries
+    .map(([peerId, entry]) => {
+      const id = `${peerId.slice(0, 16)}…`;
+      const role =
+        entry.services.length > 0
+          ? `<span class="role-server">server</span>`
+          : `<span class="role-client">client</span>`;
+      const count = entry.services.length;
+      const label = `${count} service${count === 1 ? "" : "s"}`;
+      return `<li><span class="peer-id">${id}</span> · ${role} · (${label}) · ${ageSecs(entry.lastSeen)}</li>`;
+    })
+    .join("");
 }
 
 async function start(): Promise<void> {
@@ -185,8 +202,10 @@ async function start(): Promise<void> {
     relayMultiaddr = readRelayMultiaddr();
   } catch (err) {
     setStatus((err as Error).message);
+    setHeaderState("failed");
     return;
   }
+  setStatus(`group: ${GROUP_ID}`);
   setStatus(`using relay: ${relayMultiaddr}`);
   setStatus("creating browser libp2p node");
 
@@ -194,12 +213,7 @@ async function start(): Promise<void> {
     listen: ["/webrtc", "/p2p-circuit"],
   });
 
-  const peerIdStr = node.peerId.toString();
-  peerIdEl.textContent = peerIdStr;
-  copyPeerBtn.disabled = false;
-  copyPeerBtn.addEventListener("click", () => {
-    void navigator.clipboard.writeText(peerIdStr);
-  });
+  peerIdEl.textContent = node.peerId.toString();
 
   const baseHandler = buildSiteHandler();
   const handler: SiteHandler = async (req) => {
@@ -215,21 +229,12 @@ async function start(): Promise<void> {
     }
   };
 
-  // Build the site handler once and host it over libp2p via the Duplex seam.
-  // Each inbound libp2p stream carries one HTTP call (yamux multiplexes many
-  // concurrent streams over a single peer connection). Connection-level
-  // observability comes from libp2p's `connection:open` / `connection:close`
-  // events directly; per-stream lifecycle is hidden inside the adapter.
   const stopServing = await serveLibp2p(
     { node, protocol: WEBRUN_STREAMS_LIBP2P_PROTOCOL },
     serveFetchOverDuplex(async (req) => handler(req)),
   );
+  void stopServing;
 
-  // Force-stop any SSE streams when their underlying transport disappears.
-  // The graceful cancel chain (request body `reader.cancel` → ReadableStream
-  // `cancel()` callback) covers the consumer-cancel case; this covers the
-  // abrupt-disconnect case where the libp2p stream dies before the chain
-  // can fire.
   const drainSseStops = (reason: string): void => {
     if (activeSseStops.size === 0) return;
     const stops = [...activeSseStops];
@@ -250,20 +255,30 @@ async function start(): Promise<void> {
     drainSseStops(`connection:close ${evt.detail.id}`);
     setStatus(`connection:close → ${evt.detail.remotePeer.toString().slice(0, 12)}…`);
   });
-  node.addEventListener("self:peer:update", () => updateAdvertisedAddr(node));
-  void stopServing; // retain reference; teardown happens on page unload
 
   setStatus("dialing relay");
   try {
     await node.dial(multiaddr(relayMultiaddr));
     setStatus("dialed relay; awaiting circuit reservation");
+    setHeaderState("connected");
   } catch (err) {
     setStatus(`relay dial failed: ${(err as Error).message}`);
+    setHeaderState("relay unreachable");
     throw err;
   }
+
+  // Join the group and announce both services. Render the live peers list.
+  const group = await joinGroup({ node, groupId: GROUP_ID });
+  for (const svc of SERVICES) group.announceService(svc);
+  renderMyServices();
+  renderPeers(group.state);
+  group.on("change", renderPeers);
+  // Re-render the age column once per second even when nothing changes.
+  setInterval(() => renderPeers(group.state), 1000);
 }
 
 void start().catch((err) => {
   console.error(err);
   setStatus(`fatal: ${(err as Error).message}`);
+  setHeaderState("fatal");
 });

@@ -10,12 +10,15 @@
 #
 # Env knobs:
 #   RELAY_PORT — port for the relay's WS listener (default 9090).
+#   GROUP_ID   — default group id injected as VITE_GROUP_ID (default "demo").
+#                Pages can override per-tab with a URL fragment, e.g. "#alpha".
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 RELAY_PORT="${RELAY_PORT:-9090}"
+GROUP_ID="${GROUP_ID:-demo}"
 RELAY_LOG="$(mktemp -t p2p-demo-relay.XXXXXX.log)"
 
 pids=()
@@ -72,12 +75,14 @@ fi
 echo
 echo "[p2p-demo] ==================================================================="
 echo "[p2p-demo] relay multiaddr: $multiaddr"
-echo "[p2p-demo] server page: http://localhost:5175"
-echo "[p2p-demo] client page: http://localhost:5176"
+echo "[p2p-demo] default group:   $GROUP_ID"
+echo "[p2p-demo] server page:     http://localhost:5175 (override group: append #<id>)"
+echo "[p2p-demo] client page:     http://localhost:5176 (override group: append #<id>)"
 echo "[p2p-demo] ==================================================================="
 echo
 
 export VITE_RELAY_MULTIADDR="$multiaddr"
+export VITE_GROUP_ID="$GROUP_ID"
 
 (cd "$ROOT" && exec pnpm run server-page) &
 pids+=("$!")

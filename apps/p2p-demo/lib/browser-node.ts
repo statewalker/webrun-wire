@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { gossipsub } from "@chainsafe/libp2p-gossipsub";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
@@ -20,7 +21,7 @@ export function readRelayMultiaddr(): string {
   const value = import.meta.env.VITE_RELAY_MULTIADDR ?? "";
   if (!value || value.includes("REPLACE_WITH_RELAY_PEER_ID")) {
     throw new Error(
-      'VITE_RELAY_MULTIADDR is unset. Start via `pnpm start` in apps/p2p-demo (which boots the relay and injects the env var automatically).',
+      "VITE_RELAY_MULTIADDR is unset. Start via `pnpm start` in apps/p2p-demo (which boots the relay and injects the env var automatically).",
     );
   }
   return value;
@@ -33,16 +34,17 @@ export function readRelayMultiaddr(): string {
  * multiaddrs. The "server" variant additionally listens on `/p2p-circuit`
  * so the relay can advertise a reachable circuit address for it.
  */
-export function createBrowserLibp2pNode({
-  listen,
-}: {
-  listen: string[];
-}): Promise<Libp2p> {
+export function createBrowserLibp2pNode({ listen }: { listen: string[] }): Promise<Libp2p> {
   return createLibp2p({
     addresses: { listen },
     transports: [webSockets(), webRTC(), circuitRelayTransport()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
-    services: { identify: identify() },
+    services: {
+      identify: identify(),
+      // Required by joinGroup. Pubsub must be registered at libp2p creation
+      // time — it cannot be added later.
+      pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
+    },
   });
 }

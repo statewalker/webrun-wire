@@ -7,51 +7,49 @@
     <style>
       body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 72rem; }
       h1 { margin-top: 0; }
+      h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; }
       code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
-      .row { margin: 0.75rem 0; }
-      .row label { display: inline-block; min-width: 8rem; font-weight: 600; vertical-align: top; }
-      input[type="text"] { width: 36rem; max-width: 100%; }
-      button { padding: 0.25rem 0.6rem; cursor: pointer; }
-      .panel { display: flex; gap: 1rem; margin-top: 1rem; }
-      iframe { flex: 2; height: 22rem; border: 1px solid #e5e5e5; }
-      .log-panel { flex: 1; border: 1px solid #e5e5e5; padding: 0.5rem 1rem; min-width: 18rem; }
-      .log-panel h3 { margin: 0 0 0.4rem 0; font-size: 0.95rem; }
-      .log-panel .controls { margin-bottom: 0.4rem; }
-      .log-panel ul { font-family: monospace; font-size: 0.85rem; list-style: none; padding: 0; margin: 0; max-height: 18rem; overflow: auto; }
-      .log-panel li { margin: 0.1rem 0; }
-      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
+      #status-header { background: #eff6ff; padding: 0.6rem 0.8rem; border-radius: 0.3rem; border: 1px solid #bfdbfe; font-family: monospace; font-size: 0.9rem; }
+      #status-header span { margin-right: 0.4rem; }
+      #status-state { color: #1d4ed8; font-weight: 600; }
+      ul { list-style: none; padding: 0; margin: 0; }
+      .svc-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid #f4f4f5; font-family: monospace; font-size: 0.9rem; }
+      .svc-row:last-child { border-bottom: none; }
+      .svc-title { font-weight: 600; min-width: 8rem; }
+      .svc-peer { color: #6b7280; flex: 1; }
+      .svc-state-available { color: #1d4ed8; }
+      .svc-state-mounted { color: #047857; font-weight: 600; }
+      .svc-state-disconnected { color: #b91c1c; font-weight: 600; }
+      button { padding: 0.2rem 0.7rem; cursor: pointer; }
+      .mount-card { margin: 0.6rem 0; border: 1px solid #e5e5e5; border-radius: 0.3rem; overflow: hidden; }
+      .mount-header { background: #f9fafb; padding: 0.4rem 0.7rem; font-family: monospace; font-size: 0.85rem; display: flex; align-items: center; gap: 0.6rem; }
+      .mount-header strong { flex: 1; }
+      .badge-connected { color: #047857; font-weight: 600; }
+      .badge-disconnected { color: #b91c1c; font-weight: 600; }
+      .mount-iframe { display: block; width: 100%; height: 18rem; border: none; background: white; }
+      .mount-iframe-dimmed { opacity: 0.45; filter: grayscale(0.6); }
+      #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; max-height: 12rem; overflow-y: auto; }
     </style>
   </head>
   <body>
     <h1>p2p-demo · client page</h1>
-    <p>
-      Dials the <a href="http://localhost:5175/">server page</a> peer through
-      the relay, and proxies every HTTP fetch through the libp2p connection.
-      The iframe demonstrates the transparent SW-intercept path; the SSE log
-      demonstrates explicit consumer-side iteration + cancellation.
-    </p>
 
-    <div class="row">
-      <label for="server-peer-id">server peer id:</label>
-      <input type="text" id="server-peer-id" placeholder="paste 12D… here" />
-      <button type="button" id="connect-btn">Connect</button>
-    </div>
-    <div class="row">
-      <label>status:</label>
-      <div id="status">starting up…</div>
+    <div id="status-header">
+      <span>group: <code id="group-id">…</code></span>
+      <span>·</span>
+      <span>self: <code id="peer-id">…</code></span>
+      <span>·</span>
+      <span id="status-state">starting up…</span>
     </div>
 
-    <div class="panel">
-      <iframe id="preview" title="remote site"></iframe>
-      <div class="log-panel">
-        <h3>SSE: /api/events</h3>
-        <div class="controls">
-          <button type="button" id="sse-start" disabled>Subscribe</button>
-          <button type="button" id="sse-stop" disabled>Stop</button>
-        </div>
-        <ul id="sse-log"></ul>
-      </div>
-    </div>
+    <h2>Services in group (live)</h2>
+    <ul id="services"><li class="svc-row">(no services yet)</li></ul>
+
+    <h2>Mounted</h2>
+    <div id="mounts"></div>
+
+    <h2>Activity log</h2>
+    <div id="status">starting up…</div>
 
     <script type="module" src="./main.ts"></script>
   </body>
