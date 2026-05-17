@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { multiaddr } from "@multiformats/multiaddr";
+import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { type HostedSite, HostedSiteBuilder } from "@statewalker/webrun-site-host";
 import type { Duplex } from "@statewalker/webrun-streams";
@@ -112,10 +113,18 @@ async function closeHandle(peerId: string): Promise<void> {
 async function mountService(peerId: string, service: HttpService): Promise<void> {
   const key = mountKey(peerId, service.id);
   if (mounted.has(key)) return;
-  setStatus(`mount ${service.id} from ${synthOf(peerId)}`);
+  // Resolve the peer's synth before baking it into the SW URL — synthOf
+  // can return the "······" placeholder if the SHA-1 hasn't landed yet.
+  const peerSynth = await ensureSynth(peerId);
+  setStatus(`mount ${service.id} from ${peerSynth}`);
 
-  const site = await new HostedSiteBuilder()
-    .setSiteKey(`p2p-${peerId.slice(0, 12)}-${service.id}`)
+  // All mounts in this tab go through the same shared SwHttpAdapter (see
+  // `getSharedAdapter` for the SW-dispatcher rationale). The site key has
+  // to start with the adapter's key so the SW's first-path-segment lookup
+  // resolves to the right port.
+  const adapter = getSharedAdapter();
+  const site = await new HostedSiteBuilder({ adapterFactory: () => adapter })
+    .setSiteKey(`${SHARED_ADAPTER_KEY}/${peerSynth}-${service.id}`)
     .setHandler(async (req) => {
       // Look up the current handle on every request so a peer that evicts
       // and rejoins (same peerId) transparently reconnects on the next fetch.
@@ -280,6 +289,27 @@ function rerender(): void {
 let node!: Awaited<ReturnType<typeof createBrowserLibp2pNode>>;
 let selfPeerId = "";
 let relayMultiaddr = "";
+
+/**
+ * One shared SwHttpAdapter for all mounts in this tab. The SW dispatcher's
+ * `handlersIndex` is keyed by browser-client id and stores **one** entry per
+ * client — so if every HostedSiteBuilder constructed its own SwHttpAdapter
+ * (the default), each new mount would overwrite the previous mount's
+ * registration in the SW lookup and only the most-recent site would route.
+ *
+ * Wiring one adapter and letting HostedSiteBuilder add multiple handlers
+ * through its `_handlers` map sidesteps that. Built lazily on first mount.
+ */
+let sharedAdapter: SwHttpAdapter | undefined;
+const SHARED_ADAPTER_KEY = "p2p-demo-mounts";
+
+function getSharedAdapter(): SwHttpAdapter {
+  if (!sharedAdapter) {
+    const swUrl = new URL("/sw-worker.js", location.href).toString();
+    sharedAdapter = new SwHttpAdapter({ key: SHARED_ADAPTER_KEY, serviceWorkerUrl: swUrl });
+  }
+  return sharedAdapter;
+}
 
 async function start(): Promise<void> {
   try {
