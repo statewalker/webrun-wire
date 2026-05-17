@@ -152,7 +152,13 @@ async function mountService(peerId: string, service: HttpService): Promise<void>
   const iframe = document.createElement("iframe");
   iframe.className = "mount-iframe";
   iframe.title = `${service.title} from ${synthOf(peerId)}`;
-  iframe.src = site.baseUrl + (service.path ?? "/");
+  // `site.baseUrl` already ends with `/`, so strip the leading `/` from the
+  // service path before concatenating. Otherwise the iframe lands at a URL
+  // with `//` (e.g. `…/main-site//`) and any relative `href` inside resolves
+  // against the doubled-slash form, which the SW lookup rejects with
+  // "no active handler".
+  const cleanPath = (service.path ?? "/").replace(/^\/+/, "");
+  iframe.src = site.baseUrl + cleanPath;
 
   card.append(header, iframe);
   mountsEl.append(card);
