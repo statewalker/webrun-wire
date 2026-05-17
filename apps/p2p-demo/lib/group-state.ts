@@ -1,18 +1,24 @@
-import type { Announcement, PeerEntry } from "./announcement.js";
+import type { PeerEntry, ServiceAnnouncement } from "./announcement.js";
 
 /**
- * Receiver-side state machine for the group-discovery protocol. Pure: no
+ * Receiver-side state machine for the **service catalog** layer. Pure: no
  * timers, no I/O. All wall-clock injection happens through the `now`
  * argument so behavior is reproducible from tests or replays.
+ *
+ * Peer presence + multiaddrs are managed by libp2p's discovery pipeline
+ * via `@libp2p/pubsub-peer-discovery`; this state holds only the catalog.
  */
 export type GroupState = Map<string, PeerEntry>;
 
 export type ApplyResult = "added" | "updated";
 
-export function applyAnnouncement(state: GroupState, ann: Announcement, now: number): ApplyResult {
+export function applyAnnouncement(
+  state: GroupState,
+  ann: ServiceAnnouncement,
+  now: number,
+): ApplyResult {
   const existed = state.has(ann.peerId);
   state.set(ann.peerId, {
-    multiaddrs: ann.multiaddrs,
     services: ann.services,
     lastSeen: now,
   });

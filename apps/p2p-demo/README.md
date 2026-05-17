@@ -10,16 +10,34 @@ resources they offer, and start serving those resources to each other —
 The demo ships two page roles, both of which can run in any number of tabs:
 
 - **Server page** — registers one or more HTTP services on a local
-  `SiteHandler`, announces them on the group's gossipsub topic.
+  `SiteHandler`, announces them on the group's services topic.
 - **Client page** — discovers every service offered by every server in the
   group, lists them, and mounts each chosen service in its own iframe behind
   a same-origin ServiceWorker. The list is **live**: when a server page
   vanishes, its services disappear from the list within the staleness window,
   and any iframe mounted from it surfaces a clear "disconnected" state.
 
-All discovery (peers + services) flows through one shared gossipsub topic;
-the HTTP traffic itself flows peer-to-peer over the existing
+Discovery uses **two complementary gossipsub topics** per group:
+
+- `webrun/<groupId>/peer-discovery` — owned by
+  [`@libp2p/pubsub-peer-discovery`](https://github.com/libp2p/js-libp2p-pubsub-peer-discovery).
+  Carries `{peerId, multiaddrs}`. Feeds libp2p's discovery pipeline so the
+  connection manager auto-dials peers in the background — by the time the
+  user clicks `[Mount]`, the connection is already warm.
+- `webrun/<groupId>/services` — owned by this app (`lib/join-group.ts`).
+  Carries the capability catalog (`{peerId, services[], ts, leave?}`).
+  This is the source of truth for "who is in the group" at the
+  application level.
+
+HTTP traffic itself flows peer-to-peer over the existing
 `Connect/Serve/Duplex` libp2p adapter from ADR-0004.
+
+The split into two topics is deliberate: it lets the off-the-shelf
+discovery library do what it's best at (presence + auto-dial), and
+isolates the bespoke service-catalog protocol into one small custom file.
+The two-topic shape is the stepping-stone toward a future
+`webrun-p2p-mesh` package, where presence and catalog will be the package's
+two public surfaces.
 
 ## Why it exists
 
@@ -94,9 +112,10 @@ type GroupHandle = {
 };
 
 type PeerEntry = {
-  multiaddrs: string[];
   services: Service[];                     // may be empty for consumer-only peers
   lastSeen: number;
+  // multiaddrs are looked up from `node.peerStore` at mount time —
+  // they're owned by the peer-discovery topic, not by this map.
 };
 
 declare function joinGroup(params: {
@@ -108,15 +127,19 @@ declare function joinGroup(params: {
 Symmetric: client pages call `joinGroup` and publish with `services: []`.
 The protocol has no consumer-only mode.
 
-### Wire shape — the announcement message
+### Wire shape — the services-topic announcement
+
+Only the services-topic message is custom (see "What it is" for the second
+topic, which is the off-the-shelf `pubsub-peer-discovery` protobuf and
+isn't reproduced here).
 
 ```ts
-type Announcement = {
+type ServiceAnnouncement = {
   v: 1;                       // schema version
   peerId: string;             // self
-  multiaddrs: string[];       // dial-able addresses (e.g. /p2p-circuit/webrtc/p2p/<id>)
   services: Service[];        // capability catalog; may be empty
   ts: number;                 // unix ms — staleness math on receivers
+  leave?: true;               // graceful-shutdown variant
 };
 
 type Service = HttpService;   // only kind defined this iteration
@@ -135,9 +158,10 @@ type HttpService = {
 const GROUP_ID =
   location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
 
-// createBrowserLibp2pNode is updated as part of this change to register
-// `pubsub: gossipsub()` in its services — required for joinGroup.
-const node = await createBrowserLibp2pNode({ listen: ["/webrtc", "/p2p-circuit"] });
+// createBrowserLibp2pNode registers both `pubsub: gossipsub()` and
+// `peerDiscovery: [pubsubPeerDiscovery({topics: [peerDiscoveryTopic(groupId)]})]`
+// at node-creation time — pubsub and discovery services can't be added later.
+const node = await createBrowserLibp2pNode({ listen: ["/webrtc", "/p2p-circuit"], groupId: GROUP_ID });
 const group = await joinGroup({ node, groupId: GROUP_ID });
 
 // Same SiteHandler shape as today — see ADR-0004.
@@ -162,7 +186,7 @@ their own group view.
 const GROUP_ID =
   location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
 
-const node = await createBrowserLibp2pNode({ listen: ["/webrtc"] });
+const node = await createBrowserLibp2pNode({ listen: ["/webrtc"], groupId: GROUP_ID });
 const group = await joinGroup({ node, groupId: GROUP_ID });
 // Clients don't call announceService; they're discoverable but offer nothing.
 
@@ -179,10 +203,14 @@ function pickDialAddr(multiaddrs: string[]): string {
   return multiaddrs.find((m) => m.includes("/webrtc")) ?? multiaddrs[0];
 }
 
-async function getHandle(peerId: string, multiaddrs: string[]): Promise<CallHandle> {
+async function getHandle(peerId: string): Promise<CallHandle> {
   const existing = handles.get(peerId);
   if (existing) return existing;
-  const peerMa = multiaddr(pickDialAddr(multiaddrs));
+  // Multiaddrs come from libp2p's peerStore (populated by pubsub-peer-discovery),
+  // not from group state. Group state owns only the service catalog.
+  const peer = await node.peerStore.get(peerIdFromString(peerId));
+  const addrs = peer.addresses.map((a) => a.multiaddr.toString());
+  const peerMa = multiaddr(pickDialAddr(addrs));
   const handle = await connectLibp2p({ node, peer: peerMa, protocol: WEBRUN_STREAMS_LIBP2P_PROTOCOL });
   handles.set(peerId, handle);
   return handle;
@@ -191,8 +219,7 @@ async function getHandle(peerId: string, multiaddrs: string[]): Promise<CallHand
 async function mountService(peerId: string, service: HttpService): Promise<void> {
   const key = `${peerId}:${service.id}`;
   if (mounted.has(key)) return;                                  // already mounted
-  const { multiaddrs } = group.state.get(peerId)!;
-  const { call } = await getHandle(peerId, multiaddrs);
+  const { call } = await getHandle(peerId);
 
   const site = await new HostedSiteBuilder()
     .setSiteKey(`${peerId.slice(0, 12)}-${service.id}`)
@@ -320,30 +347,54 @@ Concentrated overview; each is covered by the surrounding sections.
 ```
 apps/p2p-demo/
 ├── lib/
-│   ├── announcement.ts        # on-wire types + JSON encode/decode
+│   ├── group-topics.ts        # peerDiscoveryTopic(g) / servicesTopic(g) — naming convention
+│   ├── announcement.ts        # ServiceAnnouncement types + JSON encode/decode (services topic only)
 │   ├── group-state.ts         # pure receiver state machine (applyAnnouncement / applyLeave / evictStale)
-│   ├── join-group.ts          # joinGroup(): subscribe + tick (5s) + sweep (1s) + on-new-peer + beforeunload leave
-│   └── browser-node.ts        # libp2p factory with pubsub: gossipsub() in services
+│   ├── join-group.ts          # joinGroup(): subscribe to services topic + tick (5s) + sweep (1s) + on-new-peer + beforeunload leave
+│   └── browser-node.ts        # libp2p factory — registers pubsub: gossipsub() + peerDiscovery: [pubsubPeerDiscovery({topics:[peer-discovery]})]
 ├── relay/
-│   └── server.ts              # Node libp2p Circuit Relay v2 + gossipsub forwarder
+│   └── server.ts              # Node libp2p Circuit Relay v2 + gossipsub forwarder + auto-subscribe to webrun/* topics
 ├── server-page/
 │   ├── index.html             # status header + My services + Peers in group + Activity log
 │   └── main.ts                # SiteHandler (/, /news, /api/*), serveLibp2p, joinGroup, announceService×2
 ├── client-page/
 │   ├── index.html             # status header + Services in group (live) + Mounted (stacked) + Activity log
-│   └── main.ts                # cached call handles + mount/unmount + ghost rows + render loop
+│   └── main.ts                # cached call handles + peerStore lookup for multiaddrs + mount/unmount + ghost rows
 └── scripts/
     └── start.sh               # boots relay, parses multiaddr, injects VITE_RELAY_MULTIADDR + VITE_GROUP_ID
 ```
 
-Key invariants worth knowing while reading the code:
+### Architecture: split-topic discovery
 
-- **`joinGroup` is the only entry point** to the discovery protocol. Both
-  pages call it the same way; the only difference is whether they call
+Two gossipsub topics per group serve different concerns. The split is the
+demo's main architectural pivot — it isolates the off-the-shelf code paths
+from the bespoke ones and pre-shapes the future `webrun-p2p-mesh` package.
+
+| Topic | Owner | Carries | Used for |
+|---|---|---|---|
+| `webrun/<groupId>/peer-discovery` | `@libp2p/pubsub-peer-discovery` (off-the-shelf) | `{peerId, multiaddrs}` (protobuf) | libp2p auto-discovery + auto-dial — connections are pre-warmed in the background so the first `[Mount]` is instant |
+| `webrun/<groupId>/services` | This app (`lib/join-group.ts`) | `ServiceAnnouncement` (JSON; see Examples) | The application-level "who is here and what do they offer" map |
+
+The library handles all peer/multiaddr bookkeeping in libp2p's peerStore.
+At mount time the client queries `node.peerStore.get(peerId)` for dialable
+addresses; it never sees the peer-discovery wire format.
+
+The service catalog is fully owned by `lib/join-group.ts`. It runs the
+single-topic protocol (5s tick + on-change + on-new-peer + beforeunload
+leave) and maintains `Map<peerId, {services, lastSeen}>`. The two topic
+TTL windows aren't currently joined: a peer that drops out of
+peer-discovery but is still announcing services would render as
+"available, no dialable addresses" — fine in practice because both
+topics share the same 5s heartbeat.
+
+Key invariants:
+
+- **`joinGroup` is the only application-level entry point.** Both pages
+  call it the same way; the only difference is whether they call
   `announceService(...)` afterwards.
-- **Announcements are full snapshots, not diffs.** Receivers `state.set(peerId, …)`
-  per message — no merging at the protocol layer. This is why per-peer
-  eviction is the right granularity.
+- **ServiceAnnouncements are full snapshots, not diffs.** Receivers
+  `state.set(peerId, …)` per message — no merging at the protocol layer.
+  Per-peer eviction follows naturally.
 - **The mounted-iframe handler looks up the current call handle on every
   fetch**, so a peer that evicts and rejoins (same peerId) transparently
   reconnects on the next request. The cached handle is recreated lazily.
@@ -355,10 +406,10 @@ Key invariants worth knowing while reading the code:
 
 - Localhost only (plain `ws://` relay). Production deployment is out of scope.
 - The relay is the **only** bootstrap path: every browser dials the relay on
-  load, the gossipsub mesh forms over relay-mediated connections, and peers
-  upgrade to direct WebRTC once they've seen each other's announcements. If
-  the relay disappears, existing WebRTC connections keep working but the
-  group view freezes (no new discovery).
+  load, both gossipsub topics mesh over relay-mediated connections, and
+  peers upgrade to direct WebRTC once they've seen each other's
+  announcements. If the relay disappears, existing WebRTC connections
+  keep working but the group view freezes (no new discovery).
 - The relay adds `pubsub: gossipsub()` to its services **and** auto-
   subscribes to any `webrun/*` topic it sees a connected peer advertise.
   Gossipsub only forwards messages between peers that are both subscribed
@@ -366,11 +417,15 @@ Key invariants worth knowing while reading the code:
   the relay must join each group's topic to bridge browsers. The auto-
   subscribe pattern keeps the relay's app-level knowledge to zero (no
   topic list baked in, no per-group config) while still putting it on the
-  right meshes; it runs no handler, just forwards.
+  right meshes; it runs no handler, just forwards. Both
+  `webrun/<g>/peer-discovery` and `webrun/<g>/services` match the same
+  rule.
 - The shared `createBrowserLibp2pNode` factory (`lib/browser-node.ts`)
-  registers `pubsub: gossipsub()` in its services. Pubsub must be registered
-  at libp2p creation time — it cannot be added later. `joinGroup` assumes
-  the node was created with gossipsub available.
+  registers `pubsub: gossipsub()` **and**
+  `peerDiscovery: [pubsubPeerDiscovery({topics: [peer-discovery topic]})]`
+  in its libp2p config. Both must be registered at node-creation time —
+  they cannot be added later. The factory takes `groupId` so the
+  peer-discovery topic name is known at registration time.
 - WebTransport, DHT, rendezvous, mDNS, and `libp2p-daemon-*` are explicitly
   **not** in scope for this iteration.
 
@@ -394,6 +449,14 @@ Added in this iteration:
   — gossipsub pubsub. Registered in both the browser-node factory and the
   relay. Configured with `allowPublishToZeroTopicPeers: true` so the first
   publish before the mesh forms doesn't throw.
+- [`@libp2p/pubsub-peer-discovery`](https://www.npmjs.com/package/@libp2p/pubsub-peer-discovery)
+  (`^11.0.2`, paired with libp2p v2 / multiaddr v12) — owns the
+  `webrun/<g>/peer-discovery` topic. Periodically broadcasts the local
+  peerId + multiaddrs; libp2p's connection manager auto-dials peers it
+  hears about, pre-warming connections in the background.
+- [`@libp2p/peer-id`](https://www.npmjs.com/package/@libp2p/peer-id) — used
+  by the client page to parse string peer ids returned from our service
+  catalog into the `PeerId` objects libp2p's peerStore expects.
 
 Carried over unchanged:
 

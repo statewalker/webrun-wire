@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { peerIdFromString } from "@libp2p/peer-id";
 import { multiaddr } from "@multiformats/multiaddr";
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { type HostedSite, HostedSiteBuilder } from "@statewalker/webrun-site-host";
@@ -76,9 +77,18 @@ function mountKey(peerId: string, serviceId: string): string {
 async function getOrOpenHandle(peerId: string): Promise<CallHandle | undefined> {
   const existing = handles.get(peerId);
   if (existing) return existing;
-  const entry = group?.state.get(peerId);
-  if (!entry) return undefined;
-  const addr = pickDialAddr(entry.multiaddrs);
+  // Multiaddrs are owned by libp2p's discovery pipeline (via pubsub-peer-
+  // discovery) and live in the node's peerStore. We look them up here at
+  // mount time; if the peer hasn't been heard yet, peerStore.get rejects
+  // and we surface the error in the status log.
+  let multiaddrs: string[] = [];
+  try {
+    const peer = await node.peerStore.get(peerIdFromString(peerId));
+    multiaddrs = peer.addresses.map((a) => a.multiaddr.toString());
+  } catch {
+    /* not in peerStore yet */
+  }
+  const addr = pickDialAddr(multiaddrs);
   if (!addr) return undefined;
   setStatus(`dialing ${shortPeer(peerId)} via ${addr.slice(0, 64)}…`);
   const handle = await connectLibp2p({
@@ -274,7 +284,7 @@ async function start(): Promise<void> {
   setStatus(`using relay: ${relayMultiaddr}`);
   setStatus("creating browser libp2p node");
 
-  node = await createBrowserLibp2pNode({ listen: ["/webrtc"] });
+  node = await createBrowserLibp2pNode({ listen: ["/webrtc"], groupId: GROUP_ID });
   selfPeerId = node.peerId.toString();
   peerIdEl.textContent = selfPeerId;
 

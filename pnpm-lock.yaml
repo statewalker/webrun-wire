@@ -141,6 +141,12 @@ importers:
       '@libp2p/identify':
         specifier: ^3.0.0
         version: 3.0.39
+      '@libp2p/peer-id':
+        specifier: ^5.1.0
+        version: 5.1.9
+      '@libp2p/pubsub-peer-discovery':
+        specifier: ^11.0.2
+        version: 11.0.2
       '@libp2p/webrtc':
         specifier: ^5.0.0
         version: 5.2.24(react-native@0.85.3(@babel/core@7.29.0)(react@19.2.6))
@@ -1140,6 +1146,9 @@ packages:
 
   '@libp2p/peer-store@11.2.7':
     resolution: {integrity: sha512-dwTM+0i7mAgAnZvMHghgGcFoWPGaTbKx2nBueMd2Yg38mCs9WeambmR6gQdjwvYpybvNgFDAA+XesCKCotuczg==}
+
+  '@libp2p/pubsub-peer-discovery@11.0.2':
+    resolution: {integrity: sha512-qN3bP7QX6KepuSBIqvbkoGnMJ6Oc5gV86+QXtNJh3T2lUV34kTsuIcROkMeBeYDOfzUi/99Y4LIOrtBOC3M3yA==}
 
   '@libp2p/pubsub@10.1.18':
     resolution: {integrity: sha512-Bxa0cwkaQvadyJNlJlzH0m1eo7m03G2nCpuKbcv+i0qNbyyTOydBcuoslG/UWFYhRBB9Js9R6zNIsaIgpo+iGw==}
@@ -4950,6 +4959,17 @@ snapshots:
       main-event: 1.0.4
       mortice: 3.3.1
       multiformats: 13.4.2
+      protons-runtime: 5.6.0
+      uint8arraylist: 2.4.9
+      uint8arrays: 5.1.1
+
+  '@libp2p/pubsub-peer-discovery@11.0.2':
+    dependencies:
+      '@libp2p/crypto': 5.1.18
+      '@libp2p/interface': 2.11.0
+      '@libp2p/interface-internal': 2.3.19
+      '@libp2p/peer-id': 5.1.9
+      '@multiformats/multiaddr': 12.5.1
       protons-runtime: 5.6.0
       uint8arraylist: 2.4.9
       uint8arrays: 5.1.1

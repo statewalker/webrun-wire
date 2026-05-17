@@ -211,6 +211,7 @@ async function start(): Promise<void> {
 
   const node = await createBrowserLibp2pNode({
     listen: ["/webrtc", "/p2p-circuit"],
+    groupId: GROUP_ID,
   });
 
   peerIdEl.textContent = node.peerId.toString();

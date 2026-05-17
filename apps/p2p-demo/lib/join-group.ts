@@ -1,12 +1,13 @@
 import type { Libp2p } from "libp2p";
 import {
-  type Announcement,
   decodeAnnouncement,
   encodeAnnouncement,
   type PeerEntry,
   type Service,
+  type ServiceAnnouncement,
 } from "./announcement.js";
 import { applyAnnouncement, applyLeave, evictStale, type GroupState } from "./group-state.js";
+import { servicesTopic } from "./group-topics.js";
 
 export interface GroupHandle {
   /** Synchronous current view of the group. Same object every read. */
@@ -50,7 +51,7 @@ interface MessageEvent {
 }
 
 export async function joinGroup({ node, groupId }: JoinGroupParams): Promise<GroupHandle> {
-  const topic = `webrun/${groupId}/announce`;
+  const topic = servicesTopic(groupId);
   const selfPeerId = node.peerId.toString();
   const state: GroupState = new Map();
   const services: Service[] = [];
@@ -77,10 +78,9 @@ export async function joinGroup({ node, groupId }: JoinGroupParams): Promise<Gro
     });
   };
 
-  const buildAnnouncement = (extra?: Partial<Announcement>): Announcement => ({
+  const buildAnnouncement = (extra?: Partial<ServiceAnnouncement>): ServiceAnnouncement => ({
     v: 1,
     peerId: selfPeerId,
-    multiaddrs: node.getMultiaddrs().map((m) => m.toString()),
     services: [...services],
     ts: Date.now(),
     ...extra,
