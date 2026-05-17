@@ -77,17 +77,25 @@ function mountKey(peerId: string, serviceId: string): string {
 async function getOrOpenHandle(peerId: string): Promise<CallHandle | undefined> {
   const existing = handles.get(peerId);
   if (existing) return existing;
-  // Multiaddrs are owned by libp2p's discovery pipeline (via pubsub-peer-
-  // discovery) and live in the node's peerStore. We look them up here at
-  // mount time; if the peer hasn't been heard yet, peerStore.get rejects
-  // and we surface the error in the status log.
+
+  // peerStore is the primary source — it's populated by pubsub-peer-discovery
+  // and any peer info libp2p has learned through identify / other paths.
   let multiaddrs: string[] = [];
   try {
     const peer = await node.peerStore.get(peerIdFromString(peerId));
     multiaddrs = peer.addresses.map((a) => a.multiaddr.toString());
   } catch {
-    /* not in peerStore yet */
+    /* not in peerStore yet — fall through to the constructed form */
   }
+
+  // Always append the relay → circuit → webrtc form. The library broadcasts
+  // whatever node.getMultiaddrs() returns at the moment, which can be empty
+  // or local-only on the server before its circuit-relay reservation lands.
+  // Constructing the form ourselves from the (always-known) relay multiaddr
+  // gives a guaranteed-dialable address; it's the same shape the pre-refactor
+  // demo used unconditionally.
+  multiaddrs.push(`${relayMultiaddr}/p2p-circuit/webrtc/p2p/${peerId}`);
+
   const addr = pickDialAddr(multiaddrs);
   if (!addr) return undefined;
   setStatus(`dialing ${shortPeer(peerId)} via ${addr.slice(0, 64)}…`);
@@ -270,9 +278,9 @@ function rerender(): void {
 
 let node!: Awaited<ReturnType<typeof createBrowserLibp2pNode>>;
 let selfPeerId = "";
+let relayMultiaddr = "";
 
 async function start(): Promise<void> {
-  let relayMultiaddr: string;
   try {
     relayMultiaddr = readRelayMultiaddr();
   } catch (err) {
