@@ -9,6 +9,7 @@ import {
 import type { HttpService, PeerEntry } from "../lib/announcement.js";
 import { createBrowserLibp2pNode, readRelayMultiaddr } from "../lib/browser-node.js";
 import { joinGroup } from "../lib/join-group.js";
+import { ensureSynth, onSynthCacheUpdate, synthOf } from "../lib/peer-id-synth.js";
 
 const GROUP_ID = location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
 
@@ -20,6 +21,7 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 
 const groupIdEl = $<HTMLElement>("#group-id");
 const peerIdEl = $<HTMLElement>("#peer-id");
+const pageSynthEl = $<HTMLElement>("#page-synth");
 const statusStateEl = $<HTMLElement>("#status-state");
 const statusEl = $<HTMLDivElement>("#status");
 const myServicesEl = $<HTMLUListElement>("#my-services");
@@ -177,6 +179,10 @@ function ageSecs(ms: number): string {
 }
 
 function renderPeers(state: ReadonlyMap<string, PeerEntry>): void {
+  // Kick off synth computation for every peer we know about. Fire-and-forget;
+  // the onSynthCacheUpdate subscription below re-renders when results land.
+  for (const peerId of state.keys()) void ensureSynth(peerId);
+
   const entries = [...state.entries()];
   if (entries.length === 0) {
     peersEl.innerHTML = "<li>(no peers yet)</li>";
@@ -184,14 +190,13 @@ function renderPeers(state: ReadonlyMap<string, PeerEntry>): void {
   }
   peersEl.innerHTML = entries
     .map(([peerId, entry]) => {
-      const id = `${peerId.slice(0, 16)}…`;
-      const role =
-        entry.services.length > 0
-          ? `<span class="role-server">server</span>`
-          : `<span class="role-client">client</span>`;
+      const isServer = entry.services.length > 0;
+      const role = isServer
+        ? `<span class="role-badge role-badge-server">SERVER</span>`
+        : `<span class="role-badge role-badge-client">CLIENT</span>`;
       const count = entry.services.length;
       const label = `${count} service${count === 1 ? "" : "s"}`;
-      return `<li><span class="peer-id">${id}</span> · ${role} · (${label}) · ${ageSecs(entry.lastSeen)}</li>`;
+      return `<li><code class="peer-id" title="${peerId}">${synthOf(peerId)}</code> ${role} · ${label} · ${ageSecs(entry.lastSeen)}</li>`;
     })
     .join("");
 }
@@ -214,7 +219,13 @@ async function start(): Promise<void> {
     groupId: GROUP_ID,
   });
 
-  peerIdEl.textContent = node.peerId.toString();
+  const fullPeerId = node.peerId.toString();
+  const selfSynth = await ensureSynth(fullPeerId);
+  peerIdEl.textContent = selfSynth;
+  peerIdEl.title = fullPeerId;
+  pageSynthEl.textContent = selfSynth;
+  pageSynthEl.title = fullPeerId;
+  document.title = `Server: ${selfSynth} · p2p-demo`;
 
   const baseHandler = buildSiteHandler();
   const handler: SiteHandler = async (req) => {
@@ -274,6 +285,8 @@ async function start(): Promise<void> {
   renderMyServices();
   renderPeers(group.state);
   group.on("change", renderPeers);
+  // Re-render whenever a new peer's synth id lands in the cache.
+  onSynthCacheUpdate(() => renderPeers(group.state));
   // Re-render the age column once per second even when nothing changes.
   setInterval(() => renderPeers(group.state), 1000);
 }

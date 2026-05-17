@@ -1,5 +1,4 @@
 /// <reference types="vite/client" />
-import { peerIdFromString } from "@libp2p/peer-id";
 import { multiaddr } from "@multiformats/multiaddr";
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { type HostedSite, HostedSiteBuilder } from "@statewalker/webrun-site-host";
@@ -11,6 +10,7 @@ import {
 import type { HttpService } from "../lib/announcement.js";
 import { createBrowserLibp2pNode, readRelayMultiaddr } from "../lib/browser-node.js";
 import { type GroupHandle, joinGroup } from "../lib/join-group.js";
+import { ensureSynth, onSynthCacheUpdate, synthOf } from "../lib/peer-id-synth.js";
 
 const GROUP_ID = location.hash.slice(1) || import.meta.env.VITE_GROUP_ID || "default";
 
@@ -22,6 +22,7 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 
 const groupIdEl = $<HTMLElement>("#group-id");
 const peerIdEl = $<HTMLElement>("#peer-id");
+const pageSynthEl = $<HTMLElement>("#page-synth");
 const statusStateEl = $<HTMLElement>("#status-state");
 const statusEl = $<HTMLDivElement>("#status");
 const servicesEl = $<HTMLUListElement>("#services");
@@ -36,19 +37,6 @@ function setStatus(line: string): void {
 
 function setHeaderState(text: string): void {
   statusStateEl.textContent = text;
-}
-
-function shortPeer(peerId: string): string {
-  return `${peerId.slice(0, 12)}…`;
-}
-
-/**
- * Prefer the `/webrtc` entry — that's the WebRTC-upgradable form; libp2p
- * dials through the relay then upgrades to a direct browser-to-browser
- * connection. Falls back to whatever the peer advertised first.
- */
-function pickDialAddr(multiaddrs: string[]): string | undefined {
-  return multiaddrs.find((m) => m.includes("/webrtc")) ?? multiaddrs[0];
 }
 
 interface CallHandle {
@@ -78,30 +66,32 @@ async function getOrOpenHandle(peerId: string): Promise<CallHandle | undefined> 
   const existing = handles.get(peerId);
   if (existing) return existing;
 
-  // peerStore is the primary source — it's populated by pubsub-peer-discovery
-  // and any peer info libp2p has learned through identify / other paths.
-  let multiaddrs: string[] = [];
+  // Construct the dial address from the known relay multiaddr. We do NOT
+  // use peerStore multiaddrs because:
+  //   1. pubsub-peer-discovery broadcasts whatever node.getMultiaddrs()
+  //      returns at the moment, which can be local-only / non-/webrtc
+  //      before the server's circuit-relay reservation lands.
+  //   2. libp2p's auto-dial (triggered by pubsub-peer-discovery) may have
+  //      already opened a *limited* relay-only connection using a non-
+  //      /webrtc form. Custom protocols cannot ride on a limited
+  //      connection ("Cannot open protocol stream on limited connection").
+  //
+  // The /webrtc segment between /p2p-circuit and /p2p/<peer> tells libp2p
+  // to upgrade to a direct browser-to-browser WebRTC connection. Doing the
+  // dial ourselves with this exact form guarantees the upgrade.
+  const peerMa = multiaddr(`${relayMultiaddr}/p2p-circuit/webrtc/p2p/${peerId}`);
+  setStatus(`dialing ${synthOf(peerId)} (relay → WebRTC)…`);
   try {
-    const peer = await node.peerStore.get(peerIdFromString(peerId));
-    multiaddrs = peer.addresses.map((a) => a.multiaddr.toString());
-  } catch {
-    /* not in peerStore yet — fall through to the constructed form */
+    const connection = await node.dial(peerMa);
+    setStatus(`dialed ${synthOf(peerId)} (limited=${connection.limits != null})`);
+  } catch (err) {
+    setStatus(`dial to ${synthOf(peerId)} failed: ${(err as Error).message}`);
+    throw err;
   }
 
-  // Always append the relay → circuit → webrtc form. The library broadcasts
-  // whatever node.getMultiaddrs() returns at the moment, which can be empty
-  // or local-only on the server before its circuit-relay reservation lands.
-  // Constructing the form ourselves from the (always-known) relay multiaddr
-  // gives a guaranteed-dialable address; it's the same shape the pre-refactor
-  // demo used unconditionally.
-  multiaddrs.push(`${relayMultiaddr}/p2p-circuit/webrtc/p2p/${peerId}`);
-
-  const addr = pickDialAddr(multiaddrs);
-  if (!addr) return undefined;
-  setStatus(`dialing ${shortPeer(peerId)} via ${addr.slice(0, 64)}…`);
   const handle = await connectLibp2p({
     node,
-    peer: multiaddr(addr),
+    peer: peerMa,
     protocol: WEBRUN_STREAMS_LIBP2P_PROTOCOL,
   });
   handles.set(peerId, handle);
@@ -122,7 +112,7 @@ async function closeHandle(peerId: string): Promise<void> {
 async function mountService(peerId: string, service: HttpService): Promise<void> {
   const key = mountKey(peerId, service.id);
   if (mounted.has(key)) return;
-  setStatus(`mount ${service.id} from ${shortPeer(peerId)}`);
+  setStatus(`mount ${service.id} from ${synthOf(peerId)}`);
 
   const site = await new HostedSiteBuilder()
     .setSiteKey(`p2p-${peerId.slice(0, 12)}-${service.id}`)
@@ -130,7 +120,7 @@ async function mountService(peerId: string, service: HttpService): Promise<void>
       // Look up the current handle on every request so a peer that evicts
       // and rejoins (same peerId) transparently reconnects on the next fetch.
       const h = await getOrOpenHandle(peerId).catch((err) => {
-        setStatus(`reconnect to ${shortPeer(peerId)} failed: ${(err as Error).message}`);
+        setStatus(`reconnect to ${synthOf(peerId)} failed: ${(err as Error).message}`);
         return undefined;
       });
       if (!h) {
@@ -151,7 +141,7 @@ async function mountService(peerId: string, service: HttpService): Promise<void>
 
   const peerLabel = document.createElement("span");
   peerLabel.className = "svc-peer";
-  peerLabel.textContent = shortPeer(peerId);
+  peerLabel.textContent = synthOf(peerId);
 
   const badge = document.createElement("span");
   badge.className = "badge-connected";
@@ -161,7 +151,7 @@ async function mountService(peerId: string, service: HttpService): Promise<void>
 
   const iframe = document.createElement("iframe");
   iframe.className = "mount-iframe";
-  iframe.title = `${service.title} from ${shortPeer(peerId)}`;
+  iframe.title = `${service.title} from ${synthOf(peerId)}`;
   iframe.src = site.baseUrl + (service.path ?? "/");
 
   card.append(header, iframe);
@@ -175,7 +165,7 @@ async function unmountService(peerId: string, serviceId: string): Promise<void> 
   const key = mountKey(peerId, serviceId);
   const entry = mounted.get(key);
   if (!entry) return;
-  setStatus(`unmount ${serviceId} from ${shortPeer(peerId)}`);
+  setStatus(`unmount ${serviceId} from ${synthOf(peerId)}`);
   entry.card.remove();
   try {
     await entry.site.stop();
@@ -197,6 +187,11 @@ async function unmountService(peerId: string, serviceId: string): Promise<void> 
  */
 function rerender(): void {
   if (!group) return;
+  // Kick off synth computation for every known peer. Fire-and-forget; the
+  // onSynthCacheUpdate subscription below triggers a re-render when results
+  // land, so the row gets the real id without us blocking the first paint.
+  for (const peerId of group.state.keys()) void ensureSynth(peerId);
+
   type Row = {
     peerId: string;
     service: HttpService;
@@ -251,8 +246,8 @@ function rerender(): void {
     title.textContent = row.service.title;
 
     const peerLabel = document.createElement("span");
-    peerLabel.className = "svc-peer";
-    peerLabel.textContent = shortPeer(row.peerId);
+    peerLabel.className = "svc-from";
+    peerLabel.innerHTML = `from <code title="${row.peerId}">${synthOf(row.peerId)}</code> <span class="role-badge role-badge-server">SERVER</span>`;
 
     const stateSpan = document.createElement("span");
     stateSpan.className = `svc-state-${row.state}`;
@@ -294,7 +289,12 @@ async function start(): Promise<void> {
 
   node = await createBrowserLibp2pNode({ listen: ["/webrtc"], groupId: GROUP_ID });
   selfPeerId = node.peerId.toString();
-  peerIdEl.textContent = selfPeerId;
+  const selfSynth = await ensureSynth(selfPeerId);
+  peerIdEl.textContent = selfSynth;
+  peerIdEl.title = selfPeerId;
+  pageSynthEl.textContent = selfSynth;
+  pageSynthEl.title = selfPeerId;
+  document.title = `Client: ${selfSynth} · p2p-demo`;
 
   setStatus(`dialing relay: ${relayMultiaddr.slice(0, 60)}…`);
   try {
@@ -320,6 +320,9 @@ async function start(): Promise<void> {
   // Re-render once a second so age/state badges stay fresh even when nothing
   // structural changes.
   setInterval(rerender, 1000);
+  // Re-render whenever a new peer's synth id lands in the cache (SHA-1 is
+  // async; the first paint shows the placeholder and gets replaced here).
+  onSynthCacheUpdate(rerender);
 
   Object.assign(globalThis as unknown as { __p2p: unknown }, {
     __p2p: {

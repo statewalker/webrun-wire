@@ -12,6 +12,11 @@
       #status-header { background: #eff6ff; padding: 0.6rem 0.8rem; border-radius: 0.3rem; border: 1px solid #bfdbfe; font-family: monospace; font-size: 0.9rem; }
       #status-header span { margin-right: 0.4rem; }
       #status-state { color: #1d4ed8; font-weight: 600; }
+      .role-badge { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 0.2rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; }
+      .role-badge-server { background: #d1fae5; color: #047857; }
+      .role-badge-client { background: #fef3c7; color: #92400e; }
+      .svc-from { color: #6b7280; }
+      .svc-from code { color: #374151; }
       ul { list-style: none; padding: 0; margin: 0; }
       .svc-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid #f4f4f5; font-family: monospace; font-size: 0.9rem; }
       .svc-row:last-child { border-bottom: none; }
@@ -32,12 +37,12 @@
     </style>
   </head>
   <body>
-    <h1>p2p-demo · client page</h1>
+    <h1 id="page-title">Client: <code id="page-synth">······</code></h1>
 
     <div id="status-header">
       <span>group: <code id="group-id">…</code></span>
       <span>·</span>
-      <span>self: <code id="peer-id">…</code></span>
+      <span>self: <code id="peer-id" title="">…</code> <span class="role-badge role-badge-client">CLIENT</span></span>
       <span>·</span>
       <span id="status-state">starting up…</span>
     </div>
