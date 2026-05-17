@@ -46,11 +46,14 @@ const SERVICES: HttpService[] = [
   { id: "news", kind: "http", title: "News feed", path: "/news" },
 ];
 
-function buildSiteHandler(): SiteHandler {
+function buildSiteHandler(selfSynth: string): SiteHandler {
+  // selfSynth is baked into each page's title so the rendered iframe content
+  // is self-identifying — open three server tabs and the same "Hello site"
+  // service from each is still visually distinct.
   const indexHtml = `<!doctype html>
-<html><head><meta charset="utf-8"><title>p2p site</title></head>
+<html><head><meta charset="utf-8"><title>Hello site · ${selfSynth}</title></head>
 <body>
-  <h1>Hello from the p2p server</h1>
+  <h1>Hello site · <code>${selfSynth}</code></h1>
   <p>Group: <code>${GROUP_ID}</code></p>
   <p>Current server time: <code id="t">…</code></p>
   <p><a href="news">/news</a></p>
@@ -64,9 +67,9 @@ function buildSiteHandler(): SiteHandler {
 </body></html>`;
 
   const newsHtml = `<!doctype html>
-<html><head><meta charset="utf-8"><title>news</title></head>
+<html><head><meta charset="utf-8"><title>News feed · ${selfSynth}</title></head>
 <body>
-  <h1>News feed</h1>
+  <h1>News feed · <code>${selfSynth}</code></h1>
   <p>Group: <code>${GROUP_ID}</code></p>
   <ul>
     <li>Server peer is online.</li>
@@ -227,7 +230,7 @@ async function start(): Promise<void> {
   pageSynthEl.title = fullPeerId;
   document.title = `Server: ${selfSynth} · p2p-demo`;
 
-  const baseHandler = buildSiteHandler();
+  const baseHandler = buildSiteHandler(selfSynth);
   const handler: SiteHandler = async (req) => {
     const url = new URL(req.url);
     setStatus(`req ${req.method} ${url.pathname}`);
