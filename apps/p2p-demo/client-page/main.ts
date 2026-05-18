@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { peerIdFromString } from "@libp2p/peer-id";
 import { multiaddr } from "@multiformats/multiaddr";
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
@@ -361,6 +362,42 @@ async function start(): Promise<void> {
     setStatus(`relay dial failed: ${(err as Error).message}`);
     setHeaderState("relay unreachable");
     throw err;
+  }
+
+  // When libp2p reports a connection to a peer has closed, drop any cached
+  // call handle we have for that peer so the next iframe fetch triggers a
+  // fresh dial. Without this, the cached handle survives a dead underlying
+  // connection (NAT idle reap, browser WebRTC suspend, relay drop, …) and
+  // the next fetchOverDuplex(cachedCall, req) silently fails forever.
+  node.addEventListener("connection:close", (evt) => {
+    const peerId = evt.detail.remotePeer.toString();
+    if (handles.has(peerId)) {
+      setStatus(`connection:close → ${synthOf(peerId)}; dropping cached handle`);
+      void closeHandle(peerId);
+    }
+  });
+
+  // Keep the relay link alive. libp2p does not auto-redial peers we
+  // explicitly dialed at boot, so if the WS connection to the relay drops
+  // (browser tab suspended, network change, etc.) gossipsub freezes and
+  // new mounts can't dial through the relay's /p2p-circuit/. Poll every
+  // 10 s and re-dial if there's no open connection to the relay peer.
+  const relayPeerIdStr = multiaddr(relayMultiaddr).getPeerId();
+  if (relayPeerIdStr) {
+    const relayPid = peerIdFromString(relayPeerIdStr);
+    setInterval(async () => {
+      const conns = node.getConnections(relayPid).filter((c) => c.status === "open");
+      if (conns.length > 0) return;
+      setStatus("relay link lost; re-dialing");
+      try {
+        await node.dial(multiaddr(relayMultiaddr));
+        setStatus("re-dialed relay");
+        setHeaderState("connected");
+      } catch (err) {
+        setStatus(`relay re-dial failed: ${(err as Error).message}`);
+        setHeaderState("relay unreachable");
+      }
+    }, 10_000);
   }
 
   group = await joinGroup({ node, groupId: GROUP_ID });

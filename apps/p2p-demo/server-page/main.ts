@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { peerIdFromString } from "@libp2p/peer-id";
 import { multiaddr } from "@multiformats/multiaddr";
 import { serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
@@ -280,6 +281,30 @@ async function start(): Promise<void> {
     setStatus(`relay dial failed: ${(err as Error).message}`);
     setHeaderState("relay unreachable");
     throw err;
+  }
+
+  // Keep the relay link alive. libp2p does not auto-redial peers we
+  // explicitly dialed at boot, so if the WS connection to the relay drops
+  // (browser tab suspended, network change, …) the server loses its
+  // circuit reservation, falls off the group, and is invisible to clients
+  // until a manual reload. Poll every 10 s and re-dial if there's no
+  // open connection to the relay peer.
+  const relayPeerIdStr = multiaddr(relayMultiaddr).getPeerId();
+  if (relayPeerIdStr) {
+    const relayPid = peerIdFromString(relayPeerIdStr);
+    setInterval(async () => {
+      const conns = node.getConnections(relayPid).filter((c) => c.status === "open");
+      if (conns.length > 0) return;
+      setStatus("relay link lost; re-dialing");
+      try {
+        await node.dial(multiaddr(relayMultiaddr));
+        setStatus("re-dialed relay");
+        setHeaderState("connected");
+      } catch (err) {
+        setStatus(`relay re-dial failed: ${(err as Error).message}`);
+        setHeaderState("relay unreachable");
+      }
+    }, 10_000);
   }
 
   // Join the group and announce both services. Render the live peers list.
