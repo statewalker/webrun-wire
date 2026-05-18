@@ -182,6 +182,14 @@ function ageSecs(ms: number): string {
   return `${s}s ago`;
 }
 
+type PeerRole = "HUB" | "SERVER" | "CLIENT";
+
+function roleOf(entry: PeerEntry): PeerRole {
+  if (entry.services.some((s) => s.kind === "presence-hub")) return "HUB";
+  if (entry.services.some((s) => s.kind === "http")) return "SERVER";
+  return "CLIENT";
+}
+
 function renderPeers(state: ReadonlyMap<string, PeerEntry>): void {
   // Kick off synth computation for every peer we know about. Fire-and-forget;
   // the onSynthCacheUpdate subscription below re-renders when results land.
@@ -194,13 +202,12 @@ function renderPeers(state: ReadonlyMap<string, PeerEntry>): void {
   }
   peersEl.innerHTML = entries
     .map(([peerId, entry]) => {
-      const isServer = entry.services.length > 0;
-      const role = isServer
-        ? `<span class="role-badge role-badge-server">SERVER</span>`
-        : `<span class="role-badge role-badge-client">CLIENT</span>`;
-      const count = entry.services.length;
-      const label = `${count} service${count === 1 ? "" : "s"}`;
-      return `<li><code class="peer-id" title="${peerId}">${synthOf(peerId)}</code> ${role} · ${label} · ${ageSecs(entry.lastSeen)}</li>`;
+      const role = roleOf(entry);
+      const badge = `<span class="role-badge role-badge-${role.toLowerCase()}">${role}</span>`;
+      const httpCount = entry.services.filter((s) => s.kind === "http").length;
+      const label =
+        role === "HUB" ? "always-on" : `${httpCount} service${httpCount === 1 ? "" : "s"}`;
+      return `<li><code class="peer-id" title="${peerId}">${synthOf(peerId)}</code> ${badge} · ${label} · ${ageSecs(entry.lastSeen)}</li>`;
     })
     .join("");
 }

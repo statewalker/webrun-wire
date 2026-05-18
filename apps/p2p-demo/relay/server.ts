@@ -5,6 +5,7 @@ import { circuitRelayServer } from "@libp2p/circuit-relay-v2";
 import { identify } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
 import { createLibp2p } from "libp2p";
+import { encodeAnnouncement } from "../lib/announcement.js";
 
 const PORT = Number(process.env.RELAY_PORT ?? 9090);
 const LISTEN_ADDR = `/ip4/0.0.0.0/tcp/${PORT}/ws`;
@@ -40,6 +41,7 @@ console.log("(launcher will parse the multiaddr above and pass it to the browser
 interface PubSubLike {
   getTopics(): string[];
   subscribe(topic: string): void;
+  publish(topic: string, data: Uint8Array): Promise<unknown>;
   addEventListener(
     type: "subscription-change",
     listener: (e: {
@@ -51,17 +53,59 @@ interface PubSubLike {
   ): void;
 }
 const pubsub = node.services.pubsub as unknown as PubSubLike;
+
+/**
+ * Groups whose `webrun/<g>/services` topic we've seen a subscription for.
+ * The relay publishes a `presence-hub` announcement on each one every tick
+ * so browsers in that group can render an always-on HUB peer in their
+ * Peers-in-group view (Level-2 "permanent node" — the relay is already a
+ * gossipsub participant for these topics; this adds application-level
+ * visibility on top).
+ */
+const hubGroups = new Set<string>();
+
+function groupIdFromServicesTopic(topic: string): string | null {
+  const m = topic.match(/^webrun\/([^/]+)\/services$/);
+  return m ? m[1] : null;
+}
+
 pubsub.addEventListener("subscription-change", (evt) => {
   for (const sub of evt.detail.subscriptions ?? []) {
     if (!sub.subscribe) continue;
     if (typeof sub.topic !== "string" || !sub.topic.startsWith("webrun/")) continue;
-    if (pubsub.getTopics().includes(sub.topic)) continue;
-    pubsub.subscribe(sub.topic);
-    console.log(
-      `relay: auto-subscribed to "${sub.topic}" (seen via ${evt.detail.peerId.toString().slice(0, 12)}…)`,
-    );
+    if (!pubsub.getTopics().includes(sub.topic)) {
+      pubsub.subscribe(sub.topic);
+      console.log(
+        `relay: auto-subscribed to "${sub.topic}" (seen via ${evt.detail.peerId.toString().slice(0, 12)}…)`,
+      );
+    }
+    const g = groupIdFromServicesTopic(sub.topic);
+    if (g && !hubGroups.has(g)) {
+      hubGroups.add(g);
+      console.log(`relay: announcing as presence-hub in group "${g}"`);
+    }
   }
 });
+
+const HUB_TICK_MS = 5_000;
+const hubAnnouncement = (): Uint8Array =>
+  encodeAnnouncement({
+    v: 1,
+    peerId: node.peerId.toString(),
+    services: [{ id: "hub", kind: "presence-hub", title: "Hub" }],
+    ts: Date.now(),
+  });
+
+setInterval(() => {
+  for (const g of hubGroups) {
+    const topic = `webrun/${g}/services`;
+    try {
+      void pubsub.publish(topic, hubAnnouncement());
+    } catch {
+      // No subscribers in topic yet — fine. Next tick catches up.
+    }
+  }
+}, HUB_TICK_MS);
 
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`\nreceived ${signal}, stopping relay...`);

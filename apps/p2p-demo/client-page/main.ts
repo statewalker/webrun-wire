@@ -9,7 +9,7 @@ import {
   connect as connectLibp2p,
   DEFAULT_PROTOCOL as WEBRUN_STREAMS_LIBP2P_PROTOCOL,
 } from "@statewalker/webrun-streams-libp2p";
-import type { HttpService } from "../lib/announcement.js";
+import type { HttpService, PeerEntry } from "../lib/announcement.js";
 import { createBrowserLibp2pNode, readRelayMultiaddr } from "../lib/browser-node.js";
 import { type GroupHandle, joinGroup } from "../lib/join-group.js";
 import { ensureSynth, onSynthCacheUpdate, synthOf } from "../lib/peer-id-synth.js";
@@ -27,6 +27,7 @@ const peerIdEl = $<HTMLElement>("#peer-id");
 const pageSynthEl = $<HTMLElement>("#page-synth");
 const statusStateEl = $<HTMLElement>("#status-state");
 const statusEl = $<HTMLDivElement>("#status");
+const peersEl = $<HTMLUListElement>("#peers");
 const servicesEl = $<HTMLUListElement>("#services");
 const mountsEl = $<HTMLDivElement>("#mounts");
 
@@ -197,6 +198,37 @@ async function unmountService(peerId: string, serviceId: string): Promise<void> 
   rerender();
 }
 
+type PeerRole = "HUB" | "SERVER" | "CLIENT";
+
+function roleOf(entry: PeerEntry): PeerRole {
+  if (entry.services.some((s) => s.kind === "presence-hub")) return "HUB";
+  if (entry.services.some((s) => s.kind === "http")) return "SERVER";
+  return "CLIENT";
+}
+
+function renderPeersList(state: ReadonlyMap<string, PeerEntry>): void {
+  // Build {self + others} rows so the user can see themselves in the list.
+  const rows: Array<[string, PeerEntry | null]> = [];
+  rows.push([selfPeerId, null]);
+  for (const [peerId, entry] of state) {
+    if (peerId === selfPeerId) continue;
+    rows.push([peerId, entry]);
+  }
+  if (rows.length === 0) {
+    peersEl.innerHTML = "<li class='peer-row'>(no peers yet)</li>";
+    return;
+  }
+  peersEl.innerHTML = rows
+    .map(([peerId, entry]) => {
+      const isSelf = entry === null;
+      const role: PeerRole = isSelf ? "CLIENT" : roleOf(entry);
+      const badge = `<span class="role-badge role-badge-${role.toLowerCase()}">${role}</span>`;
+      const note = isSelf ? "(self)" : "";
+      return `<li class="peer-row"><code title="${peerId}">${synthOf(peerId)}</code> ${badge}<span class="peer-note">${note}</span></li>`;
+    })
+    .join("");
+}
+
 /**
  * Render the Services list from the union of currently-announced services
  * (from group state) and currently-mounted services (which may include
@@ -208,6 +240,7 @@ function rerender(): void {
   // onSynthCacheUpdate subscription below triggers a re-render when results
   // land, so the row gets the real id without us blocking the first paint.
   for (const peerId of group.state.keys()) void ensureSynth(peerId);
+  renderPeersList(group.state);
 
   type Row = {
     peerId: string;

@@ -21,7 +21,19 @@ export interface HttpService {
   path?: string;
 }
 
-export type Service = HttpService;
+/**
+ * Identifies a peer as the always-on group-mesh anchor (Level-2 "permanent
+ * node"). Today the relay's libp2p instance publishes this so browsers can
+ * see "there is always at least one peer in our group, and it's the relay
+ * machine". Carries no mountable content — it's a presence-only marker.
+ */
+export interface PresenceHubService {
+  id: string;
+  kind: "presence-hub";
+  title: string;
+}
+
+export type Service = HttpService | PresenceHubService;
 
 export interface ServiceAnnouncement {
   v: 1;

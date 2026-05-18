@@ -15,8 +15,13 @@
       .role-badge { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 0.2rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; }
       .role-badge-server { background: #d1fae5; color: #047857; }
       .role-badge-client { background: #fef3c7; color: #92400e; }
+      .role-badge-hub { background: #ede9fe; color: #6d28d9; }
       .svc-from { color: #6b7280; }
       .svc-from code { color: #374151; }
+      .peer-row { padding: 0.3rem 0.6rem; border-bottom: 1px solid #f4f4f5; font-family: monospace; font-size: 0.9rem; display: flex; align-items: center; gap: 0.6rem; }
+      .peer-row:last-child { border-bottom: none; }
+      .peer-row code { color: #374151; }
+      .peer-row .peer-note { color: #6b7280; }
       ul { list-style: none; padding: 0; margin: 0; }
       .svc-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid #f4f4f5; font-family: monospace; font-size: 0.9rem; }
       .svc-row:last-child { border-bottom: none; }
@@ -46,6 +51,9 @@
       <span>·</span>
       <span id="status-state">starting up…</span>
     </div>
+
+    <h2>Peers in group (live)</h2>
+    <ul id="peers"><li class="peer-row">(no peers yet)</li></ul>
 
     <h2>Services in group (live)</h2>
     <ul id="services"><li class="svc-row">(no services yet)</li></ul>
