@@ -40,8 +40,10 @@ console.log("(launcher will parse the multiaddr above and pass it to the browser
 // runs no app-level handler — it just forwards.
 interface PubSubLike {
   getTopics(): string[];
+  getPeers(): Array<{ toString(): string }>;
+  getSubscribers(topic: string): Array<{ toString(): string }>;
   subscribe(topic: string): void;
-  publish(topic: string, data: Uint8Array): Promise<unknown>;
+  publish(topic: string, data: Uint8Array): Promise<{ recipients?: Array<unknown> } | unknown>;
   addEventListener(
     type: "subscription-change",
     listener: (e: {
@@ -70,14 +72,16 @@ function groupIdFromServicesTopic(topic: string): string | null {
 }
 
 pubsub.addEventListener("subscription-change", (evt) => {
+  const peer = evt.detail.peerId.toString().slice(0, 12);
   for (const sub of evt.detail.subscriptions ?? []) {
-    if (!sub.subscribe) continue;
     if (typeof sub.topic !== "string" || !sub.topic.startsWith("webrun/")) continue;
+    console.log(
+      `relay: peer ${peer}… ${sub.subscribe ? "SUBSCRIBED to" : "UNSUBSCRIBED from"} "${sub.topic}"`,
+    );
+    if (!sub.subscribe) continue;
     if (!pubsub.getTopics().includes(sub.topic)) {
       pubsub.subscribe(sub.topic);
-      console.log(
-        `relay: auto-subscribed to "${sub.topic}" (seen via ${evt.detail.peerId.toString().slice(0, 12)}…)`,
-      );
+      console.log(`relay: auto-subscribed to "${sub.topic}"`);
     }
     const g = groupIdFromServicesTopic(sub.topic);
     if (g && !hubGroups.has(g)) {
@@ -100,12 +104,35 @@ setInterval(() => {
   for (const g of hubGroups) {
     const topic = `webrun/${g}/services`;
     try {
-      void pubsub.publish(topic, hubAnnouncement());
-    } catch {
-      // No subscribers in topic yet — fine. Next tick catches up.
+      const subs = pubsub.getSubscribers(topic).length;
+      void pubsub
+        .publish(topic, hubAnnouncement())
+        .then((res) => {
+          const recipients = (res as { recipients?: unknown[] }).recipients?.length ?? "?";
+          console.log(
+            `relay: published hub announce topic="${topic}" subscribers=${subs} recipients=${recipients}`,
+          );
+        })
+        .catch((err) => {
+          console.warn(`relay: publish FAIL topic="${topic}" err=${(err as Error).message}`);
+        });
+    } catch (err) {
+      console.warn(`relay: publish THREW topic="${topic}" err=${(err as Error).message}`);
     }
   }
 }, HUB_TICK_MS);
+
+// Periodic mesh snapshot for diagnostics.
+setInterval(() => {
+  const lines: string[] = [];
+  lines.push(`relay mesh snapshot: peers=${pubsub.getPeers().length}`);
+  for (const t of pubsub.getTopics()) {
+    if (!t.startsWith("webrun/")) continue;
+    const subs = pubsub.getSubscribers(t).map((p) => p.toString().slice(0, 12));
+    lines.push(`  ${t}: subscribers=${subs.length} [${subs.join(", ")}]`);
+  }
+  console.log(lines.join("\n"));
+}, 15_000);
 
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`\nreceived ${signal}, stopping relay...`);

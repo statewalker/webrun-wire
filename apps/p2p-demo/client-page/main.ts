@@ -458,6 +458,14 @@ async function start(): Promise<void> {
       handles: () => handles,
     },
   });
+
+  // Periodic libp2p mesh snapshot for diagnostics.
+  setInterval(() => {
+    const peers = node.getPeers().map((p) => p.toString().slice(0, 12));
+    console.log(
+      `[client-page] libp2p peers=${peers.length} [${peers.join(", ")}] groupState=${group?.state.size ?? 0}`,
+    );
+  }, 15_000);
 }
 
 void start().catch((err) => {

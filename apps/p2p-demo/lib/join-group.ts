@@ -38,6 +38,8 @@ interface PubSubLike {
   subscribe(topic: string): void;
   unsubscribe(topic: string): unknown;
   publish(topic: string, data: Uint8Array): Promise<unknown>;
+  getSubscribers(topic: string): Array<unknown>;
+  getTopics(): string[];
   addEventListener(type: "message", listener: (e: MessageEvent) => void): void;
   removeEventListener(type: "message", listener: (e: MessageEvent) => void): void;
 }
@@ -88,35 +90,52 @@ export async function joinGroup({ node, groupId }: JoinGroupParams): Promise<Gro
 
   const publishCurrent = async (): Promise<void> => {
     try {
+      const subs = pubsub.getSubscribers(topic).length;
       await pubsub.publish(topic, encodeAnnouncement(buildAnnouncement()));
+      console.log(
+        `[joinGroup] publish OK topic=${topic} subscribers=${subs} services=${services.length}`,
+      );
     } catch (err) {
       // First publish before the gossipsub mesh has formed via the relay
       // may throw "no peers in topic" / "NoPeersSubscribedToTopic". The
       // periodic tick (or on-new-peer trigger) catches up; not fatal.
-      console.debug("[joinGroup] publish skipped:", (err as Error).message);
+      console.warn(`[joinGroup] publish FAIL topic=${topic} err=${(err as Error).message}`);
     }
   };
 
   const handleMessage = (e: MessageEvent): void => {
     if (e.detail.topic !== topic) return;
     const ann = decodeAnnouncement(e.detail.data);
-    if (!ann) return;
-    if (ann.peerId === selfPeerId) return;
+    if (!ann) {
+      console.warn(`[joinGroup] recv: malformed announcement on ${topic}`);
+      return;
+    }
+    const from = ann.peerId.slice(0, 12);
+    if (ann.peerId === selfPeerId) {
+      console.debug(`[joinGroup] recv self echo from ${from} — ignoring`);
+      return;
+    }
 
     if (ann.leave === true) {
+      console.log(`[joinGroup] recv LEAVE from ${from}`);
       if (applyLeave(state, ann.peerId)) emitChange();
       return;
     }
 
     const result = applyAnnouncement(state, ann, Date.now());
+    console.log(
+      `[joinGroup] recv announce from ${from} services=${ann.services.length} kind=${ann.services[0]?.kind ?? "—"} ${result}`,
+    );
     emitChange();
     // On-new-peer trigger: immediately broadcast our state so the newly
     // discovered peer doesn't wait a full tick to learn about us.
     if (result === "added") void publishCurrent();
   };
 
+  console.log(`[joinGroup] subscribing topic=${topic} self=${selfPeerId.slice(0, 12)}`);
   pubsub.subscribe(topic);
   pubsub.addEventListener("message", handleMessage);
+  console.log(`[joinGroup] subscribed; current topics: ${pubsub.getTopics().join(", ")}`);
 
   void publishCurrent();
 

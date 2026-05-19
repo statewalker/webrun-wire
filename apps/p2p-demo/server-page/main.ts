@@ -324,6 +324,19 @@ async function start(): Promise<void> {
   onSynthCacheUpdate(() => renderPeers(group.state));
   // Re-render the age column once per second even when nothing changes.
   setInterval(() => renderPeers(group.state), 1000);
+
+  // Periodic libp2p mesh snapshot for diagnostics.
+  setInterval(() => {
+    const peers = node.getPeers().map((p) => p.toString().slice(0, 12));
+    console.log(
+      `[server-page] libp2p peers=${peers.length} [${peers.join(", ")}] groupState=${group.state.size}`,
+    );
+  }, 15_000);
+
+  // Expose for devtools.
+  Object.assign(globalThis as unknown as { __p2p: unknown }, {
+    __p2p: { node, group: () => group },
+  });
 }
 
 void start().catch((err) => {
