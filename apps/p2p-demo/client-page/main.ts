@@ -21,13 +21,16 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   if (!el) throw new Error(`client-page: missing ${sel}`);
   return el;
 };
+const $opt = <T extends HTMLElement>(sel: string): T | null => document.querySelector<T>(sel);
 
 const groupIdEl = $<HTMLElement>("#group-id");
 const peerIdEl = $<HTMLElement>("#peer-id");
 const pageSynthEl = $<HTMLElement>("#page-synth");
 const statusStateEl = $<HTMLElement>("#status-state");
 const statusEl = $<HTMLDivElement>("#status");
-const peersEl = $<HTMLUListElement>("#peers");
+// `#peers` was introduced after the original demo HTML; treat as optional so
+// the page still boots if a user is serving a stale cached HTML during dev.
+const peersEl = $opt<HTMLUListElement>("#peers");
 const servicesEl = $<HTMLUListElement>("#services");
 const mountsEl = $<HTMLDivElement>("#mounts");
 
@@ -207,16 +210,13 @@ function roleOf(entry: PeerEntry): PeerRole {
 }
 
 function renderPeersList(state: ReadonlyMap<string, PeerEntry>): void {
+  if (!peersEl) return; // stale-HTML safety; see element-query block above
   // Build {self + others} rows so the user can see themselves in the list.
   const rows: Array<[string, PeerEntry | null]> = [];
   rows.push([selfPeerId, null]);
   for (const [peerId, entry] of state) {
     if (peerId === selfPeerId) continue;
     rows.push([peerId, entry]);
-  }
-  if (rows.length === 0) {
-    peersEl.innerHTML = "<li class='peer-row'>(no peers yet)</li>";
-    return;
   }
   peersEl.innerHTML = rows
     .map(([peerId, entry]) => {
