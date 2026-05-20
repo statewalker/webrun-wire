@@ -5,6 +5,7 @@ import type { CdnProvider } from "./cdn-provider.js";
 import { CdnResolver, type ResolverEvent } from "./cdn-resolver.js";
 import { CompositeProvider } from "./composite-provider.js";
 import { EsmShProvider } from "./esmsh-provider.js";
+import { JsdelivrProvider } from "./jsdelivr-provider.js";
 import { JspmProvider } from "./jspm-provider.js";
 import { clientResources, serverResources, sharedPackageJson } from "./site.js";
 
@@ -14,8 +15,10 @@ function makeProvider(name: string): CdnProvider {
       return new JspmProvider();
     case "esm.sh":
       return new EsmShProvider();
+    case "jsdelivr":
+      return new JsdelivrProvider();
     default:
-      throw new Error(`Unknown CDN provider: "${name}" (known: jspm, esm.sh)`);
+      throw new Error(`Unknown CDN provider: "${name}" (known: jspm, esm.sh, jsdelivr)`);
   }
 }
 
@@ -83,7 +86,7 @@ try {
   const provider = pickProvider();
   log(
     `CDN provider: ${provider.name} ` +
-      "(toggle via #provider=jspm | #provider=esm.sh | #provider=jspm,esm.sh + reload)",
+      "(toggle via #provider=jspm | esm.sh | jsdelivr | a,b,c chain + reload)",
   );
   log("Running CdnResolver (lex + provider resolve + recursive prefetch)…");
   const t0 = performance.now();

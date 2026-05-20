@@ -214,15 +214,30 @@ The pipeline lives in four single-file modules under `src/`:
   prefixed paths. The module re-exports the lexer's `init` promise; the
   caller awaits it once before invoking the other functions.
 - [`cdn-provider.ts`](./src/cdn-provider.ts) — the `CdnProvider` interface.
-  Three implementations ship: [`jspm-provider.ts`](./src/jspm-provider.ts)
-  uses `@jspm/generator` to compute the full transitive map up front;
+  Four implementations ship:
+  [`jspm-provider.ts`](./src/jspm-provider.ts) uses `@jspm/generator` to
+  compute the full transitive map up front;
   [`esmsh-provider.ts`](./src/esmsh-provider.ts) constructs `esm.sh` URLs
   directly (with one round-trip per package to resolve ranges like `^4`
-  or `*` to a concrete `X.Y.Z`); [`composite-provider.ts`](./src/composite-provider.ts)
-  chains sub-providers in priority order — each spec is resolved by the
-  first sub-provider that can; later sub-providers only see what was
-  left unresolved. Adding another CDN means writing a fourth
-  `CdnProvider`; the resolver itself doesn't change.
+  or `*` to a concrete `X.Y.Z`);
+  [`jsdelivr-provider.ts`](./src/jsdelivr-provider.ts) constructs
+  `cdn.jsdelivr.net/npm/<pkg>@<v>/+esm` URLs and uses jsDelivr's data API
+  to resolve ranges;
+  [`composite-provider.ts`](./src/composite-provider.ts) chains
+  sub-providers in priority order — each spec is resolved by the first
+  sub-provider that can; later sub-providers only see what was left
+  unresolved. Adding another CDN means writing a fifth `CdnProvider`;
+  the resolver itself doesn't change.
+
+  Not currently included:
+  - **jsr.io** — direct URLs return TypeScript source, which would
+    require teaching the pipeline to transpile fetched CDN bytes (not
+    just first-party). Reachable today via esm.sh's JSR proxy:
+    `https://esm.sh/jsr/@scope/pkg@v`, handled by `EsmShProvider`
+    without changes.
+  - **unpkg.com** — returns raw npm contents (mostly CJS); no
+    server-side ESM wrap. Only usable for already-ESM packages, which
+    the other providers cover.
 - [`cdn-resolver.ts`](./src/cdn-resolver.ts) — the orchestrator.
   `CdnResolver` is a builder (`setSiteKey`, `setPackageJson`,
   `setCdnProvider`, `addSource`, `setLogger`) terminated by one async
