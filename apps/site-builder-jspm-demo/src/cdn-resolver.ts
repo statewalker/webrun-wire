@@ -55,6 +55,19 @@ export type ResolverEvent =
 
 const MANIFEST_PATH = "/resolution-manifest.json";
 
+/**
+ * Drop the `?…` query string off a URL. CDN-emitted URLs frequently
+ * carry query params (`?target=es2022`, `?dev`, `?bundle`) that are
+ * meaningful to the CDN but illegal as part of a same-origin file path —
+ * the browser will treat `?` as the start of the search component and
+ * the file lookup will miss. We canonicalise on the no-query form for
+ * both the fetch target and the /external/ cache key.
+ */
+function stripQuery(url: string): string {
+  const i = url.indexOf("?");
+  return i >= 0 ? url.slice(0, i) : url;
+}
+
 function externalAbsPath(pkg: string, version: string, file: string): string {
   return `/external/${pkg}@${version}${file.startsWith("/") ? file : `/${file}`}`;
 }
@@ -283,10 +296,12 @@ interface CdnSpecifierContext {
 function mapCdnSpecifier(ctx: CdnSpecifierContext): string {
   const { spec, fromAbs, parentUrl, provider, queue, fetched } = ctx;
 
-  // Relative — keep the output text, but enqueue the corresponding CDN
-  // sibling so it lands in /external/ alongside its parent.
+  // Relative — keep the output text. The browser will resolve it against
+  // the importing file's URL (which is already a /external/ path), so the
+  // sibling lands in the right place. Also enqueue the corresponding CDN
+  // sibling so it gets mirrored.
   if (spec.startsWith("./") || spec.startsWith("../")) {
-    const siblingUrl = new URL(spec, parentUrl).toString();
+    const siblingUrl = stripQuery(new URL(spec, parentUrl).toString());
     if (provider.ownsUrl(siblingUrl) && !fetched.has(siblingUrl)) {
       queue.push(siblingUrl);
     }
@@ -296,7 +311,7 @@ function mapCdnSpecifier(ctx: CdnSpecifierContext): string {
   // Origin-absolute path — resolve against the parent's origin. esm.sh
   // emits these inside its bundle output (e.g. `/v135/react@.../...`).
   if (spec.startsWith("/")) {
-    const absolved = new URL(spec, parentUrl).toString();
+    const absolved = stripQuery(new URL(spec, parentUrl).toString());
     if (provider.ownsUrl(absolved)) {
       const p = provider.parseUrl(absolved);
       if (p) {
@@ -307,11 +322,13 @@ function mapCdnSpecifier(ctx: CdnSpecifierContext): string {
     return spec;
   }
 
-  // Absolute URL on this CDN — canonical, just relativize.
+  // Absolute URL on this CDN — canonical (strip query for the cache key),
+  // just relativize.
   if (provider.ownsUrl(spec)) {
-    const p = provider.parseUrl(spec);
+    const canonical = stripQuery(spec);
+    const p = provider.parseUrl(canonical);
     if (!p) return spec;
-    if (!fetched.has(spec)) queue.push(spec);
+    if (!fetched.has(canonical)) queue.push(canonical);
     return relativePath(fromAbs, externalAbsPath(p.pkg, p.version, p.file));
   }
 
@@ -319,9 +336,10 @@ function mapCdnSpecifier(ctx: CdnSpecifierContext): string {
   if (isBareSpecifier(spec)) {
     const resolvedUrl = provider.resolveSpecifier(spec, parentUrl);
     if (resolvedUrl) {
-      const p = provider.parseUrl(resolvedUrl);
+      const canonical = stripQuery(resolvedUrl);
+      const p = provider.parseUrl(canonical);
       if (p) {
-        if (!fetched.has(resolvedUrl)) queue.push(resolvedUrl);
+        if (!fetched.has(canonical)) queue.push(canonical);
         return relativePath(fromAbs, externalAbsPath(p.pkg, p.version, p.file));
       }
     }
