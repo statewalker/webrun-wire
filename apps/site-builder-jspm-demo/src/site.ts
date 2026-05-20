@@ -17,7 +17,7 @@ export const sharedPackageJson = JSON.stringify(
       leaflet: "^1.9",
       htl: "*",
       kysely: "*",
-      "@astrojs/compiler-rs": "*",
+      "@astrojs/compiler": "*",
     },
   },
   null,
@@ -128,7 +128,7 @@ export const serverResources: Record<string, string> = {
 // both fetched and mirrored into /external/ before the iframe mounts.
 import { z } from "zod";
 import * as Kysely from "kysely";
-import * as AstroCompiler from "@astrojs/compiler-rs";
+import * as AstroCompiler from "@astrojs/compiler";
 
 const querySchema = z.object({
   name: z.string().min(1, "name must be non-empty"),
@@ -155,7 +155,7 @@ export default async function handle(
   }
   console.log("[jspm-demo] server env=", env, "name=", parsed.data.name);
   console.log("[jspm-demo] Kysely exports:", Object.keys(Kysely).length, "names");
-  console.log("[jspm-demo] @astrojs/compiler-rs exports:", Object.keys(AstroCompiler).length, "names");
+  console.log("[jspm-demo] @astrojs/compiler-rs exports:", AstroCompiler);
   return Response.json({
     greeting: \`Hello, \${parsed.data.name}! (service=\${env.service})\`,
     receivedName: parsed.data.name,
