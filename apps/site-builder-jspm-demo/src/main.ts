@@ -22,7 +22,10 @@ function makeProvider(name: string): CdnProvider {
 function pickProvider(): CdnProvider {
   const requested = new URLSearchParams(window.location.hash.slice(1)).get("provider");
   if (!requested) return new JspmProvider();
-  const names = requested.split(",").map((n) => n.trim()).filter(Boolean);
+  const names = requested
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
   if (names.length === 0) return new JspmProvider();
   if (names.length === 1) return makeProvider(names[0]);
   return new CompositeProvider(names.map(makeProvider));
@@ -57,6 +60,8 @@ function formatResolverEvent(event: ResolverEvent): string {
       return `discovered ${event.specifierCount} bare specifier(s) across ${event.mountCount} mount(s) — provider: ${event.provider}`;
     case "install":
       return `resolving via provider: ${event.targets.join(", ")}`;
+    case "unresolved":
+      return `⚠ ${event.provider} could not resolve: ${event.specifiers.join(", ")}`;
     case "fetch-start":
       return `→ ${event.pkg}@${event.version}`;
     case "fetch-done":

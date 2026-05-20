@@ -72,9 +72,7 @@ export class EsmShProvider implements CdnProvider {
     // references the resolved version path. We pluck `<pkg>@<X.Y.Z>` out
     // of that body. esm.sh accepts both `*` (encoded as no version
     // segment) and any npm range.
-    const url = range === "*"
-      ? `https://esm.sh/${pkg}`
-      : `https://esm.sh/${pkg}@${range}`;
+    const url = range === "*" ? `https://esm.sh/${pkg}` : `https://esm.sh/${pkg}@${range}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(

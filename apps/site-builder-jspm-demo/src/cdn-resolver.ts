@@ -35,6 +35,7 @@ export type ResolverLogger = (event: ResolverEvent) => void;
 export type ResolverEvent =
   | { kind: "discover"; specifierCount: number; mountCount: number; provider: string }
   | { kind: "install"; targets: string[] }
+  | { kind: "unresolved"; specifiers: string[]; provider: string }
   | { kind: "fetch-start"; url: string; pkg: string; version: string }
   | {
       kind: "fetch-done";
@@ -168,6 +169,10 @@ export class CdnResolver {
     // (3) Ask the provider to resolve every top-level bare specifier.
     this.#emit({ kind: "install", targets: [...bareSpecs] });
     const specToUrl = await provider.resolveTopLevel(deps, bareSpecs);
+    const unresolved = [...bareSpecs].filter((s) => !specToUrl.has(s));
+    if (unresolved.length > 0) {
+      this.#emit({ kind: "unresolved", specifiers: unresolved, provider: provider.name });
+    }
 
     // (4) Recursive prefetch loop seeded with every URL the provider
     //     returned. On each fetch, lex-rewrite internal refs to relative
@@ -225,7 +230,12 @@ export class CdnResolver {
           if (!isBareSpecifier(spec)) return spec;
           const url = specToUrl.get(spec);
           if (!url) {
-            throw new Error(`Resolver did not produce a URL for "${spec}" (used in ${fileAbs})`);
+            throw new Error(
+              `Provider "${provider.name}" did not resolve "${spec}" (used in ${fileAbs}). ` +
+                `Either remove the dep, pin a version this provider supports, or chain ` +
+                `providers via setCdnProvider(new CompositeProvider([...])). ` +
+                `In the demo, set the URL hash to #provider=jspm,esm.sh and reload.`,
+            );
           }
           const p = provider.parseUrl(url);
           if (!p) {
