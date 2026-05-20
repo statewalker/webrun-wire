@@ -214,12 +214,15 @@ The pipeline lives in four single-file modules under `src/`:
   prefixed paths. The module re-exports the lexer's `init` promise; the
   caller awaits it once before invoking the other functions.
 - [`cdn-provider.ts`](./src/cdn-provider.ts) — the `CdnProvider` interface.
-  Two implementations ship: [`jspm-provider.ts`](./src/jspm-provider.ts)
+  Three implementations ship: [`jspm-provider.ts`](./src/jspm-provider.ts)
   uses `@jspm/generator` to compute the full transitive map up front;
   [`esmsh-provider.ts`](./src/esmsh-provider.ts) constructs `esm.sh` URLs
-  directly and discovers transitives lazily through the lex+rewrite pass.
-  Adding another CDN means writing a third `CdnProvider`; the resolver
-  itself doesn't change.
+  directly (with one round-trip per package to resolve ranges like `^4`
+  or `*` to a concrete `X.Y.Z`); [`composite-provider.ts`](./src/composite-provider.ts)
+  chains sub-providers in priority order — each spec is resolved by the
+  first sub-provider that can; later sub-providers only see what was
+  left unresolved. Adding another CDN means writing a fourth
+  `CdnProvider`; the resolver itself doesn't change.
 - [`cdn-resolver.ts`](./src/cdn-resolver.ts) — the orchestrator.
   `CdnResolver` is a builder (`setSiteKey`, `setPackageJson`,
   `setCdnProvider`, `addSource`, `setLogger`) terminated by one async
@@ -259,13 +262,14 @@ only absolute relative URLs.
   host page's loader.
 - **CDN provider is pluggable** via the `CdnProvider` interface. JSPM
   (`ga.jspm.io`) is the default; switch to esm.sh at runtime by appending
-  `#provider=esm.sh` to the host page URL. The JSPM provider builds a
-  complete transitive map up front; the esm.sh provider relies on the
-  CDN's server-side rewriting and the recursive lex-pass to fill out
-  `/external/`. Each provider has different package-coverage trade-offs:
-  JSPM tends to ship strict ESM with deduped transitives; esm.sh has
-  broader CJS-via-ESM coverage and accepts ranges like `*` or `^4`
-  resolved to the latest matching tag.
+  `#provider=esm.sh` to the host page URL, or chain them with
+  `#provider=jspm,esm.sh` for fall-through (JSPM first, esm.sh for any
+  spec JSPM can't index — useful e.g. for zod 4 which JSPM hasn't
+  ingested as of writing). Each provider has different package-coverage
+  trade-offs: JSPM tends to ship strict ESM with deduped transitives;
+  esm.sh has broader CJS-via-ESM coverage. The composite "first-wins"
+  semantics keep each dep subtree anchored to whichever sub-provider
+  resolved its root, so the two CDN worlds don't cross-contaminate.
 - **Fail-loud at site build.** Any prefetch failure rejects
   `resolveAndPrefetch()` atomically; no partial `external` FilesApi is
   returned to the caller.

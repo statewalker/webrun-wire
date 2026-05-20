@@ -3,14 +3,29 @@ import { SiteBuilder } from "@statewalker/webrun-site-builder";
 import { HostedSiteBuilder, newServerRunner } from "@statewalker/webrun-site-host";
 import type { CdnProvider } from "./cdn-provider.js";
 import { CdnResolver, type ResolverEvent } from "./cdn-resolver.js";
+import { CompositeProvider } from "./composite-provider.js";
 import { EsmShProvider } from "./esmsh-provider.js";
 import { JspmProvider } from "./jspm-provider.js";
 import { clientResources, serverResources, sharedPackageJson } from "./site.js";
 
+function makeProvider(name: string): CdnProvider {
+  switch (name) {
+    case "jspm":
+      return new JspmProvider();
+    case "esm.sh":
+      return new EsmShProvider();
+    default:
+      throw new Error(`Unknown CDN provider: "${name}" (known: jspm, esm.sh)`);
+  }
+}
+
 function pickProvider(): CdnProvider {
   const requested = new URLSearchParams(window.location.hash.slice(1)).get("provider");
-  if (requested === "esm.sh") return new EsmShProvider();
-  return new JspmProvider();
+  if (!requested) return new JspmProvider();
+  const names = requested.split(",").map((n) => n.trim()).filter(Boolean);
+  if (names.length === 0) return new JspmProvider();
+  if (names.length === 1) return makeProvider(names[0]);
+  return new CompositeProvider(names.map(makeProvider));
 }
 
 const logEl = document.querySelector<HTMLDivElement>("#log");
@@ -61,7 +76,10 @@ try {
   const serverFiles = await recordToFilesApi(serverResources);
 
   const provider = pickProvider();
-  log(`CDN provider: ${provider.name} (toggle via #provider=jspm | #provider=esm.sh + reload)`);
+  log(
+    `CDN provider: ${provider.name} ` +
+      "(toggle via #provider=jspm | #provider=esm.sh | #provider=jspm,esm.sh + reload)",
+  );
   log("Running CdnResolver (lex + provider resolve + recursive prefetch)…");
   const t0 = performance.now();
   const { outputs, external, manifest } = await new CdnResolver()

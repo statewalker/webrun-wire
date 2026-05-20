@@ -43,13 +43,32 @@ export class JspmProvider implements CdnProvider {
       if (installs.has(key)) continue;
       installs.set(key, sub === "" ? { target } : { target, subpath: `.${sub}` as `./${string}` });
     }
+    // Per-spec resilience: if JSPM can't install one (e.g. zod@4 isn't
+    // indexed in JSPM's CDN as of writing), we want to skip it rather
+    // than fail the whole batch. The composite provider relies on this
+    // to fall through to the next CDN.
     for (const inst of installs.values()) {
-      await this.#generator.install(inst);
+      try {
+        await this.#generator.install(inst);
+      } catch (err) {
+        const subpath = inst.subpath ? inst.subpath.slice(1) : "";
+        console.warn(
+          `[JspmProvider] install failed for ${inst.target}${subpath}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
     const out = new Map<string, string>();
     for (const spec of specifiers) {
-      const url = this.#generator.resolve(spec, "https://demo.local/");
-      if (url) out.set(spec, url);
+      try {
+        const url = this.#generator.resolve(spec, "https://demo.local/");
+        if (url) out.set(spec, url);
+      } catch {
+        // resolve() throws if the spec was never installed — silently
+        // skip; the caller's composite chain (or the resolver's
+        // discovery check) decides what to do with the gap.
+      }
     }
     return out;
   }

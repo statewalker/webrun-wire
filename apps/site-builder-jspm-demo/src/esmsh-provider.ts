@@ -19,6 +19,11 @@ function packageNameOf(spec: string): string {
   return spec.split("/")[0];
 }
 
+function isConcreteVersion(v: string): boolean {
+  // SemVer X.Y.Z with optional pre-release / build suffix.
+  return /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(v);
+}
+
 /**
  * Provider backed by esm.sh. Resolution is URL-construction (no separate
  * install step); the recursive prefetch loop discovers transitive deps
@@ -35,19 +40,57 @@ export class EsmShProvider implements CdnProvider {
     deps: Record<string, string>,
     specifiers: Iterable<string>,
   ): Promise<Map<string, string>> {
+    // Pre-resolve every unique package to a concrete `X.Y.Z` version, so
+    // the /external/ path key is stable. esm.sh accepts ranges in URLs
+    // (`@*`, `@^4`, `@~3.23`) but they're not safe as cache keys.
+    const concreteVersions = new Map<string, string>();
+    const specList = [...specifiers];
+    const uniquePkgs = new Set<string>();
+    for (const spec of specList) uniquePkgs.add(packageNameOf(spec));
+    await Promise.all(
+      [...uniquePkgs].map(async (pkg) => {
+        const range = deps[pkg];
+        if (!range) return;
+        concreteVersions.set(pkg, await this.#resolveVersion(pkg, range));
+      }),
+    );
+
     const out = new Map<string, string>();
-    for (const spec of specifiers) {
+    for (const spec of specList) {
       const pkg = packageNameOf(spec);
-      const ver = deps[pkg];
+      const ver = concreteVersions.get(pkg);
       if (!ver) continue;
       const sub = spec.slice(pkg.length);
-      // Strip leading `^`/`~`/`>=` etc. — esm.sh accepts npm ranges, but
-      // a concrete pin is more reliable. If the range is `*`, fall back
-      // to "latest" via no version segment.
-      const versionSegment = ver === "*" ? "" : `@${ver}`;
-      out.set(spec, `https://esm.sh/${pkg}${versionSegment}${sub}`);
+      out.set(spec, `https://esm.sh/${pkg}@${ver}${sub}`);
     }
     return out;
+  }
+
+  async #resolveVersion(pkg: string, range: string): Promise<string> {
+    if (isConcreteVersion(range)) return range;
+    // GET https://esm.sh/<pkg>[@<range>] returns a tiny JS entry whose body
+    // references the resolved version path. We pluck `<pkg>@<X.Y.Z>` out
+    // of that body. esm.sh accepts both `*` (encoded as no version
+    // segment) and any npm range.
+    const url = range === "*"
+      ? `https://esm.sh/${pkg}`
+      : `https://esm.sh/${pkg}@${range}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `esm.sh could not resolve ${pkg}@${range}: HTTP ${res.status} ${res.statusText}`,
+      );
+    }
+    const body = await res.text();
+    const escapedPkg = pkg.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+    const re = new RegExp(`${escapedPkg}@(\\d+\\.\\d+\\.\\d+(?:[-+][\\w.-]+)?)`);
+    const m = re.exec(body);
+    if (!m) {
+      throw new Error(
+        `esm.sh response for ${pkg}@${range} did not embed a concrete version: ${body.slice(0, 200)}…`,
+      );
+    }
+    return m[1];
   }
 
   resolveSpecifier(specifier: string, _parentUrl: string): string | null {
