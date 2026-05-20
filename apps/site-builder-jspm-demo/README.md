@@ -213,22 +213,32 @@ The pipeline lives in four single-file modules under `src/`:
   is the path-arithmetic helper that produces minimal `./` / `../`-
   prefixed paths. The module re-exports the lexer's `init` promise; the
   caller awaits it once before invoking the other functions.
-- [`jspm-resolver.ts`](./src/jspm-resolver.ts) — the orchestrator.
-  `JspmResolver` is a builder (`setSiteKey`, `setPackageJson`,
-  `addSource`) terminated by one async method
-  `resolveAndPrefetch(): Promise<ResolveOutput>`. It (1) transpiles every
-  source script via `transformSource`, (2) collects bare specifiers via
-  `discoverSpecifiers`, (3) validates each against the source
-  `package.json`, (4) installs each `(package, subpath)` pair into a
-  `@jspm/generator` instance, (5) walks the generator's `getMap()` URLs
-  in a fixed-point prefetch loop with recursive `rewriteImports` against
-  CDN responses, (6) rewrites each first-party file with the same lex
-  pass, and (7) emits the resolution manifest.
+- [`cdn-provider.ts`](./src/cdn-provider.ts) — the `CdnProvider` interface.
+  Two implementations ship: [`jspm-provider.ts`](./src/jspm-provider.ts)
+  uses `@jspm/generator` to compute the full transitive map up front;
+  [`esmsh-provider.ts`](./src/esmsh-provider.ts) constructs `esm.sh` URLs
+  directly and discovers transitives lazily through the lex+rewrite pass.
+  Adding another CDN means writing a third `CdnProvider`; the resolver
+  itself doesn't change.
+- [`cdn-resolver.ts`](./src/cdn-resolver.ts) — the orchestrator.
+  `CdnResolver` is a builder (`setSiteKey`, `setPackageJson`,
+  `setCdnProvider`, `addSource`, `setLogger`) terminated by one async
+  method `resolveAndPrefetch(): Promise<ResolveOutput>`. It (1) transpiles
+  every source script via `transformSource`, (2) collects bare specifiers
+  via `discoverSpecifiers`, (3) validates each against the source
+  `package.json`, (4) calls `provider.resolveTopLevel` to get a
+  `spec → URL` map, (5) walks those URLs in a fixed-point prefetch loop
+  with recursive `rewriteImports` against CDN responses (including
+  relative siblings inside each package), (6) rewrites each first-party
+  file with the same lex pass using the map, and (7) emits the resolution
+  manifest sidecar.
 - [`main.ts`](./src/main.ts) — the demo wiring. Reads
   `clientResources`/`serverResources`/`sharedPackageJson` from
-  [`site.ts`](./src/site.ts), runs `JspmResolver.resolveAndPrefetch()`,
-  hands the result to a standard `SiteBuilder` + `HostedSiteBuilder`.
-  Logs progress and surfaces the manifest into the host page.
+  [`site.ts`](./src/site.ts), picks a CDN provider from the URL hash
+  (`#provider=jspm` or `#provider=esm.sh`, default jspm), runs
+  `CdnResolver.resolveAndPrefetch()`, hands the result to a standard
+  `SiteBuilder` + `HostedSiteBuilder`. Logs every event (discover, fetch,
+  rewrite, manifest) into the host page.
 
 The host page realm dynamic-imports the rewritten server module via
 `newServerRunner` from `@statewalker/webrun-site-host` — unchanged from
@@ -247,9 +257,15 @@ only absolute relative URLs.
 - **Host page realm runs the server module.** Acceptable because the
   rewritten server bytes carry no bare specifiers — nothing pollutes the
   host page's loader.
-- **`ga.jspm.io` is the only backing CDN.** The `CdnProvider` abstraction
-  discussed during the grill is not implemented; lifting to a pluggable
-  interface is a future change.
+- **CDN provider is pluggable** via the `CdnProvider` interface. JSPM
+  (`ga.jspm.io`) is the default; switch to esm.sh at runtime by appending
+  `#provider=esm.sh` to the host page URL. The JSPM provider builds a
+  complete transitive map up front; the esm.sh provider relies on the
+  CDN's server-side rewriting and the recursive lex-pass to fill out
+  `/external/`. Each provider has different package-coverage trade-offs:
+  JSPM tends to ship strict ESM with deduped transitives; esm.sh has
+  broader CJS-via-ESM coverage and accepts ranges like `*` or `^4`
+  resolved to the latest matching tag.
 - **Fail-loud at site build.** Any prefetch failure rejects
   `resolveAndPrefetch()` atomically; no partial `external` FilesApi is
   returned to the caller.

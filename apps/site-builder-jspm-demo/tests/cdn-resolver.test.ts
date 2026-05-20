@@ -1,6 +1,6 @@
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { beforeAll, describe, expect, it } from "vitest";
-import { JspmResolver } from "../src/jspm-resolver.js";
+import { CdnResolver } from "../src/cdn-resolver.js";
 import { init } from "../src/lex-rewrite.js";
 import { transformSource } from "../src/script-transform.js";
 import { clientResources } from "../src/site.js";
@@ -37,7 +37,7 @@ describe("bare-specifier validation (no network)", () => {
     const sources = await makeFs({
       "/main.ts": 'import { something } from "left-pad";\nexport const x = something;',
     });
-    const resolver = new JspmResolver()
+    const resolver = new CdnResolver()
       .setSiteKey("test")
       .setPackageJson({ dependencies: { react: "18.3.1" } })
       .addSource("/client", sources);
@@ -51,7 +51,7 @@ describe("bare-specifier validation (no network)", () => {
     const sources = await makeFs({
       "/main.ts": 'import { z } from "zod/lib/types";\nexport const x = z;',
     });
-    const resolver = new JspmResolver()
+    const resolver = new CdnResolver()
       .setSiteKey("test")
       .setPackageJson({ dependencies: {} })
       .addSource("/client", sources);
@@ -63,12 +63,12 @@ describe("bare-specifier validation (no network)", () => {
 
   it("refuses to run without setPackageJson", async () => {
     const sources = await makeFs({ "/x.ts": "export const x = 1;" });
-    const resolver = new JspmResolver().setSiteKey("test").addSource("/client", sources);
+    const resolver = new CdnResolver().setSiteKey("test").addSource("/client", sources);
     await expect(resolver.resolveAndPrefetch()).rejects.toThrow(/setPackageJson.*not called/);
   });
 
   it("refuses to run without any source mount", async () => {
-    const resolver = new JspmResolver().setSiteKey("test").setPackageJson({ dependencies: {} });
+    const resolver = new CdnResolver().setSiteKey("test").setPackageJson({ dependencies: {} });
     await expect(resolver.resolveAndPrefetch()).rejects.toThrow(/at least one addSource/);
   });
 });
@@ -96,7 +96,7 @@ describe.concurrent("end-to-end with JSPM network (gated by JSPM_DEMO_NETWORK=1)
         "/api/index.ts":
           'import { z } from "zod";\nexport default async () => z.object({ name: z.string() });',
       });
-      const resolver = new JspmResolver()
+      const resolver = new CdnResolver()
         .setSiteKey("test")
         .setPackageJson({
           dependencies: { react: "18.3.1", "react-dom": "18.3.1", zod: "3.23.8" },

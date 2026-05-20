@@ -1,8 +1,17 @@
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SiteBuilder } from "@statewalker/webrun-site-builder";
 import { HostedSiteBuilder, newServerRunner } from "@statewalker/webrun-site-host";
-import { JspmResolver, type ResolverEvent } from "./jspm-resolver.js";
+import type { CdnProvider } from "./cdn-provider.js";
+import { CdnResolver, type ResolverEvent } from "./cdn-resolver.js";
+import { EsmShProvider } from "./esmsh-provider.js";
+import { JspmProvider } from "./jspm-provider.js";
 import { clientResources, serverResources, sharedPackageJson } from "./site.js";
+
+function pickProvider(): CdnProvider {
+  const requested = new URLSearchParams(window.location.hash.slice(1)).get("provider");
+  if (requested === "esm.sh") return new EsmShProvider();
+  return new JspmProvider();
+}
 
 const logEl = document.querySelector<HTMLDivElement>("#log");
 const previewEl = document.querySelector<HTMLIFrameElement>("#preview");
@@ -30,9 +39,9 @@ async function recordToFilesApi(record: Record<string, string>): Promise<MemFile
 function formatResolverEvent(event: ResolverEvent): string {
   switch (event.kind) {
     case "discover":
-      return `discovered ${event.specifierCount} bare specifier(s) across ${event.mountCount} mount(s)`;
+      return `discovered ${event.specifierCount} bare specifier(s) across ${event.mountCount} mount(s) — provider: ${event.provider}`;
     case "install":
-      return `installing into JSPM generator: ${event.targets.join(", ")}`;
+      return `resolving via provider: ${event.targets.join(", ")}`;
     case "fetch-start":
       return `→ ${event.pkg}@${event.version}`;
     case "fetch-done":
@@ -51,11 +60,14 @@ try {
   const clientFiles = await recordToFilesApi(clientResources);
   const serverFiles = await recordToFilesApi(serverResources);
 
-  log("Running JspmResolver (lex + @jspm/generator + recursive prefetch)…");
+  const provider = pickProvider();
+  log(`CDN provider: ${provider.name} (toggle via #provider=jspm | #provider=esm.sh + reload)`);
+  log("Running CdnResolver (lex + provider resolve + recursive prefetch)…");
   const t0 = performance.now();
-  const { outputs, external, manifest } = await new JspmResolver()
+  const { outputs, external, manifest } = await new CdnResolver()
     .setSiteKey("jspm")
     .setPackageJson(JSON.parse(sharedPackageJson))
+    .setCdnProvider(provider)
     .addSource("/client", clientFiles)
     .addSource("/server", serverFiles)
     .setLogger((event) => log(formatResolverEvent(event)))

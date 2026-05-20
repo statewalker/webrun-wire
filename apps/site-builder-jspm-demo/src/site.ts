@@ -13,7 +13,7 @@ export const sharedPackageJson = JSON.stringify(
     dependencies: {
       react: "^18",
       "react-dom": "^18",
-      zod: "^3",
+      zod: "^4",
       leaflet: "^1.9",
       htl: "*",
       kysely: "*",
@@ -121,11 +121,14 @@ export const serverResources: Record<string, string> = {
   "/package.json": sharedPackageJson,
   "/api/index.ts": `// Typed (Request, env) -> Response handler. The dynamic import in
 // newServerRunner pulls this URL through the SW; the served bytes have
-// the \`zod\` bare specifier rewritten to a relative ../external/zod@<v>/
+// every bare specifier rewritten to a relative ../external/<pkg>@<v>/
 // path, so the host page realm runs it directly without an import map.
+//
+// With the esm.sh provider, this module also pulls Astro and zod 4 —
+// both fetched and mirrored into /external/ before the iframe mounts.
 import { z } from "zod";
-import * as Kyseley from "kysely";
-// import * as Astro from "astro";
+import * as Kysely from "kysely";
+import * as Astro from "astro";
 
 const querySchema = z.object({
   name: z.string().min(1, "name must be non-empty"),
@@ -151,12 +154,17 @@ export default async function handle(
     );
   }
   console.log("[jspm-demo] server env=", env, "name=", parsed.data.name);
-  console.log("[jspm-demo] Kysely version:", Kyseley);
-  // console.log("[jspm-demo] Astro", Astro);
+  console.log("[jspm-demo] Kysely exports:", Object.keys(Kysely).length, "names");
+  console.log("[jspm-demo] Astro exports:", Object.keys(Astro).length, "names");
   return Response.json({
     greeting: \`Hello, \${parsed.data.name}! (service=\${env.service})\`,
     receivedName: parsed.data.name,
     now: new Date().toISOString(),
+    libs: {
+      zod: "v4 (resolved via esm.sh when #provider=esm.sh)",
+      astroExports: Object.keys(Astro).slice(0, 5),
+      kyselyExports: Object.keys(Kysely).slice(0, 5),
+    },
   });
 }
 `,
