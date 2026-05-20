@@ -4,11 +4,13 @@ packages:
 
 catalog:
   "@biomejs/biome": ^2.4.12
+  "@jspm/generator": ^2.6.1
   "@statewalker/webrun-files": ^0.7.0
   "@statewalker/webrun-files-mem": ^0.7.2
   "@types/node": ^25.6.0
   "@vitest/coverage-v8": ^4.1.4
   "@ygoe/msgpack": ^1.0.3
+  es-module-lexer: ^2.0.0
   http-server: ^14.1.1
   idb-keyval: ^6.2.2
   pnpm: ^10.33.0

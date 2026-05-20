@@ -1,0 +1,30 @@
+{
+  "name": "@statewalker/site-builder-jspm-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo: bare-specifier imports in client and server source resolved in-browser via @jspm/generator and rewritten to a same-origin /external/ mount with relative URLs.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5175",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jspm/generator": "catalog:",
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:*",
+    "@statewalker/webrun-site-host": "workspace:*",
+    "es-module-lexer": "catalog:",
+    "sucrase": "catalog:"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-files": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
