@@ -17,7 +17,7 @@ export const sharedPackageJson = JSON.stringify(
       leaflet: "^1.9",
       htl: "*",
       kysely: "*",
-      astro: "*",
+      "@astrojs/compiler-rs": "*",
     },
   },
   null,
@@ -128,7 +128,7 @@ export const serverResources: Record<string, string> = {
 // both fetched and mirrored into /external/ before the iframe mounts.
 import { z } from "zod";
 import * as Kysely from "kysely";
-import * as Astro from "astro";
+import * as AstroCompiler from "@astrojs/compiler-rs";
 
 const querySchema = z.object({
   name: z.string().min(1, "name must be non-empty"),
@@ -155,14 +155,14 @@ export default async function handle(
   }
   console.log("[jspm-demo] server env=", env, "name=", parsed.data.name);
   console.log("[jspm-demo] Kysely exports:", Object.keys(Kysely).length, "names");
-  console.log("[jspm-demo] Astro exports:", Object.keys(Astro).length, "names");
+  console.log("[jspm-demo] @astrojs/compiler-rs exports:", Object.keys(AstroCompiler).length, "names");
   return Response.json({
     greeting: \`Hello, \${parsed.data.name}! (service=\${env.service})\`,
     receivedName: parsed.data.name,
     now: new Date().toISOString(),
     libs: {
       zod: "v4 (resolved via esm.sh when #provider=esm.sh)",
-      astroExports: Object.keys(Astro).slice(0, 5),
+      astroCompilerExports: Object.keys(AstroCompiler).slice(0, 5),
       kyselyExports: Object.keys(Kysely).slice(0, 5),
     },
   });
