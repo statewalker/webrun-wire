@@ -18,6 +18,7 @@ export const sharedPackageJson = JSON.stringify(
       htl: "*",
       kysely: "*",
       "@astrojs/compiler": "*",
+      "just-bash": "*",
     },
   },
   null,
@@ -129,6 +130,7 @@ export const serverResources: Record<string, string> = {
 import { z } from "zod";
 import * as Kysely from "kysely";
 import * as AstroCompiler from "@astrojs/compiler";
+// import * as justBash from "just-bash/browser";
 
 const querySchema = z.object({
   name: z.string().min(1, "name must be non-empty"),
@@ -155,7 +157,9 @@ export default async function handle(
   }
   console.log("[jspm-demo] server env=", env, "name=", parsed.data.name);
   console.log("[jspm-demo] Kysely exports:", Object.keys(Kysely).length, "names");
-  console.log("[jspm-demo] @astrojs/compiler-rs exports:", AstroCompiler);
+  console.log("[jspm-demo] @astrojs/compiler exports:", AstroCompiler);
+  // console.log("[jspm-demo] just-bash:", justBash);
+  console.log("[jspm-demo] server wired");
   return Response.json({
     greeting: \`Hello, \${parsed.data.name}! (service=\${env.service})\`,
     receivedName: parsed.data.name,
