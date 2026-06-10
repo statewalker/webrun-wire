@@ -36,3 +36,7 @@ coverage/
 # Test data
 test-data/
 tmp/
+
+# Work in progress (not yet tracked)
+packages/webrun-p2p-mesh/
+apps/p2p-demo/deploy/
