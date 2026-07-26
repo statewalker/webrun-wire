@@ -62,6 +62,18 @@ describe("http-stubs", () => {
     expect(await response.text()).toBe("pong");
   });
 
+  it("reconstructs a 204 null-body-status response without attaching a body", async () => {
+    // `new Response(body, { status: 204 })` throws — the client stub must emit a
+    // bodyless response for 204/205/304 (a plain REST `DELETE` returns 204).
+    const stub = newHttpClientStub(async () => ({
+      options: { status: 204, statusText: "No Content", headers: {} },
+      content: (async function* () {})(),
+    }));
+    const response = await stub(new Request("https://foo.bar/x", { method: "DELETE" }));
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+  });
+
   it("returns 404 when the transport resolves to undefined", async () => {
     const stub = newHttpClientStub(async () => undefined);
     const response = await stub(new Request("https://foo.bar/missing"));

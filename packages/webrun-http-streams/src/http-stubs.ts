@@ -28,6 +28,10 @@ export interface SerializedHttpEnvelope<Options> {
 
 export type HttpHandler = (request: Request) => Response | Promise<Response>;
 
+// Statuses that MUST NOT carry a body — `new Response(body, { status })` throws
+// for these (per the Fetch spec's "null body status" set).
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
 const REQUEST_FIELDS = [
   "url",
   "method",
@@ -71,7 +75,14 @@ export function newHttpClientStub(
 
     const responseOptions = result.options;
     const method = options.method;
-    if (method === "HEAD" || method === "OPTIONS") {
+    // `new Response(body, ...)` throws for null-body statuses (204/205/304), and
+    // HEAD/OPTIONS carry no body either — drain the (empty) content stream and
+    // emit a bodyless response.
+    if (
+      method === "HEAD" ||
+      method === "OPTIONS" ||
+      NULL_BODY_STATUSES.has(responseOptions.status)
+    ) {
       const returnable = result.content as AsyncIterable<Uint8Array> & { return?: () => unknown };
       await returnable.return?.();
       return new Response(null, responseOptions);
