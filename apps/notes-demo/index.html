@@ -8,10 +8,12 @@
       body { font-family: system-ui, sans-serif; margin: 1.5rem; }
       h1 { margin-top: 0; font-size: 1.25rem; }
       code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }
-      .panel { display: flex; gap: 1rem; margin-top: 1rem; }
-      iframe { flex: 1; height: 34rem; border: 1px solid #e5e5e5; border-radius: 0.25rem; }
+      /* Stack so the hosted app gets the full page width for its two-column UI,
+         with the pipeline log as a strip below it. */
+      .panel { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; }
+      iframe { width: 100%; height: 36rem; border: 1px solid #e5e5e5; border-radius: 0.25rem; }
       .log {
-        width: 24rem; border: 1px solid #e5e5e5; padding: 0.5rem 1rem;
+        max-height: 10rem; border: 1px solid #e5e5e5; padding: 0.5rem 1rem;
         font-family: ui-monospace, monospace; font-size: 0.8rem; overflow: auto;
         border-radius: 0.25rem;
       }

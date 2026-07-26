@@ -37,18 +37,23 @@ try {
   const lock = await deriveLock(workspace);
   log(`lock derived: ${JSON.stringify(lock)}`);
 
+  // Isolate external npm deps under `/deps/` while authored project files stay at
+  // `/~/` — the app lives at `<site>/~/client|server/…`, its dependencies at
+  // `<site>/deps/<pkg>@<ver>/…`, both served by the one module server.
   const server = newModuleServer({
     cache: new MemFilesApi(),
     project: workspace,
     target: "browser",
     lock,
+    depsPath: "/deps/",
   });
   log("module server ready");
 
   // `/api/*` (specific) must be registered before `/*` (catch-all → module
-  // server); SiteBuilder matches by URLPattern over the whole pathname, so the
-  // patterns carry a `*`. The server runner dynamic-imports the transpiled
-  // server entry at its module-server URL and passes the workspace as `env.data`.
+  // server, which serves both `/~/…` project files and `/deps/…` packages).
+  // SiteBuilder matches by URLPattern over the whole pathname, so the patterns
+  // carry a `*`. The server runner dynamic-imports the transpiled server entry at
+  // its module-server URL and passes the workspace as `env.data`.
   let baseUrl = "";
   const handler = new SiteBuilder()
     .setEndpoint(

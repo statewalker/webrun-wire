@@ -6,6 +6,7 @@
   "dependencies": {
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "marked": "15.0.4"
+    "marked": "15.0.4",
+    "lodash.debounce": "4.0.8"
   }
 }

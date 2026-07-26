@@ -22,8 +22,10 @@
     "@statewalker/webrun-site-host": "workspace:*"
   },
   "devDependencies": {
+    "@types/lodash.debounce": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "lodash.debounce": "catalog:",
     "marked": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
