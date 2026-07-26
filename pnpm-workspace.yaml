@@ -6,12 +6,18 @@ catalog:
   "@biomejs/biome": ^2.4.12
   "@jspm/generator": ^2.6.1
   "@statewalker/webrun-files": ^0.7.0
+  "@statewalker/webrun-files-browser": 0.7.0
   "@statewalker/webrun-files-mem": ^0.7.2
   "@statewalker/webrun-files-node": ^0.7.0
   "@types/node": ^25.6.0
+  "@types/react": ^18.3.12
+  "@types/react-dom": ^18.3.1
   "@vitest/coverage-v8": ^4.1.4
   "@ygoe/msgpack": ^1.0.3
   es-module-lexer: ^2.0.0
+  marked: ^15.0.4
+  react: ^18.3.1
+  react-dom: ^18.3.1
   http-server: ^14.1.1
   idb-keyval: ^6.2.2
   pnpm: ^10.33.0
