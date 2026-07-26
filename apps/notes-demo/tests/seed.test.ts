@@ -19,29 +19,32 @@ describe("seed mapping", () => {
 });
 
 describe("ensureWorkspace", () => {
-  it("seeds every payload file into an empty workspace", async () => {
+  it("seeds every payload file into an empty workspace and records the version", async () => {
     const files = new MemFilesApi();
-    await ensureWorkspace(files);
+    expect(await ensureWorkspace(files)).toBe(true);
     expect(await files.exists("/package.json")).toBe(true);
     expect(await files.exists("/server/index.ts")).toBe(true);
     expect(await files.exists("/client/main.tsx")).toBe(true);
+    expect(await files.exists("/.seed-version")).toBe(true);
   });
 
-  it("is a no-op when /package.json already exists", async () => {
+  it("is a no-op (and leaves source edits intact) when the version already matches", async () => {
     const files = new MemFilesApi();
-    await writeText(files, "/package.json", '{"existing":true}');
-    await ensureWorkspace(files);
-    // Untouched: our marker manifest is still there, no payload file written.
-    expect(await readText(files, "/package.json")).toBe('{"existing":true}');
-    expect(await files.exists("/server/index.ts")).toBe(false);
+    expect(await ensureWorkspace(files)).toBe(true);
+    await writeText(files, "/client/main.tsx", "// user tweak");
+    expect(await ensureWorkspace(files)).toBe(false); // same seed → skip
+    expect(await readText(files, "/client/main.tsx")).toBe("// user tweak");
   });
 
-  it("preserves a pre-existing /data note (never touches /data), but still seeds", async () => {
+  it("re-seeds source when the payload version changes, preserving /data", async () => {
     const files = new MemFilesApi();
-    await writeText(files, "/data/notes/keep.md", "kept body");
-    // No /package.json yet → seeding runs, but /data is left intact.
-    await ensureWorkspace(files);
-    expect(await readText(files, "/data/notes/keep.md")).toBe("kept body");
-    expect(await files.exists("/package.json")).toBe(true);
+    const v1 = { "/package.json": "{}", "/client/main.tsx": "v1" };
+    expect(await ensureWorkspace(files, v1)).toBe(true);
+    await writeText(files, "/data/notes/keep.md", "kept body"); // user note
+
+    const v2 = { "/package.json": "{}", "/client/main.tsx": "v2 CHANGED" };
+    expect(await ensureWorkspace(files, v2)).toBe(true); // different version → re-seed
+    expect(await readText(files, "/client/main.tsx")).toBe("v2 CHANGED"); // source refreshed
+    expect(await readText(files, "/data/notes/keep.md")).toBe("kept body"); // /data untouched
   });
 });

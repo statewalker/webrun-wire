@@ -31,8 +31,8 @@ try {
   const workspace = await createWorkspace(kind);
   log(`storage backend: ${kind}`);
 
-  await ensureWorkspace(workspace);
-  log("workspace seeded");
+  const seeded = await ensureWorkspace(workspace);
+  log(seeded ? "workspace seeded" : "workspace source up to date");
 
   const lock = await deriveLock(workspace);
   log(`lock derived: ${JSON.stringify(lock)}`);
