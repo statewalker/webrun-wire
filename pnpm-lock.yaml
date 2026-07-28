@@ -16,7 +16,7 @@ catalogs:
       specifier: ^0.7.0
       version: 0.7.0
     '@statewalker/webrun-files-browser':
-      specifier: 0.7.0
+      specifier: ^0.7.0
       version: 0.7.0
     '@statewalker/webrun-files-mem':
       specifier: ^0.7.2
