@@ -284,6 +284,35 @@ runtimes — loadable via classic `importScripts(...)`.
 
 Via [Changesets](./PUBLISHING.md).
 
+## Transport adapters
+
+Each adapter binds the `webrun-streams` `Duplex`/`ByteChannel` seam to a concrete
+transport, so the same handler code runs over any of them:
+
+| Package | Transport |
+| --- | --- |
+| [`@statewalker/webrun-streams-ws`](packages/webrun-streams-ws) | WebSocket. |
+| [`@statewalker/webrun-streams-webrtc`](packages/webrun-streams-webrtc) | WebRTC data channels. |
+| [`@statewalker/webrun-streams-peerjs`](packages/webrun-streams-peerjs) | PeerJS. |
+| [`@statewalker/webrun-streams-libp2p`](packages/webrun-streams-libp2p) | libp2p. |
+| [`@statewalker/webrun-streams-port`](packages/webrun-streams-port) | `MessagePort` — workers, iframes, in-process pipes. |
+| [`@statewalker/webrun-streams-conformance`](packages/webrun-streams-conformance) | The shared conformance suite every adapter above must pass. |
+
+## Cross-repo dependencies
+
+This repository depends on:
+
+| Repository | Packages used |
+| --- | --- |
+| [`webrun-files`](https://github.com/statewalker/webrun-files) | `@statewalker/webrun-files`, `@statewalker/webrun-files-mem` |
+
+**Depended on by:** [`statewalker-workbench`](https://github.com/statewalker/statewalker-workbench) (`@statewalker/webrun-site-builder`, `@statewalker/webrun-site-host`); [`webrun-vcs`](https://github.com/statewalker/webrun-vcs) (`@statewalker/webrun-http-streams`, `@statewalker/webrun-streams`, `@statewalker/webrun-streams-livekit`, `@statewalker/webrun-streams-signaling`).
+
+Cross-repo dependencies are declared `workspace:*` rather than `catalog:`. This is
+deliberate: turbo derives its task graph from `workspace:` specifiers and does **not**
+resolve `catalog:`, so a `catalog:` cross-repo dependency is invisible to the scheduler
+and its consumer can be built before it.
+
 ## License
 
 MIT © statewalker
