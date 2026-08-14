@@ -34,7 +34,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-files-mem": "workspace:*",
     "@statewalker/webrun-http-browser": "workspace:*",
     "@statewalker/webrun-site-builder": "workspace:*"
   },
@@ -42,7 +42,7 @@
     "@statewalker/webrun-files": "^0.7.0"
   },
   "devDependencies": {
-    "@statewalker/webrun-files": "catalog:",
+    "@statewalker/webrun-files": "workspace:*",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
