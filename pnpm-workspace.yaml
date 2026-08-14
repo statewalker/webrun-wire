@@ -3,33 +3,33 @@ packages:
   - "apps/*"
 
 catalog:
-  "@biomejs/biome": ^2.4.12
-  "@jspm/generator": ^2.6.1
+  "@biomejs/biome": ^2.5.8
+  "@jspm/generator": ^2.16.3
   "@statewalker/webrun-files": ^0.7.0
-  "@statewalker/webrun-files-browser": ^0.7.0
+  "@statewalker/webrun-files-browser": ^0.7.2
   "@statewalker/webrun-files-mem": ^0.7.2
-  "@statewalker/webrun-files-node": ^0.7.0
-  "@types/node": ^25.6.0
+  "@statewalker/webrun-files-node": ^0.7.2
+  "@types/node": ^26.2.0
   "@types/lodash.debounce": ^4.0.9
-  "@types/react": ^18.3.12
-  "@types/react-dom": ^18.3.1
-  "@vitest/coverage-v8": ^4.1.4
+  "@types/react": ^19.2.18
+  "@types/react-dom": ^19.2.4
+  "@vitest/coverage-v8": ^4.1.10
   "@ygoe/msgpack": ^1.0.3
-  es-module-lexer: ^2.0.0
-  marked: ^15.0.4
-  react: ^18.3.1
-  react-dom: ^18.3.1
+  es-module-lexer: ^2.3.1
+  marked: ^18.0.9
+  react: ^19.2.8
+  react-dom: ^19.2.8
   http-server: ^14.1.1
-  idb-keyval: ^6.2.2
+  idb-keyval: ^6.3.0
   "lodash.debounce": ^4.0.8
-  pnpm: ^10.33.0
+  pnpm: ^11.21.0
   rimraf: ^6.1.3
-  rolldown: ^1.0.0-rc.16
+  rolldown: ^1.2.4
   sucrase: ^3.35.1
-  tsdown: ^0.21.9
-  tsx: ^4.21.0
-  turbo: ^2.9.6
-  typescript: ^6.0.3
-  vite: ^8.0.9
-  vite-plugin-static-copy: ^4.1.0
-  vitest: ^4.1.4
+  tsdown: ^0.22.14
+  tsx: ^4.23.12
+  turbo: ^2.10.9
+  typescript: ^7.0.2
+  vite: ^8.2.1
+  vite-plugin-static-copy: ^4.1.1
+  vitest: ^4.1.10
