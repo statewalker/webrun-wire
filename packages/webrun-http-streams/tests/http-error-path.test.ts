@@ -1,10 +1,81 @@
-import type { Duplex } from "@statewalker/webrun-streams";
+import { type ByteChannel, type Duplex, emulateMux } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { jsonEnvelopeCodec } from "../src/envelope.js";
 import { PEER_ERROR_HEADER } from "../src/http-data.js";
 import { httpCodec } from "../src/http1/index.js";
 import { fetchOverDuplex, httpFetch, httpServe, serveFetchOverDuplex } from "../src/index.js";
 import type { DecodedResponse, MessageCodec, RequestEnvelope } from "../src/message.js";
+
+/** A pair of in-memory `ByteChannel`s piped to each other, for `emulateMux`. */
+function makePipePair(): { a: ByteChannel; b: ByteChannel } {
+  let closedResolveA!: () => void;
+  let closedResolveB!: () => void;
+  const closedA = new Promise<void>((r) => {
+    closedResolveA = r;
+  });
+  const closedB = new Promise<void>((r) => {
+    closedResolveB = r;
+  });
+  const queueA: Uint8Array[] = [];
+  const queueB: Uint8Array[] = [];
+  let pendingA: ((value: IteratorResult<Uint8Array>) => void) | null = null;
+  let pendingB: ((value: IteratorResult<Uint8Array>) => void) | null = null;
+  let closed = false;
+
+  const deliverTo = (target: "a" | "b", bytes: Uint8Array): void => {
+    if (closed) return;
+    if (target === "a") {
+      if (pendingA) {
+        const r = pendingA;
+        pendingA = null;
+        r({ value: bytes, done: false });
+      } else queueA.push(bytes);
+    } else {
+      if (pendingB) {
+        const r = pendingB;
+        pendingB = null;
+        r({ value: bytes, done: false });
+      } else queueB.push(bytes);
+    }
+  };
+
+  const recvOf = (target: "a" | "b"): AsyncIterable<Uint8Array> => ({
+    [Symbol.asyncIterator]() {
+      return {
+        next(): Promise<IteratorResult<Uint8Array>> {
+          const queue = target === "a" ? queueA : queueB;
+          if (queue.length > 0) {
+            const value = queue.shift() as Uint8Array;
+            return Promise.resolve({ value, done: false });
+          }
+          if (closed) {
+            return Promise.resolve({ value: undefined, done: true } as IteratorResult<Uint8Array>);
+          }
+          return new Promise<IteratorResult<Uint8Array>>((resolve) => {
+            if (target === "a") pendingA = resolve;
+            else pendingB = resolve;
+          });
+        },
+      };
+    },
+  });
+
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    pendingA?.({ value: undefined, done: true } as IteratorResult<Uint8Array>);
+    pendingB?.({ value: undefined, done: true } as IteratorResult<Uint8Array>);
+    pendingA = null;
+    pendingB = null;
+    closedResolveA();
+    closedResolveB();
+  };
+
+  return {
+    a: { send: (bytes) => deliverTo("b", bytes), recv: recvOf("a"), closed: closedA, close },
+    b: { send: (bytes) => deliverTo("a", bytes), recv: recvOf("b"), closed: closedB, close },
+  };
+}
 
 const loopback =
   (handler: Duplex): Duplex =>
@@ -128,6 +199,44 @@ describe("peer-error response body is actually drained", () => {
       }),
     ).rejects.toThrow(/boom/);
     expect(released.value).toBe(true);
+  });
+
+  it("does not leak a mux stream slot per peer-error call", async () => {
+    // On a mux transport, a `Duplex` call is backed by a stream-table entry
+    // freed only when the consumer's output generator is driven to
+    // completion or explicitly `.return()`-ed — see the comment on
+    // `throwIfPeerError` in `src/http-data.ts`. Draining the response *body*
+    // alone (the fix above) doesn't do that: the body is a separate,
+    // lower-level generator that stops pulling from the wire as soon as it
+    // has what it needs, well short of the `Duplex` call's own generator
+    // reaching `{done: true}`. Left unreturned, each peer-error call leaks
+    // one stream-table slot, forever, until the mux itself is closed — an
+    // availability bug independent of body size.
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 2 });
+    const server = emulateMux(b, { side: "responder" });
+    server.serve(
+      httpServe(async () => {
+        throw new Error("boom");
+      }),
+    );
+
+    // Exhaust maxStreams worth of peer-error calls.
+    for (let i = 0; i < 2; i++) {
+      await expect(
+        httpFetch(client.call, { url: "http://h.test/x", method: "GET", headers: [] }),
+      ).rejects.toThrow(/boom/);
+    }
+
+    // A further call must still reach the peer (and get the real error),
+    // not fail locally because every slot is still occupied by a call that
+    // already finished.
+    await expect(
+      httpFetch(client.call, { url: "http://h.test/x", method: "GET", headers: [] }),
+    ).rejects.toThrow(/boom/);
+
+    await client.close();
+    await server.close();
   });
 });
 

@@ -75,10 +75,37 @@ function encodeErrorResponse(
   );
 }
 
-async function throwIfPeerError(result: HttpFetchResult): Promise<void> {
+/**
+ * `output` is the `Duplex` call's own generator — one logical call, per the
+ * `Duplex` contract in `@statewalker/webrun-streams`: "Consumer `.return()`
+ * on the output → producer's `finally` runs." On a mux transport
+ * (`emulateMux`), that `finally` is what frees the stream-table slot; skip it
+ * and every peer-error response leaks one slot, unboundedly, until the mux
+ * itself is exhausted (`maxStreams` reached, every further call rejected).
+ *
+ * Cancelling `output` here — not inside the codec's own decode logic — is
+ * deliberate. `codec.decodeResponse` already pulled from `output` to read the
+ * head before this function runs, so unlike the body case above there's no
+ * suspended-start no-op to worry about. And it's safe specifically *because*
+ * this is the client's own response-only generator: the request was already
+ * fully sent before we got here, so there is nothing left to write on it.
+ * The equivalent is NOT safe inside `src/http1/decode.ts`'s `ByteReader` —
+ * that code also runs when a caller wires `codec.decodeRequest`/
+ * `decodeResponse` directly onto a raw bidirectional socket (see
+ * `tests/http1-node-interop.test.ts`), where the *same* object is read from
+ * and then written back to (a server reads the request, then replies on the
+ * same socket); cancelling the read side there tears down the whole
+ * connection out from under the pending write. That was tried and reverted —
+ * see the Task 11 report for the "socket hang up" failure it caused.
+ */
+async function throwIfPeerError(
+  result: HttpFetchResult,
+  output: AsyncGenerator<Uint8Array>,
+): Promise<void> {
   const found = result.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
   if (!found) return;
   await discard(result.body);
+  await output.return?.(undefined);
   let payload: { message: string };
   try {
     payload = JSON.parse(found[1]) as { message: string };
@@ -105,7 +132,7 @@ export async function httpFetch(
   const codec = options.codec ?? defaultCodec;
   const output = call(codec.encodeRequest(env, body));
   const result = await codec.decodeResponse(output, { method: env.method });
-  await throwIfPeerError(result);
+  await throwIfPeerError(result, output);
   return result;
 }
 
