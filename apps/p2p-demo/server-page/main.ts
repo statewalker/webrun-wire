@@ -74,7 +74,7 @@ function buildSiteHandler(selfSynth: string): SiteHandler {
   <p>Group: <code>${GROUP_ID}</code></p>
   <ul>
     <li>Server peer is online.</li>
-    <li>Auto-discovery via gossipsub on topic <code>webrun/${GROUP_ID}/announce</code>.</li>
+    <li>Auto-discovery via relay-mediated announce for group <code>${GROUP_ID}</code>.</li>
     <li>This page is the second service announced by the server.</li>
   </ul>
 </body></html>`;
@@ -296,7 +296,9 @@ async function start(): Promise<void> {
   // circuit reservation, falls off the group, and is invisible to clients
   // until a manual reload. Poll every 10 s and re-dial if there's no
   // open connection to the relay peer.
-  const relayPeerIdStr = multiaddr(relayMultiaddr).getPeerId();
+  const relayPeerIdStr = multiaddr(relayMultiaddr)
+    .getComponents()
+    .find((c) => c.name === "p2p")?.value;
   if (relayPeerIdStr) {
     const relayPid = peerIdFromString(relayPeerIdStr);
     setInterval(async () => {
@@ -315,7 +317,7 @@ async function start(): Promise<void> {
   }
 
   // Join the group and announce both services. Render the live peers list.
-  const group = await joinGroup({ node, groupId: GROUP_ID });
+  const group = await joinGroup({ node, groupId: GROUP_ID, relay: multiaddr(relayMultiaddr) });
   for (const svc of SERVICES) group.announceService(svc);
   renderMyServices();
   renderPeers(group.state);
