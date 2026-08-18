@@ -1,4 +1,5 @@
-import type { Multiaddr } from "@multiformats/multiaddr";
+import { peerIdFromString } from "@libp2p/peer-id";
+import { multiaddr, type Multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p } from "libp2p";
 import { discoveryClient } from "./discovery.js";
 import { type PeerEntry, type Service, type ServiceAnnouncement } from "./announcement.js";
@@ -75,6 +76,39 @@ export async function joinGroup({ node, groupId, relay }: JoinGroupParams): Prom
     if (changed) emitChange();
   };
 
+  // Background connection pre-warming. Discovery only tells us who is in
+  // the group; it doesn't itself open anything. Without this, the first
+  // fetch to a newly discovered peer pays the full cold
+  // WS→relay→circuit-reservation→WebRTC-upgrade path on click. This
+  // restores the auto-dial warming libp2p's connection manager used to do
+  // for free — we dial the same `/p2p-circuit/webrtc/p2p/<peerId>` form
+  // `getOrOpenHandle` uses, just proactively and in the background.
+  // Best-effort only: a peer that's briefly unreachable must not disturb
+  // discovery, so failures are swallowed and never surfaced or rethrown.
+  const warming = new Set<string>();
+  const preWarmPeers = (): void => {
+    for (const peerId of state.keys()) {
+      if (peerId === selfPeerId || warming.has(peerId)) continue;
+      let pid;
+      try {
+        pid = peerIdFromString(peerId);
+      } catch {
+        continue; // malformed peer id — nothing to dial.
+      }
+      if (node.getConnections(pid).some((c) => c.status === "open")) continue;
+      warming.add(peerId);
+      const target = multiaddr(`${relay.toString()}/p2p-circuit/webrtc/p2p/${peerId}`);
+      void node
+        .dial(target)
+        .catch(() => {
+          /* best-effort pre-warm; the click-time dial in getOrOpenHandle retries */
+        })
+        .finally(() => {
+          warming.delete(peerId);
+        });
+    }
+  };
+
   const announceCurrent = async (extra?: Partial<ServiceAnnouncement>): Promise<void> => {
     try {
       const replies = await client.announce(buildAnnouncement(extra));
@@ -82,6 +116,8 @@ export async function joinGroup({ node, groupId, relay }: JoinGroupParams): Prom
         `[joinGroup] announce OK group=${groupId} services=${services.length} peers=${replies.length}`,
       );
       applyReplies(replies);
+      // No point pre-warming connections on the way out.
+      if (extra?.leave !== true) preWarmPeers();
     } catch (err) {
       console.warn(`[joinGroup] announce FAIL group=${groupId} err=${(err as Error).message}`);
     }

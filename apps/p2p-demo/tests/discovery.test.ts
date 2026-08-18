@@ -142,12 +142,13 @@ describe("relay-mediated discovery", () => {
     await Promise.allSettled([relay.stop(), a.stop()]);
   });
 
-  it("still returns groupCount to 0 after peers expire when selfServices is configured", async () => {
+  it("still returns groupCount to 0 after peers expire when selfServices is configured, and a fresh announce afterward sees no resurrected peers", async () => {
     const relay = await mk(true);
+    const hubServices = [{ id: "hub", kind: "presence-hub" as const, title: "Hub" }];
     const stop = await serveDiscovery(relay, {
       ttlMs: 150,
       sweepMs: 25,
-      selfServices: [{ id: "hub", kind: "presence-hub", title: "Hub" }],
+      selfServices: hubServices,
     });
     const addr = relay.getMultiaddrs()[0];
     if (addr == null) throw new Error("relay has no listen address");
@@ -164,6 +165,31 @@ describe("relay-mediated discovery", () => {
 
     await new Promise((r) => setTimeout(r, 400));
     expect(stop.groupCount).toBe(0);
+
+    // A test that only checks groupCount returning to 0 would also pass
+    // against a buggy variant that persists the self entry into GroupState
+    // but happens not to be re-touched during the wait above — it decays
+    // alongside the real peer and the count still lands on 0 for the wrong
+    // reason. Close that gap: announce once more into one of the
+    // now-deleted groups (re-using peers[0], the peer that originally
+    // announced into "group-0" and then went stale) and inspect what
+    // comes back.
+    const [p0] = peers;
+    if (p0 == null) throw new Error("expected at least one peer");
+    const seenAfterExpiry = await discoveryClient(p0, addr, "group-0").announce(
+      ann(p0, "svc-fresh"),
+    );
+
+    // Only the synthetic self entry should appear — not the announcer
+    // itself (excluded as the proven announcer), and nothing resurrected
+    // from before eviction (this same peer's own prior entry in this group
+    // included, since the group was fully deleted and rebuilt from empty).
+    expect(seenAfterExpiry.map((x) => x.peerId)).toEqual([relay.peerId.toString()]);
+    expect(seenAfterExpiry[0]?.services).toEqual(hubServices);
+    // Exactly the one group this announce just recreated — the other four
+    // stay gone, proving groupCount tracks live groups, not a hub-entry
+    // side effect.
+    expect(stop.groupCount).toBe(1);
 
     await stop();
     await Promise.allSettled([relay.stop(), ...peers.map((p) => p.stop())]);
