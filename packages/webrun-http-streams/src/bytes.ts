@@ -90,6 +90,11 @@ export class ByteReader {
    * One CRLF-terminated line, without the CRLF. A bare LF is rejected: real
    * peers always send CRLF, and tolerating a bare LF is precisely the lenience
    * that lets request smuggling through a proxy pair.
+   *
+   * The `maxBytes` bound is best-effort: it only rejects a line if the check
+   * happens to run before the line is fully buffered. A line already sitting in
+   * the buffer bypasses the check. Callers needing a hard per-line limit or
+   * aggregate bounds must keep their own running total.
    */
   async readLine(maxBytes: number): Promise<Uint8Array> {
     let searched = 0;

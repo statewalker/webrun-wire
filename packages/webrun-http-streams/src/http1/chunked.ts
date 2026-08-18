@@ -39,10 +39,13 @@ export async function* decodeChunked(
     const sizeLine = decodeLatin1(await reader.readLine(maxLineBytes));
     const semicolon = sizeLine.indexOf(";"); // chunk extensions: accepted, ignored
     const sizeText = semicolon === -1 ? sizeLine : sizeLine.slice(0, semicolon);
-    if (!/^[0-9a-fA-F]{1,13}$/.test(sizeText)) {
+    if (!/^[0-9a-fA-F]{1,32}$/.test(sizeText)) {
       throw new HttpParseError(`invalid chunk size: ${JSON.stringify(sizeLine)}`);
     }
     const size = Number.parseInt(sizeText, 16);
+    if (!Number.isSafeInteger(size)) {
+      throw new HttpParseError(`chunk size is too large: ${JSON.stringify(sizeLine)}`);
+    }
 
     if (size === 0) {
       // Trailer section: legal input, read and discarded, never re-emitted.
@@ -54,6 +57,9 @@ export async function* decodeChunked(
         }
         const lineBytes = await reader.readLine(remaining);
         used += lineBytes.byteLength + 2;
+        if (used > maxLineBytes) {
+          throw new HttpParseError(`trailer section exceeds ${maxLineBytes} bytes`);
+        }
         if (lineBytes.byteLength === 0) break;
       }
       return;

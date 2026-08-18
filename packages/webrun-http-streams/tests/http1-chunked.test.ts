@@ -91,4 +91,12 @@ describe("decodeChunked", () => {
   it("rejects extension-only chunk size", async () => {
     await expect(unwire(";name=value\r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/invalid chunk size/);
   });
+
+  it("accepts hex chunk size with leading zeros", async () => {
+    expect(await unwire("00000000000005\r\nhello\r\n0\r\n\r\n")).toBe("hello");
+  });
+
+  it("rejects chunk size that exceeds safe integer", async () => {
+    await expect(unwire("fffffffffffffff\r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/too large/);
+  });
 });
