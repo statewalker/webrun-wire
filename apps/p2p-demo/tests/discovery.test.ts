@@ -90,4 +90,24 @@ describe("relay-mediated discovery", () => {
     await stop();
     await Promise.allSettled([relay.stop(), a.stop(), b.stop(), c.stop()]);
   });
+
+  it("does not leak empty group entries after peers expire", async () => {
+    const relay = await mk(true);
+    const stop = await serveDiscovery(relay, { ttlMs: 150, sweepMs: 25 });
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    const peers = await Promise.all(Array.from({ length: 5 }, () => mk(false)));
+    await Promise.all(
+      peers.map((p, i) => discoveryClient(p, addr, `group-${i}`).announce(ann(p, `svc-${i}`))),
+    );
+
+    expect(stop.groupCount).toBe(5);
+
+    await new Promise((r) => setTimeout(r, 400));
+    expect(stop.groupCount).toBe(0);
+
+    await stop();
+    await Promise.allSettled([relay.stop(), ...peers.map((p) => p.stop())]);
+  });
 });
