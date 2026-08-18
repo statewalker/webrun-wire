@@ -49,6 +49,25 @@ export function createBrowserLibp2pNode({
     transports: [webSockets(), webRTC(), circuitRelayTransport()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
+    // libp2p 3.x's browser-only default connection gater denies dialling
+    // BOTH insecure `ws://` addresses and private/loopback addresses (see
+    // `libp2p/dist/src/config/connection-gater.browser.js`). This demo's
+    // relay is exactly that: `ws://127.0.0.1:<port>` in `relay/server.ts`.
+    // With the default gater every dial the app makes — to the relay
+    // itself, and to every `${relayMultiaddr}/p2p-circuit/webrtc/p2p/...`
+    // peer address derived from it — is denied before any handshake, so
+    // discovery and mounting never work at all.
+    //
+    // This is deliberately permissive, and deliberately scoped to this
+    // demo: `createBrowserLibp2pNode` is only used by `client-page` and
+    // `server-page` to dial the local dev relay they're launched with.
+    // A real deployment (`apps/p2p-demo/deploy/`, once it exists) talks to
+    // a relay over `wss://` on a real DNS name, where libp2p's default
+    // gater posture — deny insecure ws, deny private addresses — is the
+    // correct one and must not be silently weakened the way it is here.
+    connectionGater: {
+      denyDialMultiaddr: async () => false,
+    },
     services: {
       identify: identify(),
     },
