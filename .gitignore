@@ -40,3 +40,14 @@ tmp/
 # Work in progress (not yet tracked)
 packages/webrun-p2p-mesh/
 apps/p2p-demo/deploy/
+
+# Lockfile. This repo is an umbrella workspace member: its cross-repo deps are
+# `workspace:*` on packages that live in OTHER repositories (webrun-files), so
+# `pnpm install` here can never resolve them — it fails with
+# ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. turbo.json likewise carries `extends: ["//"]`,
+# a nested-config form only valid under the umbrella root. Both are deliberate.
+# The authoritative lockfile is the umbrella's, which pins the whole cross-repo
+# closure; the umbrella branch additionally records this repo's exact SHA as a
+# gitlink. A lockfile here could not be regenerated, could not be used, and would
+# only drift into saying false things about the dependency set.
+pnpm-lock.yaml
