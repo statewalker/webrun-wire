@@ -1,14 +1,13 @@
-export type RequestEnvelope = {
-  url: string;
-  method: string;
-  headers: [string, string][];
-};
+import type {
+  ByteSource,
+  DecodedRequest,
+  DecodedResponse,
+  MessageCodec,
+  RequestEnvelope,
+  ResponseEnvelope,
+} from "./message.js";
 
-export type ResponseEnvelope = {
-  status: number;
-  statusText: string;
-  headers: [string, string][];
-};
+export type { RequestEnvelope, ResponseEnvelope } from "./message.js";
 
 const NEWLINE = 0x0a;
 const encoder = new TextEncoder();
@@ -114,3 +113,23 @@ function concatChunks(parts: Uint8Array[], totalLen: number): Uint8Array {
   }
   return out;
 }
+
+const OPEN_BRACE = 0x7b;
+
+/**
+ * The original wire format — `<JSON.stringify(envelope)>\n<body bytes…>` —
+ * expressed as a `MessageCodec`. Direction-agnostic: requests and responses
+ * serialise identically.
+ *
+ * Retained so a peer pair can be upgraded in either order; see ADR-0006.
+ */
+export const jsonEnvelopeCodec: MessageCodec = {
+  name: "json-envelope",
+  sniff: (byte: number): boolean => byte === OPEN_BRACE,
+  encodeRequest: (env: RequestEnvelope, body?: ByteSource) => encodeMessage(env, body),
+  encodeResponse: (env: ResponseEnvelope, body?: ByteSource) => encodeMessage(env, body),
+  decodeRequest: (input: ByteSource): Promise<DecodedRequest> =>
+    decodeMessage<RequestEnvelope>(input),
+  decodeResponse: (input: ByteSource): Promise<DecodedResponse> =>
+    decodeMessage<ResponseEnvelope>(input),
+};
