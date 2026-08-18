@@ -13,6 +13,9 @@ export const DISCOVERY_PROTOCOL = "/p2p-demo/discovery/1.0.0";
 const DEFAULT_TTL_MS = 15_000;
 const DEFAULT_SWEEP_MS = 1_000;
 
+const ENCODER = new TextEncoder();
+const DECODER = new TextDecoder();
+
 /** Length-prefixed frames so one stream carries N records. */
 function frame(payloads: Uint8Array[]): Uint8Array {
   const total = payloads.reduce((n, p) => n + 4 + p.length, 0);
@@ -60,13 +63,16 @@ async function collect(
 }
 
 /**
- * Relay side. Holds one flat `GroupState` and answers each announce with the
- * current catalogue (every other peer's last-known services). There is no
- * `groupId` on `ServiceAnnouncement` to key on — the relay serves a single
- * group per protocol instance, mirroring how `serveConnections` already
- * scopes one relay/protocol pair to one rendezvous point. The announcing
- * peer's identity comes from the Noise-proven `context.remotePeer`, never
- * from the payload.
+ * Relay side. Holds one `GroupState` per group id and answers each announce
+ * with that group's current catalogue (every other peer's last-known
+ * services in the *same* group). `ServiceAnnouncement` itself carries no
+ * `groupId` — that field lives only in the discovery envelope, one level
+ * above the announcement, the same way `joinGroup` scopes it at the pubsub
+ * topic layer rather than inside the message. The request envelope is
+ * exactly two length-prefixed records: the UTF-8 group id, then the
+ * `ServiceAnnouncement`; anything else is rejected rather than guessed at.
+ * The announcing peer's identity comes from the Noise-proven
+ * `context.remotePeer`, never from the payload.
  */
 export async function serveDiscovery(
   node: Libp2p,
@@ -74,23 +80,33 @@ export async function serveDiscovery(
 ): Promise<() => Promise<void>> {
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
   const sweepMs = opts.sweepMs ?? DEFAULT_SWEEP_MS;
-  const state: GroupState = new Map();
+  const groups = new Map<string, GroupState>();
 
   const sweep = setInterval(() => {
-    evictStale(state, Date.now(), ttlMs);
+    for (const state of groups.values()) evictStale(state, Date.now(), ttlMs);
   }, sweepMs);
 
   const stop = await serveConnections(
     { node, protocol: DISCOVERY_PROTOCOL },
     (context) =>
       async function* handle(input) {
-        const incoming = decodeAnnouncement(await collect(input));
+        const records = unframe(await collect(input));
+        if (records.length !== 2) return; // malformed envelope — reject, don't guess.
+        const [groupIdBytes, announcementBytes] = records;
+        if (groupIdBytes == null || announcementBytes == null) return;
+        const groupId = DECODER.decode(groupIdBytes);
+        const incoming = decodeAnnouncement(announcementBytes);
         if (incoming == null) return;
 
         // Trust the proven peer id, not the payload's claim.
         const proven = context.remotePeer.toString();
         const announcement: ServiceAnnouncement = { ...incoming, peerId: proven };
 
+        let state = groups.get(groupId);
+        if (state == null) {
+          state = new Map();
+          groups.set(groupId, state);
+        }
         if (announcement.leave === true) applyLeave(state, proven);
         else applyAnnouncement(state, announcement, Date.now());
         evictStale(state, Date.now(), ttlMs);
@@ -117,8 +133,9 @@ export async function serveDiscovery(
   };
 }
 
-/** Peer side. One `announce` == one stream == one round trip. */
-export function discoveryClient(node: Libp2p, relay: PeerId | Multiaddr) {
+/** Peer side. One `announce` == one stream == one round trip, scoped to one group. */
+export function discoveryClient(node: Libp2p, relay: PeerId | Multiaddr, groupId: string) {
+  const groupIdBytes = ENCODER.encode(groupId);
   return {
     async announce(a: ServiceAnnouncement): Promise<ServiceAnnouncement[]> {
       const { call, close } = await connect({
@@ -130,7 +147,7 @@ export function discoveryClient(node: Libp2p, relay: PeerId | Multiaddr) {
         const reply = await collect(
           call(
             (async function* () {
-              yield encodeAnnouncement(a);
+              yield frame([groupIdBytes, encodeAnnouncement(a)]);
             })(),
           ),
         );
