@@ -122,6 +122,61 @@ export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handle
   };
 };
 
+/** What the serving side knows about the connection a stream arrived on. */
+export interface ConnectionContext {
+  /**
+   * The peer id libp2p's Noise handshake proved for this connection. This is
+   * the only identity claim on the serving side that cannot be forged by the
+   * request payload.
+   */
+  remotePeer: PeerId;
+}
+
+/**
+ * Builds a handler for one inbound connection. Called once per stream, so the
+ * connection stays reachable in the returned Duplex's closure — `Duplex` is
+ * bytes-only (ADR-0004) and gains no new parameter.
+ */
+export type ServeConnectionsHandler = (context: ConnectionContext) => Duplex;
+
+/**
+ * Like `serve`, but the handler is built per inbound stream and is told which
+ * peer libp2p proved on that connection.
+ */
+export async function serveConnections(
+  { node, protocol }: ServeLibp2pParams,
+  makeHandler: ServeConnectionsHandler,
+): Promise<() => Promise<void>> {
+  const proto = protocol ?? DEFAULT_PROTOCOL;
+
+  const onStream = (stream: Stream, connection: Connection): void => {
+    void (async () => {
+      const handler = makeHandler({ remotePeer: connection.remotePeer });
+      const inputQueue = makeInputQueue();
+      const output = handler(inputQueue.iter());
+      try {
+        for await (const chunk of duplexOverStream(stream, output, {
+          onPeerInputEnd: (err) => inputQueue.done(err),
+        })) {
+          inputQueue.push(chunk);
+        }
+      } finally {
+        inputQueue.done();
+        await closeStream(stream);
+      }
+    })();
+  };
+
+  await node.handle(proto, onStream);
+
+  let torn = false;
+  return async () => {
+    if (torn) return;
+    torn = true;
+    await node.unhandle(proto);
+  };
+}
+
 interface InputQueue {
   iter(): AsyncGenerator<Uint8Array>;
   push(chunk: Uint8Array): void;
