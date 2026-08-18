@@ -102,6 +102,13 @@ export async function* duplexOverStream(
   try {
     // libp2p 3.x `Stream` is itself the readable `AsyncIterable` (it no
     // longer exposes a separate `.source`).
+    // INVARIANT: nothing may `await` between acquiring `stream` and the first pull
+    // below. In libp2p 3.x end-of-inbound is an EVENT ('remoteCloseWrite'), and the
+    // async iterator only subscribes on its first next(). Buffered payload bytes are
+    // re-dispatched on subscribe, but a 'remoteCloseWrite' delivered before we
+    // subscribe is lost and this loop would never end. Every current path from
+    // dialProtocol/onStream to here is microtask-only, so a socket FIN cannot
+    // interleave. Inserting an await above would break that.
     for await (const frame of parseFrames(stream)) {
       if (frame.type === TYPE_DATA) {
         yield frame.payload;
@@ -175,6 +182,17 @@ export async function closeStream(
     await stream.close({ signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const e = err instanceof Error ? err : new Error(String(err));
+    // The bound tripped (or close() otherwise failed): fall back to a hard
+    // abort so the caller is never left hanging. That abort sends a reset to
+    // the peer, silently truncating whatever was still in flight — this
+    // side must not report clean completion without a trace of that, per
+    // this project's own "silent failures deserve loud guards" rule. Not
+    // rethrown: closeStream is called from `finally` blocks, and throwing
+    // here would mask whatever error the caller was already unwinding from.
+    console.warn(
+      `[webrun-streams-libp2p] closeStream: graceful close of protocol ${stream.protocol} ` +
+        `did not settle within ${timeoutMs}ms, aborting instead (peer may see truncated data): ${e.message}`,
+    );
     try {
       stream.abort(e);
     } catch {

@@ -6,8 +6,6 @@ import { createLibp2p } from "libp2p";
 import { describe, expect, it } from "vitest";
 import { connect, serveConnections } from "../src/index.js";
 
-const enabled = process.env.WEBRUN_STREAMS_LIBP2P === "1";
-
 async function node(listen: boolean): Promise<Libp2p> {
   return createLibp2p({
     addresses: listen ? { listen: ["/ip4/127.0.0.1/tcp/0"] } : {},
@@ -17,7 +15,7 @@ async function node(listen: boolean): Promise<Libp2p> {
   });
 }
 
-describe.skipIf(!enabled)("serveConnections", () => {
+describe("serveConnections", () => {
   it("hands the handler the peer id Noise proved for the connection", async () => {
     const server = await node(true);
     const client = await node(false);
