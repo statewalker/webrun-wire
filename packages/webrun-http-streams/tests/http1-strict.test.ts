@@ -31,6 +31,11 @@ const CORPUS: { name: string; wire: string; pattern: RegExp; maxHeaderBytes?: nu
     pattern: /conflicting Content-Length/,
   },
   {
+    name: "non-numeric Content-Length",
+    wire: `${HEAD}Content-Length: abc\r\n\r\n`,
+    pattern: /invalid Content-Length/,
+  },
+  {
     name: "non-hex chunk size",
     wire: `${HEAD}Transfer-Encoding: chunked\r\n\r\n1z\r\nhello\r\n0\r\n\r\n`,
     pattern: /invalid chunk size/,
@@ -67,6 +72,11 @@ const CORPUS: { name: string; wire: string; pattern: RegExp; maxHeaderBytes?: nu
     pattern: /control character/,
   },
   {
+    name: "CR embedded in a header value",
+    wire: `${HEAD}X-Foo: a\rb\r\n\r\n`,
+    pattern: /value contains CR or LF/,
+  },
+  {
     name: "HTTP/1.1 request with no Host",
     wire: "POST /x HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
     pattern: /no Host header/,
@@ -98,7 +108,7 @@ const CORPUS: { name: string; wire: string; pattern: RegExp; maxHeaderBytes?: nu
   },
 ];
 
-describe("strictness: every ambiguous message is refused, never guessed", () => {
+describe("strictness: every ambiguous message is refused, never guessed (17 cases)", () => {
   it.each(CORPUS)("rejects $name", async ({ wire, pattern, maxHeaderBytes }) => {
     await expect(parse(wire, maxHeaderBytes)).rejects.toThrow(pattern);
   });
