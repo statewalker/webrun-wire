@@ -15,28 +15,28 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@chainsafe/libp2p-gossipsub": "^14.1.2",
-    "@chainsafe/libp2p-noise": "^16.0.0",
-    "@chainsafe/libp2p-yamux": "^7.0.0",
-    "@libp2p/circuit-relay-v2": "^3.0.0",
-    "@libp2p/identify": "^3.0.0",
-    "@libp2p/peer-id": "^5.1.0",
-    "@libp2p/pubsub-peer-discovery": "^11.0.2",
-    "@libp2p/webrtc": "^5.0.0",
-    "@libp2p/websockets": "^9.0.0",
-    "@multiformats/multiaddr": "^12.0.0",
+    "@chainsafe/libp2p-noise": "17.0.0",
+    "@chainsafe/libp2p-yamux": "8.0.1",
+    "@libp2p/circuit-relay-v2": "4.2.11",
+    "@libp2p/identify": "4.1.12",
+    "@libp2p/interface": "3.2.5",
+    "@libp2p/peer-id": "6.0.14",
+    "@libp2p/webrtc": "6.0.29",
+    "@libp2p/websockets": "10.1.19",
+    "@multiformats/multiaddr": "13.0.3",
     "@statewalker/webrun-http-streams": "workspace:*",
     "@statewalker/webrun-site-builder": "workspace:*",
     "@statewalker/webrun-site-host": "workspace:*",
     "@statewalker/webrun-streams": "workspace:*",
     "@statewalker/webrun-streams-libp2p": "workspace:*",
-    "libp2p": "^2.4.0"
+    "libp2p": "3.3.8"
   },
   "devDependencies": {
     "@statewalker/webrun-http-browser": "workspace:*",
     "@types/node": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }
