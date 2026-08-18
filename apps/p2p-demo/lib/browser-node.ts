@@ -58,16 +58,25 @@ export function createBrowserLibp2pNode({
     // peer address derived from it — is denied before any handshake, so
     // discovery and mounting never work at all.
     //
-    // This is deliberately permissive, and deliberately scoped to this
-    // demo: `createBrowserLibp2pNode` is only used by `client-page` and
-    // `server-page` to dial the local dev relay they're launched with.
-    // A real deployment (`apps/p2p-demo/deploy/`, once it exists) talks to
-    // a relay over `wss://` on a real DNS name, where libp2p's default
-    // gater posture — deny insecure ws, deny private addresses — is the
-    // correct one and must not be silently weakened the way it is here.
-    connectionGater: {
-      denyDialMultiaddr: async () => false,
-    },
+    // Gated on `import.meta.env.DEV` (false in a production build) rather
+    // than left as a bare relaxation, so a future `apps/p2p-demo/deploy/`
+    // build that reuses this factory unchanged falls back to libp2p's
+    // default posture automatically instead of silently shipping with
+    // its dial protections disabled — a comment alone doesn't stop that,
+    // only a code guard does.
+    connectionGater: import.meta.env.DEV
+      ? {
+          // Local development only: the demo's relay is reached at
+          // /ip4/127.0.0.1/tcp/9090/ws, which libp2p 3.x's browser default
+          // gater denies on two counts — insecure websocket and private
+          // address. The same gater also sees the derived
+          // /p2p-circuit/webrtc/ peer addresses, so both dial paths need it.
+          denyDialMultiaddr: async () => false,
+        }
+      : // Production (see apps/p2p-demo/deploy/): wss:// on a real DNS
+        // name, where libp2p's default posture is the correct one. Do not
+        // relax it here.
+        undefined,
     services: {
       identify: identify(),
     },
