@@ -1,4 +1,5 @@
 import type { ByteReader } from "../bytes.js";
+import { ByteStreamError } from "../bytes.js";
 import type { ByteSource } from "../message.js";
 import { HttpParseError } from "./errors.js";
 import { decodeLatin1 } from "./headers.js";
@@ -37,16 +38,23 @@ export async function* decodeChunked(
   while (true) {
     const sizeLine = decodeLatin1(await reader.readLine(maxLineBytes));
     const semicolon = sizeLine.indexOf(";"); // chunk extensions: accepted, ignored
-    const sizeText = (semicolon === -1 ? sizeLine : sizeLine.slice(0, semicolon)).trim();
-    if (!/^[0-9a-fA-F]{1,15}$/.test(sizeText)) {
+    const sizeText = semicolon === -1 ? sizeLine : sizeLine.slice(0, semicolon);
+    if (!/^[0-9a-fA-F]{1,13}$/.test(sizeText)) {
       throw new HttpParseError(`invalid chunk size: ${JSON.stringify(sizeLine)}`);
     }
     const size = Number.parseInt(sizeText, 16);
 
     if (size === 0) {
       // Trailer section: legal input, read and discarded, never re-emitted.
-      while ((await reader.readLine(maxLineBytes)).byteLength !== 0) {
-        /* discard */
+      let used = 0;
+      while (true) {
+        const remaining = maxLineBytes - used;
+        if (remaining <= 0) {
+          throw new HttpParseError(`trailer section exceeds ${maxLineBytes} bytes`);
+        }
+        const lineBytes = await reader.readLine(remaining);
+        used += lineBytes.byteLength + 2;
+        if (lineBytes.byteLength === 0) break;
       }
       return;
     }
@@ -61,8 +69,15 @@ export async function* decodeChunked(
       yield part;
     }
 
-    if ((await reader.readLine(2)).byteLength !== 0) {
-      throw new HttpParseError("chunk data not terminated by CRLF");
+    try {
+      if ((await reader.readLine(2)).byteLength !== 0) {
+        throw new HttpParseError("chunk data not terminated by CRLF");
+      }
+    } catch (err) {
+      if (err instanceof ByteStreamError) {
+        throw new HttpParseError("chunk data not terminated by CRLF");
+      }
+      throw err;
     }
   }
 }

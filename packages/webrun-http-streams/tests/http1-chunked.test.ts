@@ -68,7 +68,27 @@ describe("decodeChunked", () => {
     await expect(unwire("2\r\nhiXX0\r\n\r\n")).rejects.toThrow(/not terminated by CRLF/);
   });
 
+  it("rejects chunk data not terminated by CRLF when line exceeds bound", async () => {
+    await expect(unwire("2\r\nhiXXXX")).rejects.toThrow(/not terminated by CRLF/);
+  });
+
   it("rejects a truncated chunk", async () => {
     await expect(unwire("10\r\nshort")).rejects.toThrow(/truncated|without CRLF/);
+  });
+
+  it("rejects leading whitespace before chunk size", async () => {
+    await expect(unwire(" 5\r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/invalid chunk size/);
+  });
+
+  it("rejects trailing whitespace after chunk size", async () => {
+    await expect(unwire("5 \r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/invalid chunk size/);
+  });
+
+  it("rejects empty chunk size", async () => {
+    await expect(unwire("\r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/invalid chunk size/);
+  });
+
+  it("rejects extension-only chunk size", async () => {
+    await expect(unwire(";name=value\r\nhello\r\n0\r\n\r\n")).rejects.toThrow(/invalid chunk size/);
   });
 });
