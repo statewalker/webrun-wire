@@ -10,19 +10,36 @@ export interface ConnectLibp2pParams {
   peer: PeerId | Multiaddr;
   /** libp2p protocol id; defaults to `/webrun-streams/1.0.0`. */
   protocol?: string;
+  /**
+   * How long to wait for a backpressured stream to drain before dropping the
+   * peer; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes).
+   */
+  drainTimeoutMs?: number;
 }
 
 export interface ServeLibp2pParams {
   node: Libp2p;
   /** libp2p protocol id; defaults to `/webrun-streams/1.0.0`. */
   protocol?: string;
+  /**
+   * How long to wait for a backpressured stream to drain before dropping the
+   * peer; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes). This is the only
+   * bound on a peer that requests something and then stops reading without
+   * closing, since the caller-side `.return`/abort escape does not exist here.
+   */
+  drainTimeoutMs?: number;
 }
 
 /**
  * Caller-side: each `call(input)` opens a new libp2p `Stream` via
  * `node.dialProtocol(peer, [protocol])` and runs the call over it.
  */
-export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protocol }) => {
+export const connect: Connect<ConnectLibp2pParams> = async ({
+  node,
+  peer,
+  protocol,
+  drainTimeoutMs,
+}) => {
   const proto = protocol ?? DEFAULT_PROTOCOL;
   const open = new Set<Stream>();
   const call: Duplex = (input) => {
@@ -34,6 +51,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
       let sourceCompleted = false;
       try {
         yield* duplexOverStream(stream, input, {
+          drainTimeoutMs,
           onSourceCompleted: () => {
             sourceCompleted = true;
           },
@@ -113,7 +131,7 @@ export type ServeConnectionsHandler = (context: ConnectionContext) => Duplex;
  * peer libp2p proved on that connection.
  */
 export async function serveConnections(
-  { node, protocol }: ServeLibp2pParams,
+  { node, protocol, drainTimeoutMs }: ServeLibp2pParams,
   makeHandler: ServeConnectionsHandler,
 ): Promise<() => Promise<void>> {
   const proto = protocol ?? DEFAULT_PROTOCOL;
@@ -125,6 +143,7 @@ export async function serveConnections(
       const output = handler(inputQueue.iter());
       try {
         for await (const chunk of duplexOverStream(stream, output, {
+          drainTimeoutMs,
           onPeerInputEnd: (err) => inputQueue.done(err),
         })) {
           inputQueue.push(chunk);
@@ -133,7 +152,21 @@ export async function serveConnections(
         inputQueue.done();
         await closeStream(stream);
       }
-    })();
+    })().catch((err: unknown) => {
+      // One inbound stream failing must not take down the process serving
+      // every other peer. `duplexOverStream` rejects on the read side
+      // whenever the peer sends an ERROR frame or resets mid-request — which
+      // happens in ordinary use, not just under attack (a browser tab closed
+      // mid-request resets its streams). Without this catch that rejection is
+      // unhandled, and Node's default for `unhandledRejection` is to
+      // terminate. Logged rather than rethrown, and never rethrown from here:
+      // there is no caller left to receive it.
+      const e = err instanceof Error ? err : new Error(String(err));
+      console.warn(
+        `[webrun-streams-libp2p] serve: inbound stream on protocol ${proto} failed: ${e.message}`,
+        e,
+      );
+    });
   };
 
   await node.handle(proto, onStream);

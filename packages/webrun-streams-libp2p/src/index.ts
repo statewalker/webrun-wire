@@ -8,4 +8,8 @@ export {
   serve,
   serveConnections,
 } from "./connect-serve.js";
-export { duplexOverStream } from "./duplex-over-stream.js";
+export {
+  DEFAULT_DRAIN_TIMEOUT_MS,
+  type DuplexOverStreamOptions,
+  duplexOverStream,
+} from "./duplex-over-stream.js";
