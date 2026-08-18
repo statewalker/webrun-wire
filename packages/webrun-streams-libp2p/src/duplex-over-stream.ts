@@ -191,7 +191,7 @@ export async function closeStream(
     // here would mask whatever error the caller was already unwinding from.
     console.warn(
       `[webrun-streams-libp2p] closeStream: graceful close of protocol ${stream.protocol} ` +
-        `did not settle within ${timeoutMs}ms, aborting instead (peer may see truncated data): ${e.message}`,
+        `failed (bound ${timeoutMs}ms), aborting instead (peer may see truncated data): ${e.message}`,
     );
     try {
       stream.abort(e);
