@@ -151,8 +151,16 @@ try {
   // and "Unmount" otherwise. A substring/case-insensitive match like
   // text=/Mount/i also matches "Unmount" and would give a false pass on a
   // client that never discovered anything to mount.
+  //
+  // The server page announces two services (server-page/main.ts), so the
+  // client renders two "Mount" buttons. `mount` is scoped to `svcRow`
+  // (not queried page-wide) so the row whose remote-peer-id we verify
+  // below is guaranteed to be the same row whose button we click — a
+  // page-wide button query resolves independently of svcRow and could,
+  // even with a single service, click a different row than the one just
+  // checked.
   const svcRow = clientPage.locator("#services li.svc-row").first();
-  const mount = clientPage.getByRole("button", { name: "Mount", exact: true });
+  const mount = svcRow.getByRole("button", { name: "Mount", exact: true });
   await mount.waitFor({ state: "visible", timeout: 90_000 });
 
   const svcTitle = (await svcRow.locator(".svc-title").textContent())?.trim();
