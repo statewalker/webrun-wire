@@ -1,8 +1,16 @@
-import type { Stream } from "@libp2p/interface";
+import type { Stream, StreamCloseEvent } from "@libp2p/interface";
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 
 const TYPE_DATA = 0x00;
 const TYPE_ERROR = 0x02;
+
+/**
+ * Default bound for {@link closeStream}'s wait for a graceful close. Matches
+ * 2.x's own default (`DEFAULT_SEND_CLOSE_WRITE_TIMEOUT`,
+ * `@libp2p/utils@6.7.2/dist/src/abstract-stream.js:7`) — this restores that
+ * bound rather than inventing a new number.
+ */
+const DEFAULT_CLOSE_TIMEOUT_MS = 5000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -55,17 +63,22 @@ export async function* duplexOverStream(
   const outboundSource = framedOutbound(input);
   const outbound = (async () => {
     try {
-      // libp2p 3.x streams are push-based (`send()` + `onDrain()`) rather
-      // than the pull-based `sink(AsyncIterable)` of 2.x, so we pump the
-      // framed outbound generator by hand and honour backpressure via
-      // `onDrain()` whenever `send()` reports its buffer is full.
+      // libp2p 3.x streams are push-based (`send()` + drain) rather than
+      // the pull-based `sink(AsyncIterable)` of 2.x, so we pump the framed
+      // outbound generator by hand and honour backpressure by waiting for
+      // the stream's `'drain'` event whenever `send()` reports its buffer
+      // is full. We deliberately do NOT use `stream.onDrain()`: it
+      // memoises a single promise for the stream's whole lifetime and
+      // never clears it (`@libp2p/utils@7.3.2/dist/src/abstract-message-stream.js`),
+      // so past the first backpressure cycle it resolves instantly while
+      // the buffer is still full, defeating flow control entirely.
       for await (const chunk of outboundSource) {
         const canAcceptMore = stream.send(chunk);
         if (!canAcceptMore) {
-          await stream.onDrain();
+          await waitForDrain(stream);
         }
       }
-      await stream.close();
+      await closeStream(stream);
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       try {
@@ -115,6 +128,58 @@ export async function* duplexOverStream(
       }
     }
     await outbound;
+  }
+}
+
+/**
+ * Wait for `stream` to signal it can accept more data, per the real
+ * `'drain'` event rather than the broken {@link Stream.onDrain}. Rejects if
+ * the stream closes first (including a remote reset) so a peer that goes
+ * away while we're backpressured unwinds into the caller's existing
+ * `catch` instead of hanging forever.
+ */
+function waitForDrain(stream: Stream): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      stream.removeEventListener("drain", onDrain);
+      stream.removeEventListener("close", onClose);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onClose = (evt: StreamCloseEvent): void => {
+      cleanup();
+      reject(evt.error ?? new Error("stream closed"));
+    };
+    stream.addEventListener("drain", onDrain);
+    stream.addEventListener("close", onClose);
+  });
+}
+
+/**
+ * Close a `Stream`'s writable end, bounded by `timeoutMs`. Plain
+ * `stream.close()` awaits the write queue draining and the peer
+ * acknowledging with no bound of its own — a peer that stops reading
+ * without resetting (a suspended tab, a paused container, `SIGSTOP`) means
+ * it never settles, which would otherwise hang every caller waiting on it
+ * (the outbound pump here, and `connect`/`serve`'s teardown in
+ * `connect-serve.ts`). On timeout we fall back to a hard `abort()` so the
+ * caller is never left hanging.
+ */
+export async function closeStream(
+  stream: Stream,
+  timeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    await stream.close({ signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    const e = err instanceof Error ? err : new Error(String(err));
+    try {
+      stream.abort(e);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

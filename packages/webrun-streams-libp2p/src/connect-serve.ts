@@ -1,7 +1,7 @@
 import type { Connection, Libp2p, PeerId, Stream } from "@libp2p/interface";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
-import { duplexOverStream } from "./duplex-over-stream.js";
+import { closeStream, duplexOverStream } from "./duplex-over-stream.js";
 
 export const DEFAULT_PROTOCOL = "/webrun-streams/1.0.0";
 
@@ -41,12 +41,9 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
       } finally {
         open.delete(stream);
         if (sourceCompleted) {
-          // Natural end on both sides. Graceful close.
-          try {
-            await stream.close();
-          } catch {
-            /* ignore */
-          }
+          // Natural end on both sides. Graceful close, bounded so a peer
+          // that stops reading without resetting can't hang this forever.
+          await closeStream(stream);
         }
         // Else: consumer cancelled. The .return override below has already
         // called stream.abort to send RST; nothing more to do here.
@@ -109,11 +106,9 @@ export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handle
         }
       } finally {
         inputQueue.done();
-        try {
-          await stream.close();
-        } catch {
-          /* ignore */
-        }
+        // Bounded, so a caller that stops reading without resetting can't
+        // hang this forever.
+        await closeStream(stream);
       }
     })();
   };
