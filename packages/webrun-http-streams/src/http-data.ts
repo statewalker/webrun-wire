@@ -105,7 +105,11 @@ async function throwIfPeerError(
   const found = result.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
   if (!found) return;
   await discard(result.body);
-  await output.return?.(undefined);
+  try {
+    await output.return?.(undefined);
+  } catch {
+    /* the call is being abandoned; a failing cancel must not mask the peer's error */
+  }
   let payload: { message: string };
   try {
     payload = JSON.parse(found[1]) as { message: string };

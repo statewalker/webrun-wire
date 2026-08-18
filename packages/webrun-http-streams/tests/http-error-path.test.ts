@@ -238,6 +238,58 @@ describe("peer-error response body is actually drained", () => {
     await client.close();
     await server.close();
   });
+
+  it("does not let a failing output.return() mask the peer's error", async () => {
+    // Same reasoning as discard()'s catch-and-swallow one line above: we are
+    // about to throw the peer's own, more informative error. A transport
+    // whose cancellation itself fails must not replace that with cleanup
+    // noise ("transport close failed") — the cancellation is best-effort
+    // bookkeeping, not something the caller asked for or should ever see.
+    const fakeCodec: MessageCodec = {
+      name: "fake",
+      sniff: () => true,
+      encodeRequest: () => (async function* () {})(),
+      encodeResponse: () => (async function* () {})(),
+      decodeRequest: async () => ({
+        envelope: { url: "/", method: "GET", headers: [] } as RequestEnvelope,
+        body: (async function* () {})(),
+      }),
+      decodeResponse: async (): Promise<DecodedResponse> => ({
+        envelope: {
+          status: 500,
+          statusText: "Internal Server Error",
+          headers: [[PEER_ERROR_HEADER, JSON.stringify({ message: "boom" })]],
+        },
+        body: (async function* () {
+          yield new TextEncoder().encode("unused");
+        })(),
+      }),
+    };
+
+    const call: Duplex = () => {
+      const output: AsyncGenerator<Uint8Array> = {
+        async next(): Promise<IteratorResult<Uint8Array>> {
+          return { value: undefined, done: true };
+        },
+        async return(): Promise<IteratorResult<Uint8Array>> {
+          throw new Error("transport close failed");
+        },
+        async throw(err?: unknown): Promise<IteratorResult<Uint8Array>> {
+          throw err;
+        },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      };
+      return output;
+    };
+
+    await expect(
+      httpFetch(call, { url: "http://h.test/x", method: "GET", headers: [] }, undefined, {
+        codec: fakeCodec,
+      }),
+    ).rejects.toThrow(/boom/);
+  });
 });
 
 describe("codec selection", () => {
