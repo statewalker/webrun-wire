@@ -59,7 +59,7 @@ describe("conformance against a real HTTP implementation", () => {
           method: "POST",
           headers: [["X-Test", "yes"]],
         },
-        [enc("hel"), enc("lo")],
+        [enc("hello-from-webrun"), enc("!")],
       )) {
         socket.write(chunk);
       }
@@ -73,7 +73,7 @@ describe("conformance against a real HTTP implementation", () => {
       expect(seen.headers?.host).toBe(`127.0.0.1:${port}`);
       expect(seen.headers?.["x-test"]).toBe("yes");
       expect(seen.headers?.["transfer-encoding"]).toBe("chunked");
-      expect(seen.body).toBe("hello"); // note 15 Q2: a streamed body is not empty
+      expect(seen.body).toBe("hello-from-webrun!"); // note 15 Q2: a streamed body is not empty
 
       // --- we parsed what they generated ---
       expect(decoded.envelope.status).toBe(201);
