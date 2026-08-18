@@ -43,7 +43,46 @@ const stop = await new DuplexSiteBuilder()
 
 ## Wire format
 
-`<JSON.stringify(envelope)>\n<body bytes…>` — newline-delimited JSON header followed by raw body bytes. Same shape as the legacy `webrun-http-port` so a future bridging adapter could interop.
+Conforming **HTTP/1.1** by default — a `Duplex` carries bytes a real HTTP
+implementation can parse, and accepts bytes a real HTTP implementation
+produces. Verified against `node:http` in both directions.
+
+```
+POST /api?a=1 HTTP/1.1
+Host: peer.test
+Connection: close
+Transfer-Encoding: chunked
+
+5
+hello
+0
+
+```
+
+One message per `Duplex` call: `Connection: close` is always emitted, and bytes
+after a complete message are an error. Bodies use `Content-Length` when the
+caller declares one and chunked transfer coding otherwise; a message declaring
+both is refused.
+
+### Choosing a codec
+
+```ts
+import { httpCodec, jsonEnvelopeCodec, newHttpCodec } from "@statewalker/webrun-http-streams";
+
+// default: writes HTTP/1.1, accepts HTTP/1.1 or the legacy JSON envelope
+await httpFetch(call, env);
+
+// pinned
+await httpFetch(call, env, body, { codec: httpCodec });
+
+// the scheme is not on the HTTP/1.1 wire; supply it here
+const codec = newHttpCodec({ scheme: "https", host: "peer.test" });
+```
+
+The previous format — `<JSON.stringify(envelope)>` + newline + body bytes —
+remains available as `jsonEnvelopeCodec`, and readers accept it automatically,
+so the two ends of a peer pair can be upgraded in either order. A server
+answers in whichever format read the request. See ADR-0006.
 
 ## License
 
