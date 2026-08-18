@@ -19,6 +19,25 @@ export function toAsyncIterator(input: ByteSource): AsyncIterator<Uint8Array> {
   };
 }
 
+/**
+ * Discard an iterable we are contractually forbidden from consuming — a body
+ * skipped for HEAD/204, or one abandoned because the peer reported an error.
+ *
+ * The `.next()` is not optional: `.return()` on a generator still in suspended
+ * start is a no-op, so the body never runs and its `try/finally` never unwinds.
+ * Without it a wrapped ReadableStream or socket is never cancelled.
+ */
+export async function discard(source: ByteSource | undefined): Promise<void> {
+  if (source === undefined) return;
+  const it = toAsyncIterator(source);
+  try {
+    await it.next();
+    await it.return?.();
+  } catch {
+    /* the source is being discarded; its failures are not ours to surface */
+  }
+}
+
 export function concatChunks(parts: Uint8Array[], totalLen: number): Uint8Array {
   if (parts.length === 1) return parts[0];
   const out = new Uint8Array(totalLen);

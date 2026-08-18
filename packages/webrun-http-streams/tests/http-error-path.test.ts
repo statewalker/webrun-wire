@@ -1,8 +1,10 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { jsonEnvelopeCodec } from "../src/envelope.js";
+import { PEER_ERROR_HEADER } from "../src/http-data.js";
 import { httpCodec } from "../src/http1/index.js";
 import { fetchOverDuplex, httpFetch, httpServe, serveFetchOverDuplex } from "../src/index.js";
+import type { DecodedResponse, MessageCodec, RequestEnvelope } from "../src/message.js";
 
 const loopback =
   (handler: Duplex): Duplex =>
@@ -76,6 +78,56 @@ describe("handler errors under HTTP framing", () => {
     await expect(fetchOverDuplex(call, new Request("https://example.test/x"))).rejects.toThrow(
       /handler exploded/,
     );
+  });
+});
+
+describe("peer-error response body is actually drained", () => {
+  it("runs the response body's own cleanup, not just .return() on a never-started generator", async () => {
+    // A body whose `finally` marks itself released — proves `discard()` (used
+    // by `throwIfPeerError`) actually started the generator before returning
+    // it. `.return()` alone on a generator still in suspended start is a
+    // documented JS no-op: none of the generator's code, including this
+    // `finally`, would ever execute — which is exactly the bug under test.
+    // A custom codec isolates this from HTTP/1.1's own chunked-decode
+    // internals (a separate, lower-level concern from what `throwIfPeerError`
+    // is responsible for): it hands `throwIfPeerError` a body it controls
+    // directly, so this test is a property of `discard()` and its call site,
+    // not of how any particular wire format happens to frame a body.
+    const released = { value: false };
+    async function* bodyWithFinally(): AsyncGenerator<Uint8Array> {
+      try {
+        yield new TextEncoder().encode("unused");
+      } finally {
+        released.value = true;
+      }
+    }
+
+    const fakeCodec: MessageCodec = {
+      name: "fake",
+      sniff: () => true,
+      encodeRequest: () => (async function* () {})(),
+      encodeResponse: () => (async function* () {})(),
+      decodeRequest: async () => ({
+        envelope: { url: "/", method: "GET", headers: [] } as RequestEnvelope,
+        body: (async function* () {})(),
+      }),
+      decodeResponse: async (): Promise<DecodedResponse> => ({
+        envelope: {
+          status: 500,
+          statusText: "Internal Server Error",
+          headers: [[PEER_ERROR_HEADER, JSON.stringify({ message: "boom" })]],
+        },
+        body: bodyWithFinally(),
+      }),
+    };
+
+    const call: Duplex = () => (async function* () {})();
+    await expect(
+      httpFetch(call, { url: "http://h.test/x", method: "GET", headers: [] }, undefined, {
+        codec: fakeCodec,
+      }),
+    ).rejects.toThrow(/boom/);
+    expect(released.value).toBe(true);
   });
 });
 

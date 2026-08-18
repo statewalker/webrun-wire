@@ -1,5 +1,6 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
+import { discard } from "./bytes.js";
 import { defaultCodec } from "./codec-default.js";
 import type { ByteSource, MessageCodec, RequestEnvelope, ResponseEnvelope } from "./message.js";
 
@@ -77,7 +78,7 @@ function encodeErrorResponse(
 async function throwIfPeerError(result: HttpFetchResult): Promise<void> {
   const found = result.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
   if (!found) return;
-  await (result.body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]().return?.();
+  await discard(result.body);
   let payload: { message: string };
   try {
     payload = JSON.parse(found[1]) as { message: string };

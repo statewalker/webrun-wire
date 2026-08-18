@@ -1,3 +1,4 @@
+import { discard } from "../bytes.js";
 import type { ByteSource, RequestEnvelope, ResponseEnvelope } from "../message.js";
 import { encodeChunked } from "./chunked.js";
 import { HttpParseError } from "./errors.js";
@@ -90,26 +91,6 @@ async function* emitBody(
   }
 }
 
-/**
- * Close a body source we are contractually forbidden from sending (HEAD, 204).
- * `.return()` on an async generator still in "suspended start" is a no-op —
- * its body, and any `finally` inside it, never ran — so we must advance the
- * iterator once before returning it, or the underlying resource (e.g. the
- * `ReadableStream` `src/fetch.ts` wraps) never gets cancelled.
- */
-async function drain(body: ByteSource | undefined): Promise<void> {
-  if (body === undefined) return;
-  const asAsync = body as { [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> };
-  const it = asAsync[Symbol.asyncIterator]?.();
-  if (!it) return;
-  try {
-    await it.next();
-    await it.return?.();
-  } catch {
-    /* the body is being discarded; its failures are not ours to surface */
-  }
-}
-
 export async function* encodeRequest(
   env: RequestEnvelope,
   body: ByteSource | undefined,
@@ -166,7 +147,7 @@ export async function* encodeResponse(
   yield encodeLatin1(head);
 
   if (bodyless || body === undefined) {
-    await drain(bodyless ? body : undefined);
+    await discard(bodyless ? body : undefined);
     return;
   }
   yield* emitBody(body, declared);
