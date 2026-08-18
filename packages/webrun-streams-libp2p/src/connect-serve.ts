@@ -1,4 +1,4 @@
-import type { Libp2p, PeerId, Stream } from "@libp2p/interface";
+import type { Connection, Libp2p, PeerId, Stream } from "@libp2p/interface";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
 import { duplexOverStream } from "./duplex-over-stream.js";
@@ -28,11 +28,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
   const call: Duplex = (input) => {
     let streamRef: Stream | null = null;
     const gen = (async function* () {
-      const stream = (await (
-        node as unknown as {
-          dialProtocol(p: PeerId | Multiaddr, protocols: string[]): Promise<Stream>;
-        }
-      ).dialProtocol(peer, [proto])) as Stream;
+      const stream = await node.dialProtocol(peer, [proto]);
       streamRef = stream;
       open.add(stream);
       let sourceCompleted = false;
@@ -96,9 +92,10 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
  */
 export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handler: Duplex) => {
   const proto = protocol ?? DEFAULT_PROTOCOL;
-  const onStream = (data: { stream: Stream }): void => {
+  // libp2p 3.x invokes stream handlers as `(stream, connection)` rather than
+  // 2.x's `({ stream, connection })`.
+  const onStream = (stream: Stream, _connection: Connection): void => {
     void (async () => {
-      const stream = data.stream;
       const inputQueue = makeInputQueue();
       // Hand the handler an input queue we control. Signal end-of-input as
       // soon as the peer's source ends — without this, the handler would hang
@@ -120,17 +117,13 @@ export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handle
       }
     })();
   };
-  await (
-    node as unknown as {
-      handle(p: string, cb: (data: { stream: Stream }) => void): Promise<void>;
-    }
-  ).handle(proto, onStream);
+  await node.handle(proto, onStream);
 
   let torn = false;
   return async () => {
     if (torn) return;
     torn = true;
-    await (node as unknown as { unhandle(p: string): Promise<void> }).unhandle(proto);
+    await node.unhandle(proto);
   };
 };
 

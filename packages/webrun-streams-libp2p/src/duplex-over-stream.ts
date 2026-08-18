@@ -37,7 +37,7 @@ export interface DuplexOverStreamOptions {
  *
  * Types are `DATA` (0x00, body bytes) and `ERROR` (0x02, followed by a
  * JSON-serialised `Error`). Normal end-of-input is signalled by libp2p's
- * `closeWrite()`. The frame layer exists so we can preserve `Error` fidelity
+ * `close()`. The frame layer exists so we can preserve `Error` fidelity
  * across the wire (yamux's native stream reset only carries "stream reset").
  */
 export async function* duplexOverStream(
@@ -55,10 +55,17 @@ export async function* duplexOverStream(
   const outboundSource = framedOutbound(input);
   const outbound = (async () => {
     try {
-      await (stream as unknown as { sink(s: AsyncIterable<Uint8Array>): Promise<void> }).sink(
-        outboundSource,
-      );
-      await stream.closeWrite();
+      // libp2p 3.x streams are push-based (`send()` + `onDrain()`) rather
+      // than the pull-based `sink(AsyncIterable)` of 2.x, so we pump the
+      // framed outbound generator by hand and honour backpressure via
+      // `onDrain()` whenever `send()` reports its buffer is full.
+      for await (const chunk of outboundSource) {
+        const canAcceptMore = stream.send(chunk);
+        if (!canAcceptMore) {
+          await stream.onDrain();
+        }
+      }
+      await stream.close();
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       try {
@@ -80,7 +87,9 @@ export async function* duplexOverStream(
 
   let sourceCompleted = false;
   try {
-    for await (const frame of parseFrames(stream.source)) {
+    // libp2p 3.x `Stream` is itself the readable `AsyncIterable` (it no
+    // longer exposes a separate `.source`).
+    for await (const frame of parseFrames(stream)) {
       if (frame.type === TYPE_DATA) {
         yield frame.payload;
       } else if (frame.type === TYPE_ERROR) {
