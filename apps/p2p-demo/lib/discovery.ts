@@ -4,6 +4,7 @@ import { connect, serveConnections } from "@statewalker/webrun-streams-libp2p";
 import {
   decodeAnnouncement,
   encodeAnnouncement,
+  type Service,
   type ServiceAnnouncement,
 } from "./announcement.js";
 import { applyAnnouncement, applyLeave, evictStale, type GroupState } from "./group-state.js";
@@ -88,8 +89,9 @@ function withGroupCount<T extends object>(
  * with that group's current catalogue (every other peer's last-known
  * services in the *same* group). `ServiceAnnouncement` itself carries no
  * `groupId` — that field lives only in the discovery envelope, one level
- * above the announcement, the same way `joinGroup` scopes it at the pubsub
- * topic layer rather than inside the message. The request envelope is
+ * above the announcement, the same way `joinGroup` passes it as a separate
+ * argument to `discoveryClient` rather than folding it into the message
+ * itself. The request envelope is
  * exactly two length-prefixed records: the UTF-8 group id, then the
  * `ServiceAnnouncement`; anything else is rejected rather than guessed at.
  * The announcing peer's identity comes from the Noise-proven
@@ -100,13 +102,25 @@ function withGroupCount<T extends object>(
  * request empties it (e.g. the last member leaves) and during the periodic
  * sweep — so the outer `groups` map cannot be grown without bound by a
  * client cycling through fresh group ids.
+ *
+ * `opts.selfServices`, when set, makes every catalogue response also carry
+ * one entry for the relay's own `node.peerId` advertising those services.
+ * This module stays generic about what those services are (a caller may
+ * use it for a "presence hub" marker, or for anything else) — it just
+ * echoes them back. The entry is synthesized fresh into each response and
+ * is never written into `GroupState`: storing it there would make every
+ * group permanently non-empty and defeat the `groups.delete(groupId)`
+ * eviction above, reopening the unbounded-`groups`-growth problem this
+ * module exists to close.
  */
 export async function serveDiscovery(
   node: Libp2p,
-  opts: { ttlMs?: number; sweepMs?: number } = {},
+  opts: { ttlMs?: number; sweepMs?: number; selfServices?: Service[] } = {},
 ): Promise<(() => Promise<void>) & { readonly groupCount: number }> {
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
   const sweepMs = opts.sweepMs ?? DEFAULT_SWEEP_MS;
+  const selfServices = opts.selfServices;
+  const selfPeerId = node.peerId.toString();
   const groups = new Map<string, GroupState>();
 
   const sweep = setInterval(() => {
@@ -152,6 +166,16 @@ export async function serveDiscovery(
               peerId,
               services: entry.services,
               ts: entry.lastSeen,
+            }),
+          );
+        }
+        if (selfServices != null && selfPeerId !== proven) {
+          catalogue.push(
+            encodeAnnouncement({
+              v: 1,
+              peerId: selfPeerId,
+              services: selfServices,
+              ts: Date.now(),
             }),
           );
         }

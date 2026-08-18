@@ -20,7 +20,12 @@ const node = await createLibp2p({
   },
 });
 
-await serveDiscovery(node);
+// The relay advertises itself as an always-on "presence hub" member of
+// every group so browsers in that group can render an always-on HUB row
+// (Level-2 "permanent node") even before any other peer has announced.
+await serveDiscovery(node, {
+  selfServices: [{ id: "hub", kind: "presence-hub", title: "Hub" }],
+});
 
 console.log("p2p-demo relay started.");
 console.log(`peerId: ${node.peerId.toString()}`);

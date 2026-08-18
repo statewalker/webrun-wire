@@ -110,4 +110,62 @@ describe("relay-mediated discovery", () => {
     await stop();
     await Promise.allSettled([relay.stop(), ...peers.map((p) => p.stop())]);
   });
+
+  it("includes the relay's own entry in every catalogue when selfServices is set", async () => {
+    const relay = await mk(true);
+    const a = await mk(false);
+    const hubServices = [{ id: "hub", kind: "presence-hub" as const, title: "Hub" }];
+    const stop = await serveDiscovery(relay, { selfServices: hubServices });
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    const seen = await discoveryClient(a, addr, "g1").announce(ann(a, "alpha"));
+    const hubEntry = seen.find((x) => x.peerId === relay.peerId.toString());
+    expect(hubEntry).toBeDefined();
+    expect(hubEntry?.services).toEqual(hubServices);
+
+    await stop();
+    await Promise.allSettled([relay.stop(), a.stop()]);
+  });
+
+  it("omits the relay's own entry when selfServices is unset", async () => {
+    const relay = await mk(true);
+    const a = await mk(false);
+    const stop = await serveDiscovery(relay);
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    const seen = await discoveryClient(a, addr, "g1").announce(ann(a, "alpha"));
+    expect(seen.map((x) => x.peerId)).not.toContain(relay.peerId.toString());
+
+    await stop();
+    await Promise.allSettled([relay.stop(), a.stop()]);
+  });
+
+  it("still returns groupCount to 0 after peers expire when selfServices is configured", async () => {
+    const relay = await mk(true);
+    const stop = await serveDiscovery(relay, {
+      ttlMs: 150,
+      sweepMs: 25,
+      selfServices: [{ id: "hub", kind: "presence-hub", title: "Hub" }],
+    });
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    const peers = await Promise.all(Array.from({ length: 5 }, () => mk(false)));
+    await Promise.all(
+      peers.map((p, i) => discoveryClient(p, addr, `group-${i}`).announce(ann(p, `svc-${i}`))),
+    );
+
+    // The relay's synthetic self entry must not be written into GroupState
+    // (only injected at response time) — otherwise no group would ever go
+    // empty and groupCount would never return to 0.
+    expect(stop.groupCount).toBe(5);
+
+    await new Promise((r) => setTimeout(r, 400));
+    expect(stop.groupCount).toBe(0);
+
+    await stop();
+    await Promise.allSettled([relay.stop(), ...peers.map((p) => p.stop())]);
+  });
 });
