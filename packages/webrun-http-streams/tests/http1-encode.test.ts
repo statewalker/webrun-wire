@@ -9,6 +9,15 @@ const OPTS: ResolvedHttpCodecOptions = {
 };
 const enc = (s: string) => new TextEncoder().encode(s);
 
+/** A body whose `finally` marks itself released — proves `drain()` actually ran it. */
+async function* bodyWithFinally(flag: { released: boolean }): AsyncGenerator<Uint8Array> {
+  try {
+    yield enc("x");
+  } finally {
+    flag.released = true;
+  }
+}
+
 async function wire(gen: AsyncGenerator<Uint8Array>): Promise<string> {
   let out = "";
   const dec = new TextDecoder();
@@ -44,6 +53,14 @@ describe("splitTarget", () => {
 
   it("drops the fragment, which is never sent", () => {
     expect(splitTarget("http://h.test/x?a=1#frag", OPTS).target).toBe("/x?a=1");
+  });
+
+  it("prefixes a leading slash when the path is empty but a query is present", () => {
+    expect(splitTarget("https://example.test?a=1", OPTS).target).toBe("/?a=1");
+  });
+
+  it("strips userinfo from the authority before it reaches Host", () => {
+    expect(splitTarget("http://user:pass@host/x", OPTS).authority).toBe("host");
   });
 });
 
@@ -176,5 +193,30 @@ describe("encodeResponse", () => {
     await expect(
       wire(encodeResponse({ status: 99, statusText: "", headers: [] }, undefined, OPTS)),
     ).rejects.toThrow(/invalid status/);
+  });
+
+  it("releases the discarded body's underlying resource for a 204 response", async () => {
+    const flag = { released: false };
+    await wire(
+      encodeResponse(
+        { status: 204, statusText: "No Content", headers: [] },
+        bodyWithFinally(flag),
+        OPTS,
+      ),
+    );
+    expect(flag.released).toBe(true);
+  });
+
+  it("releases the discarded body's underlying resource for a response to HEAD", async () => {
+    const flag = { released: false };
+    await wire(
+      encodeResponse(
+        { status: 200, statusText: "OK", headers: [] },
+        bodyWithFinally(flag),
+        OPTS,
+        "HEAD",
+      ),
+    );
+    expect(flag.released).toBe(true);
   });
 });

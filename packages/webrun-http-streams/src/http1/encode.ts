@@ -38,11 +38,18 @@ export function splitTarget(
   if (!match) {
     throw new HttpParseError(`cannot derive a request target from url: ${JSON.stringify(url)}`);
   }
-  const authority = match[1];
-  if (authority === "") {
+  const rawAuthority = match[1];
+  if (rawAuthority === "") {
     throw new HttpParseError(`url has no authority: ${JSON.stringify(url)}`);
   }
-  return { target: match[2] === "" ? "/" : match[2], authority };
+  // Host is `uri-host [ ":" port ]` — no userinfo (RFC 9110 §7.2). Strip any
+  // `user:pass@` prefix so credentials never end up in a header proxies log.
+  const at = rawAuthority.lastIndexOf("@");
+  const authority = at === -1 ? rawAuthority : rawAuthority.slice(at + 1);
+
+  const rawTarget = match[2];
+  const target = rawTarget === "" ? "/" : rawTarget.startsWith("/") ? rawTarget : `/${rawTarget}`;
+  return { target, authority };
 }
 
 function declaredLength(headers: HeaderList): number | undefined {
@@ -83,11 +90,24 @@ async function* emitBody(
   }
 }
 
-/** Close a body source we are contractually forbidden from sending (HEAD, 204). */
+/**
+ * Close a body source we are contractually forbidden from sending (HEAD, 204).
+ * `.return()` on an async generator still in "suspended start" is a no-op —
+ * its body, and any `finally` inside it, never ran — so we must advance the
+ * iterator once before returning it, or the underlying resource (e.g. the
+ * `ReadableStream` `src/fetch.ts` wraps) never gets cancelled.
+ */
 async function drain(body: ByteSource | undefined): Promise<void> {
   if (body === undefined) return;
   const asAsync = body as { [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> };
-  await asAsync[Symbol.asyncIterator]?.().return?.();
+  const it = asAsync[Symbol.asyncIterator]?.();
+  if (!it) return;
+  try {
+    await it.next();
+    await it.return?.();
+  } catch {
+    /* the body is being discarded; its failures are not ours to surface */
+  }
 }
 
 export async function* encodeRequest(
