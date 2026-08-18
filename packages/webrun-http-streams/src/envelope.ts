@@ -1,3 +1,4 @@
+import { concatChunks, toAsyncIterator } from "./bytes.js";
 import type {
   ByteSource,
   DecodedRequest,
@@ -88,30 +89,6 @@ export async function decodeMessage<E>(
   }
 
   return { envelope, body: body() };
-}
-
-function toAsyncIterator(
-  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
-): AsyncIterator<Uint8Array> {
-  const asyncIter = (input as AsyncIterable<Uint8Array>)[Symbol.asyncIterator];
-  if (asyncIter) return asyncIter.call(input as AsyncIterable<Uint8Array>);
-  const syncIter = (input as Iterable<Uint8Array>)[Symbol.iterator]();
-  return {
-    next(): Promise<IteratorResult<Uint8Array>> {
-      return Promise.resolve(syncIter.next());
-    },
-  };
-}
-
-function concatChunks(parts: Uint8Array[], totalLen: number): Uint8Array {
-  if (parts.length === 1) return parts[0];
-  const out = new Uint8Array(totalLen);
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.byteLength;
-  }
-  return out;
 }
 
 const OPEN_BRACE = 0x7b;
