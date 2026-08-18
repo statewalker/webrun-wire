@@ -85,42 +85,11 @@ export const connect: Connect<ConnectLibp2pParams> = async ({ node, peer, protoc
 
 /**
  * Server-side: registers `node.handle(protocol, ...)`. Each inbound stream is
- * wrapped as a `Duplex` and handed to `handler`.
+ * wrapped as a `Duplex` and handed to `handler`. Identity-unaware; use
+ * `serveConnections` when the handler needs to know who is calling.
  */
-export const serve: Serve<ServeLibp2pParams> = async ({ node, protocol }, handler: Duplex) => {
-  const proto = protocol ?? DEFAULT_PROTOCOL;
-  // libp2p 3.x invokes stream handlers as `(stream, connection)` rather than
-  // 2.x's `({ stream, connection })`.
-  const onStream = (stream: Stream, _connection: Connection): void => {
-    void (async () => {
-      const inputQueue = makeInputQueue();
-      // Hand the handler an input queue we control. Signal end-of-input as
-      // soon as the peer's source ends — without this, the handler would hang
-      // forever waiting for input that never arrives.
-      const output = handler(inputQueue.iter());
-      try {
-        for await (const chunk of duplexOverStream(stream, output, {
-          onPeerInputEnd: (err) => inputQueue.done(err),
-        })) {
-          inputQueue.push(chunk);
-        }
-      } finally {
-        inputQueue.done();
-        // Bounded, so a caller that stops reading without resetting can't
-        // hang this forever.
-        await closeStream(stream);
-      }
-    })();
-  };
-  await node.handle(proto, onStream);
-
-  let torn = false;
-  return async () => {
-    if (torn) return;
-    torn = true;
-    await node.unhandle(proto);
-  };
-};
+export const serve: Serve<ServeLibp2pParams> = async (params, handler: Duplex) =>
+  serveConnections(params, () => handler);
 
 /** What the serving side knows about the connection a stream arrived on. */
 export interface ConnectionContext {
