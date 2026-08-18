@@ -45,14 +45,33 @@ function unframe(bytes: Uint8Array): Uint8Array[] {
   return out;
 }
 
+/**
+ * Cap on one discovery message, applied while it is being read rather than
+ * after. Every message on this protocol is a whole announcement or a whole
+ * catalogue, so both directions have to be buffered before they can be
+ * decoded — which means an uncapped `collect` lets any peer make the shared
+ * relay hold as much memory as it cares to stream at it. A real announcement
+ * is a few hundred bytes and a catalogue is that times the group's size, so
+ * 1 MiB is several orders of magnitude of headroom while still bounding the
+ * damage one peer can do.
+ */
+const MAX_MESSAGE_BYTES = 1024 * 1024;
+
 async function collect(
   input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  limitBytes: number = MAX_MESSAGE_BYTES,
 ): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for await (const c of input) {
     chunks.push(c);
     total += c.length;
+    if (total > limitBytes) {
+      // Thrown from inside the loop so the rest is never read, let alone
+      // retained: on the relay side this ends the handler, which the framing
+      // layer reports to the peer as an error and then tears the stream down.
+      throw new Error(`discovery message exceeds ${limitBytes} bytes, refusing to buffer it`);
+    }
   }
   const out = new Uint8Array(total);
   let off = 0;

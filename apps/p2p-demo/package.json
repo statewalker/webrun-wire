@@ -13,6 +13,7 @@
     "build:client-page": "vite build --config vite.client.config.ts",
     "build": "pnpm run build:server-page && pnpm run build:client-page",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "e2e": "node e2e/browser-to-browser.mjs"
   },
   "dependencies": {

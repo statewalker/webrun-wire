@@ -2,10 +2,11 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import type { Libp2p } from "@libp2p/interface";
 import { webSockets } from "@libp2p/websockets";
+import { connect } from "@statewalker/webrun-streams-libp2p";
 import { createLibp2p } from "libp2p";
 import { describe, expect, it } from "vitest";
 import type { ServiceAnnouncement } from "../lib/announcement.js";
-import { discoveryClient, serveDiscovery } from "../lib/discovery.js";
+import { DISCOVERY_PROTOCOL, discoveryClient, serveDiscovery } from "../lib/discovery.js";
 
 const mk = (listen: boolean) =>
   createLibp2p({
@@ -236,5 +237,107 @@ describe("relay-mediated discovery", () => {
 
     await stop();
     await Promise.allSettled([relay.stop(), busy.stop(), quitter.stop()]);
+  });
+
+  // The one line every other test in this file is blind to: every other test
+  // announces with a truthful `peerId`, so deleting `peerId: proven` from
+  // `serveDiscovery` (discovery.ts) keeps them all green — the claimed and the
+  // proven string are the same value, and the self-filter, `applyAnnouncement`
+  // and `applyLeave` all key on it either way.
+  //
+  // Verified to fail before the fix: replacing `peerId: proven` with
+  // `peerId: incoming.peerId` fails this with
+  // `expected [ '12D3Koo…victim', 'not-a-peer-id-at-all' ] to strictly equal
+  // [ '12D3Koo…liar' ]`.
+  it("catalogues the announcer's proven peer id, never the one the payload claims", async () => {
+    const relay = await mk(true);
+    const liar = await mk(false);
+    const victim = await mk(false);
+    const observer = await mk(false);
+    const stop = await serveDiscovery(relay);
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    const liarClient = discoveryClient(liar, addr, "g1");
+
+    // Forgery 1: claim to be another real peer in the same group.
+    await liarClient.announce({
+      v: 1,
+      peerId: victim.peerId.toString(),
+      services: [{ kind: "http", id: "spoofed", title: "Spoofed", path: "/spoofed" }],
+      ts: Date.now(),
+    });
+    // Forgery 2: a peer id that is not a peer id at all.
+    await liarClient.announce({
+      v: 1,
+      peerId: "not-a-peer-id-at-all",
+      services: [{ kind: "http", id: "garbage", title: "Garbage", path: "/garbage" }],
+      ts: Date.now(),
+    });
+
+    const seenByObserver = await discoveryClient(observer, addr, "g1").announce(
+      ann(observer, "obs"),
+    );
+
+    // Both forgeries collapsed onto the one identity Noise proved for the
+    // connection they arrived on, so the group holds exactly one other peer.
+    expect(seenByObserver.map((x) => x.peerId)).toStrictEqual([liar.peerId.toString()]);
+    // And the impersonated peer — which never announced at all — is not in the
+    // catalogue the next peer receives.
+    expect(seenByObserver.map((x) => x.peerId)).not.toContain(victim.peerId.toString());
+
+    // The victim announcing for real is a separate entry, not a takeover of
+    // the one the liar planted.
+    const seenByVictim = await discoveryClient(victim, addr, "g1").announce(ann(victim, "real"));
+    expect(seenByVictim.map((x) => x.peerId).sort()).toStrictEqual(
+      [liar.peerId.toString(), observer.peerId.toString()].sort(),
+    );
+
+    await stop();
+    await Promise.allSettled([relay.stop(), liar.stop(), victim.stop(), observer.stop()]);
+  });
+
+  // `collect()` has to buffer a whole message before it can be decoded, so
+  // without a cap a peer can make the shared relay hold as much memory as it
+  // cares to stream at it.
+  //
+  // Verified to fail before the fix: with the cap removed from `collect`, the
+  // relay swallows all 2.4 MiB and answers normally, and this fails with
+  // `promise resolved instead of rejecting`.
+  it("refuses a request larger than the cap, and keeps serving afterwards", async () => {
+    const relay = await mk(true);
+    const flooder = await mk(false);
+    const honest = await mk(false);
+    const stop = await serveDiscovery(relay);
+    const addr = relay.getMultiaddrs()[0];
+    if (addr == null) throw new Error("relay has no listen address");
+
+    // Straight onto the discovery protocol rather than through
+    // `discoveryClient`, because the point is a peer that ignores the
+    // envelope's shape entirely and just streams.
+    const { call, close } = await connect({
+      node: flooder,
+      peer: addr,
+      protocol: DISCOVERY_PROTOCOL,
+    });
+    const flood = (async function* () {
+      for (let i = 0; i < 24; i++) yield new Uint8Array(100 * 1024).fill(7);
+    })();
+    await expect(
+      (async () => {
+        for await (const _chunk of call(flood)) {
+          // the relay is expected to error, not answer
+        }
+      })(),
+    ).rejects.toThrow(/exceeds 1048576 bytes/);
+    await close();
+
+    // The flood created no group, and the relay still answers a real peer.
+    const seen = await discoveryClient(honest, addr, "g1").announce(ann(honest, "svc"));
+    expect(seen).toStrictEqual([]);
+    expect(stop.groupCount).toBe(1);
+
+    await stop();
+    await Promise.allSettled([relay.stop(), flooder.stop(), honest.stop()]);
   });
 });

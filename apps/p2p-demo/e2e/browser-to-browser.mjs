@@ -2,7 +2,9 @@
 // servers exactly as scripts/start.sh does, opens the server page and the
 // client page in one real browser (Chromium or Firefox, via Playwright),
 // and asserts that the client discovers the server's service over
-// relay -> circuit -> WebRTC and mounts it.
+// relay -> circuit -> WebRTC, mounts it, and actually receives the remote
+// peer's bytes through it — both the mounted document and a sub-resource
+// the document itself fetches back over the same duplex.
 //
 // This is the only check in the libp2p-3.x-and-identity change that proves
 // two browsers actually find each other after gossipsub was ripped out and
@@ -114,6 +116,9 @@ log("relay + both dev servers are up");
 
 const browser = await engine.launch();
 const ctx = await browser.newContext();
+// Collected AND asserted on: an uncaught exception or a console error in
+// either page is a failure, not a footnote. Logging them without failing let
+// a broken run print PASS.
 const errors = [];
 const serverPage = await ctx.newPage();
 const clientPage = await ctx.newPage();
@@ -188,7 +193,57 @@ try {
   const mountCount = await clientPage.locator("#mounts .mount-card").count();
   log(`mounted ${mountCount} service card(s) in #mounts`);
 
-  log(`PASS — client discovered ${remoteSynth}'s "${svcTitle}" service and mounted it`);
+  // "Attached" is not "served": mountService (client-page/main.ts) builds the
+  // HostedSite and appends the iframe synchronously, while the dial and
+  // fetchOverDuplex happen lazily inside the ServiceWorker when the iframe
+  // fetches. If libp2p, WebRTC, the circuit path or the framing layer were
+  // broken, the iframe would still be attached and counted — it would just
+  // hold an error page. So read what is actually inside it.
+  const frame = await mountedIframe.contentFrame();
+  if (frame == null) throw new Error("mounted iframe has no content frame");
+  const heading = frame.locator("h1");
+  await heading.waitFor({ timeout: 30_000 });
+  const headingText = (await heading.textContent())?.trim();
+  // The remote peer bakes its own synthetic id into every page it serves
+  // (server-page/main.ts), so this text can only have come off the wire from
+  // that peer — no local fallback produces it.
+  if (!headingText || !headingText.includes(remoteSynth)) {
+    throw new Error(
+      `mounted iframe did not render ${remoteSynth}'s page over the duplex ` +
+        `(heading was ${JSON.stringify(headingText)})`,
+    );
+  }
+  log(`iframe rendered "${headingText}" — served by the remote peer`);
+
+  // Second proof, one level deeper: #t is filled by a fetch the *iframe
+  // document* makes for api/time, i.e. a sub-resource request routed through
+  // the ServiceWorker and back over the same duplex after the document
+  // itself loaded. It starts as "…" and becomes "error: …" if that fetch
+  // fails, so neither of those counts as served.
+  const timeLoc = frame.locator("#t");
+  let served = null;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    served = (await timeLoc.textContent())?.trim();
+    if (served && served !== "…") break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!served || served === "…" || served.startsWith("error")) {
+    throw new Error(`iframe never fetched api/time over the duplex: ${JSON.stringify(served)}`);
+  }
+  if (Number.isNaN(Date.parse(served))) {
+    throw new Error(`api/time over the duplex returned something that is not a time: ${served}`);
+  }
+  log(`iframe fetched api/time over the duplex: ${served}`);
+
+  if (errors.length) {
+    throw new Error(`page errors during the run:\n  ${errors.join("\n  ")}`);
+  }
+
+  log(
+    `PASS — client discovered ${remoteSynth}'s "${svcTitle}" service, mounted it, ` +
+      `and fetched its content over the peer-to-peer duplex`,
+  );
   exitCode = 0;
 } catch (err) {
   log(`FAIL — ${err instanceof Error ? err.message : String(err)}`);
