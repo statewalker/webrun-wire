@@ -15,6 +15,27 @@ import {
 const VERSIONS = new Set(["HTTP/1.1", "HTTP/1.0"]);
 const ABSOLUTE_FORM = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
+// RFC 3986 `authority` grammar, restricted to `host [ ":" port ]` (no
+// userinfo — RFC 9110 §7.2 excludes it from Host). Two shapes: an IP-literal
+// in brackets, or a reg-name of unreserved/sub-delims/pct-encoded characters,
+// which by construction excludes "@", "/", "?", "#", whitespace, and every
+// control character.
+const HOST_IP_LITERAL = /^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/;
+const HOST_REG_NAME = /^[A-Za-z0-9._~%!$&'()*+,;=-]+(:\d{1,5})?$/;
+
+/**
+ * Validates a `Host` header value taken off the wire. Untrusted input, so an
+ * unrecognised shape is a refusal, not a guess — a present-but-empty value or
+ * one carrying userinfo (`evil.com@good.com`) would otherwise splice
+ * unchecked into the reconstructed URL. Never applied to `opts.host`, which
+ * is trusted configuration.
+ */
+function assertValidHost(host: string): void {
+  if (!HOST_IP_LITERAL.test(host) && !HOST_REG_NAME.test(host)) {
+    throw new HttpParseError(`invalid Host header: ${JSON.stringify(host)}`);
+  }
+}
+
 /**
  * One message per Duplex call (ADR-0006), so bytes after a complete message
  * are an error. Checked against what is ALREADY BUFFERED rather than by
@@ -90,6 +111,7 @@ export async function decodeRequest(
     if (version === "HTTP/1.1" && host === undefined) {
       throw new HttpParseError("HTTP/1.1 request has no Host header");
     }
+    if (host !== undefined) assertValidHost(host);
     // The scheme is not on the wire in origin-form; it comes from config.
     url = `${opts.scheme}://${host ?? opts.host}${target}`;
   } else if (ABSOLUTE_FORM.test(target)) {

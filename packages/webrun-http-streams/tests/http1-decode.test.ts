@@ -103,6 +103,40 @@ describe("decodeRequest", () => {
     );
     await expect(text(body)).rejects.toThrow(/body truncated/);
   });
+
+  it("rejects a present-but-empty Host header", async () => {
+    await expect(decodeRequest([enc("GET /x HTTP/1.1\r\nHost: \r\n\r\n")], OPTS)).rejects.toThrow(
+      /invalid Host header/,
+    );
+  });
+
+  it("rejects a Host header carrying userinfo", async () => {
+    await expect(
+      decodeRequest([enc("GET /x HTTP/1.1\r\nHost: evil.com@good.com\r\n\r\n")], OPTS),
+    ).rejects.toThrow(/invalid Host header/);
+  });
+
+  it("rejects a Host header containing whitespace", async () => {
+    await expect(
+      decodeRequest([enc("GET /x HTTP/1.1\r\nHost: exa mple.test\r\n\r\n")], OPTS),
+    ).rejects.toThrow(/invalid Host header/);
+  });
+
+  it("accepts an IP-literal Host with a port", async () => {
+    const { envelope } = await decodeRequest(
+      [enc("GET /x HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n")],
+      OPTS,
+    );
+    expect(envelope.url).toBe("http://[::1]:8080/x");
+  });
+
+  it("accepts a reg-name Host with a port", async () => {
+    const { envelope } = await decodeRequest(
+      [enc("GET /x HTTP/1.1\r\nHost: example.test:8080\r\n\r\n")],
+      OPTS,
+    );
+    expect(envelope.url).toBe("http://example.test:8080/x");
+  });
 });
 
 describe("decodeResponse", () => {
