@@ -29,16 +29,22 @@ describe("note 15's proof questions, re-run against HTTP/1.1 framing", () => {
 
     const arrived: number[] = [];
     let seen = "";
+    let sentWhenFirstArrived = -1;
     const dec = new TextDecoder();
     for await (const chunk of decoded.body) {
       arrived.push(Date.now());
+      if (sentWhenFirstArrived === -1) sentWhenFirstArrived = sent.length;
       seen += dec.decode(chunk, { stream: true });
     }
     seen += dec.decode();
 
     expect(seen).toBe("chunk0chunk1chunk2chunk3");
-    // The assertion that matters: it fails if the codec ever silently buffers
-    // the whole body before handing any of it over.
+    // Streaming means the first chunk is handed over while the producer is still
+    // on its first chunk — not after it has run ahead. This catches partial
+    // buffering, which the arrival-vs-send comparison below cannot see.
+    expect(sentWhenFirstArrived).toBe(1);
+    // The assertion that mirrors the original proof: it fails if the codec ever
+    // silently buffers the whole body before handing any of it over.
     expect(arrived[0]).toBeLessThan(sent[sent.length - 1]);
   });
 
@@ -58,17 +64,30 @@ describe("note 15's proof questions, re-run against HTTP/1.1 framing", () => {
     );
 
     const arrived: number[] = [];
-    for await (const _chunk of decoded.body) arrived.push(Date.now());
+    let sentWhenFirstArrived = -1;
+    for await (const _chunk of decoded.body) {
+      arrived.push(Date.now());
+      if (sentWhenFirstArrived === -1) sentWhenFirstArrived = sent.length;
+    }
 
     expect(arrived).toHaveLength(4);
+    // Streaming means the first chunk is handed over while the producer is still
+    // on its first chunk — not after it has run ahead. This catches partial
+    // buffering, which the arrival-vs-send comparison below cannot see.
+    expect(sentWhenFirstArrived).toBe(1);
+    // The assertion that mirrors the original proof.
     expect(arrived[0]).toBeLessThan(sent[sent.length - 1]);
   });
 
   it("Q5: a 4 MB body transits in pieces, never as one buffer", async () => {
     const PIECE = new Uint8Array(64 * 1024).fill(0x61);
     const COUNT = 64; // 4 MiB
+    let sourceYielded = 0;
     async function* big() {
-      for (let i = 0; i < COUNT; i++) yield PIECE;
+      for (let i = 0; i < COUNT; i++) {
+        sourceYielded++;
+        yield PIECE;
+      }
     }
 
     const decoded = await httpCodec.decodeRequest(
@@ -78,14 +97,19 @@ describe("note 15's proof questions, re-run against HTTP/1.1 framing", () => {
     let total = 0;
     let largest = 0;
     let pieces = 0;
+    let sourceWhenFirstArrived = -1;
     for await (const chunk of decoded.body) {
       total += chunk.byteLength;
       largest = Math.max(largest, chunk.byteLength);
+      if (sourceWhenFirstArrived === -1) sourceWhenFirstArrived = sourceYielded;
       pieces += 1;
     }
 
     expect(total).toBe(COUNT * PIECE.byteLength);
     expect(pieces).toBeGreaterThan(1);
+    // The consumer sees data before the producer has run ahead: materiali​zation is
+    // bounded by the pull-driven consumption.
+    expect(sourceWhenFirstArrived).toBeLessThanOrEqual(2);
     // No step ever held more than one source piece at a time.
     expect(largest).toBeLessThanOrEqual(PIECE.byteLength);
   });
