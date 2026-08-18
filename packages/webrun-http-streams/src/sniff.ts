@@ -44,7 +44,8 @@ export function newSniffingCodec(options: SniffingCodecOptions): MessageCodec {
     encodeResponse: (env, body, o) => write.encodeResponse(env, body, o),
     decodeRequest: async (input) => {
       const picked = await pick(input);
-      return picked.codec.decodeRequest(picked.input);
+      const decoded = await picked.codec.decodeRequest(picked.input);
+      return { ...decoded, codec: picked.codec };
     },
     decodeResponse: async (input, o) => {
       const picked = await pick(input);

@@ -47,7 +47,7 @@ describe("httpFetch / httpServe (data layer)", () => {
       out.set(b, off);
       off += b.byteLength;
     }
-    expect(new TextDecoder().decode(out)).toBe("hello GET /x");
+    expect(new TextDecoder().decode(out)).toBe("hello GET http://localhost/x");
   });
 
   it("POST round-trips a streaming body", async () => {

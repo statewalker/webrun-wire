@@ -1,6 +1,27 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
-import { httpFetch, httpServe } from "./http-data.js";
+import { type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
+
+/**
+ * Connection-scoped headers. The codec surfaces them verbatim (decision 12),
+ * but they are meaningless to a `Request`/`Response`, and re-emitting them
+ * from a relay would corrupt its framing.
+ */
+const HOP_BY_HOP = new Set([
+  "connection",
+  "host",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+function forwardableHeaders(headers: [string, string][]): [string, string][] {
+  return headers.filter(([name]) => !HOP_BY_HOP.has(name.toLowerCase()));
+}
 
 function headersToArray(headers: Headers): [string, string][] {
   const out: [string, string][] = [];
@@ -67,7 +88,11 @@ function asyncIterableToReadable(iter: AsyncIterable<Uint8Array>): ReadableStrea
  * the other side. The request's `signal` is plumbed into the body iteration —
  * abort terminates the underlying call.
  */
-export async function fetchOverDuplex(call: Duplex, request: Request): Promise<Response> {
+export async function fetchOverDuplex(
+  call: Duplex,
+  request: Request,
+  options: HttpDataOptions = {},
+): Promise<Response> {
   if (request.signal?.aborted) throw abortReason(request.signal);
   const env: RequestEnvelope = {
     url: request.url,
@@ -75,11 +100,11 @@ export async function fetchOverDuplex(call: Duplex, request: Request): Promise<R
     headers: headersToArray(request.headers),
   };
   const body = request.body ? readableToAsyncIterable(request.body) : undefined;
-  const { envelope, body: respBody } = await httpFetch(call, env, body);
+  const { envelope, body: respBody } = await httpFetch(call, env, body, options);
   return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), {
     status: envelope.status,
     statusText: envelope.statusText,
-    headers: envelope.headers,
+    headers: forwardableHeaders(envelope.headers),
   });
 }
 
@@ -87,11 +112,14 @@ export async function fetchOverDuplex(call: Duplex, request: Request): Promise<R
  * Wrap a `(Request) => Promise<Response>` handler as a `Duplex` so it can be
  * registered with any `webrun-streams-*` adapter's `serve`.
  */
-export function serveFetchOverDuplex(handler: (request: Request) => Promise<Response>): Duplex {
+export function serveFetchOverDuplex(
+  handler: (request: Request) => Promise<Response>,
+  options: HttpDataOptions = {},
+): Duplex {
   return httpServe(async (env, body) => {
     const reqInit: RequestInit = {
       method: env.method,
-      headers: env.headers,
+      headers: forwardableHeaders(env.headers),
     };
     if (env.method !== "GET" && env.method !== "HEAD") {
       reqInit.body = asyncIterableToReadable(body);
@@ -108,7 +136,7 @@ export function serveFetchOverDuplex(handler: (request: Request) => Promise<Resp
       envelope: respEnv,
       body: response.body ? readableToAsyncIterable(response.body) : undefined,
     };
-  });
+  }, options);
 }
 
 async function* withAbort(

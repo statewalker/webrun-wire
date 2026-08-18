@@ -16,6 +16,8 @@ export type ResponseEnvelope = {
 export type DecodedRequest = {
   envelope: RequestEnvelope;
   body: AsyncIterable<Uint8Array>;
+  /** The codec that actually read this message; set by the sniffing codec. */
+  codec?: MessageCodec;
 };
 
 export type DecodedResponse = {

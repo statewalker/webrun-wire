@@ -1,5 +1,6 @@
 import type { Serve } from "@statewalker/webrun-streams";
 import { serveFetchOverDuplex } from "./fetch.js";
+import type { MessageCodec } from "./message.js";
 
 /**
  * Structural alias of `SiteHandler` from `@statewalker/webrun-site-builder`.
@@ -29,9 +30,16 @@ export type SiteHandler = (request: Request) => Promise<Response>;
  */
 export class DuplexSiteBuilder {
   #handler?: SiteHandler;
+  #codec?: MessageCodec;
 
   setHandler(handler: SiteHandler): this {
     this.#handler = handler;
+    return this;
+  }
+
+  /** Pin the wire format. Defaults to HTTP/1.1 with legacy acceptance. */
+  setCodec(codec: MessageCodec): this {
+    this.#codec = codec;
     return this;
   }
 
@@ -42,7 +50,7 @@ export class DuplexSiteBuilder {
     const handler = this.#handler;
     return serve(
       params,
-      serveFetchOverDuplex(async (req) => handler(req)),
+      serveFetchOverDuplex(async (req) => handler(req), { codec: this.#codec }),
     );
   }
 }
