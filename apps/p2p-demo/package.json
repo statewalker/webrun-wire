@@ -12,7 +12,8 @@
     "build:server-page": "vite build --config vite.server.config.ts",
     "build:client-page": "vite build --config vite.client.config.ts",
     "build": "pnpm run build:server-page && pnpm run build:client-page",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/browser-to-browser.mjs"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "17.0.0",
@@ -34,6 +35,7 @@
   "devDependencies": {
     "@statewalker/webrun-http-browser": "workspace:*",
     "@types/node": "catalog:",
+    "playwright": "1.58.0",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
