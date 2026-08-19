@@ -261,7 +261,25 @@ export function emulateMux(
   const handleFrame = (frame: Uint8Array): void => {
     if (muxClosed) return;
     if (frame.byteLength < 2) return;
-    const { value: id, offset } = decodeVarint(frame, 0);
+
+    // The id is the one field parsed from untrusted bytes before we know which
+    // stream a frame belongs to, and decodeVarint throws on a truncated or
+    // over-long encoding. Left unguarded that exception escapes handleFrame,
+    // reaches the inbound loop's catch, and calls failAll — so a single
+    // malformed frame tears down every stream on the connection.
+    //
+    // A ByteChannel is message-oriented, so frames are discrete and a corrupt
+    // one cannot desync the next. Dropping it is therefore safe, and is what
+    // keeps one bad frame from becoming a denial of service against every
+    // healthy stream sharing the mux.
+    let id: number;
+    let offset: number;
+    try {
+      ({ value: id, offset } = decodeVarint(frame, 0));
+    } catch {
+      return;
+    }
+    if (offset >= frame.byteLength) return; // id consumed the whole frame: no type byte
     const type = frame[offset];
     const payload = frame.subarray(offset + 1);
 
