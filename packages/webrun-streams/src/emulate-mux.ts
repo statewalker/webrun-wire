@@ -519,7 +519,7 @@ function decodeVarint(buf: Uint8Array, start: number): { value: number; offset: 
   let shift = 0;
   let i = start;
   while (i < buf.length) {
-    const b = buf[i++];
+    const b = buf[i++]!; // i < buf.length, checked by the while condition, so this index exists
     value |= (b & 0x7f) << shift;
     if ((b & 0x80) === 0) return { value: value >>> 0, offset: i };
     shift += 7;

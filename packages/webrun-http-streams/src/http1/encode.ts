@@ -47,7 +47,10 @@ export function splitTarget(
   if (!match) {
     throw new HttpParseError(`cannot derive a request target from url: ${JSON.stringify(url)}`);
   }
-  const rawAuthority = match[1];
+  // Both capture groups are mandatory in the regex above (neither is
+  // `?`-quantified), so a successful match always populates them — an empty
+  // string is possible, `undefined` is not.
+  const rawAuthority = match[1]!;
   if (rawAuthority === "") {
     throw new HttpParseError(`url has no authority: ${JSON.stringify(url)}`);
   }
@@ -57,7 +60,7 @@ export function splitTarget(
   const authority = at === -1 ? rawAuthority : rawAuthority.slice(at + 1);
   assertValidHost(authority);
 
-  const rawTarget = match[2];
+  const rawTarget = match[2]!;
   const target = rawTarget === "" ? "/" : rawTarget.startsWith("/") ? rawTarget : `/${rawTarget}`;
   assertValidTarget(target);
   return { target, authority };
@@ -127,7 +130,11 @@ export async function* encodeRequest(
 export async function* encodeResponse(
   env: ResponseEnvelope,
   body: ByteSource | undefined,
-  opts: ResolvedHttpCodecOptions,
+  // Unused: response encoding needs no scheme/host/maxHeaderBytes. Kept
+  // positionally so this signature mirrors `encodeRequest`'s, which the
+  // `newHttpCodec` wrapper in ./index.ts relies on when partially applying
+  // `opts` to both.
+  _opts: ResolvedHttpCodecOptions,
   requestMethod?: string,
 ): AsyncGenerator<Uint8Array> {
   if (!Number.isInteger(env.status) || env.status < 100 || env.status > 599) {

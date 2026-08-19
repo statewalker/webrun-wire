@@ -29,7 +29,7 @@ export function isToken(value: string): boolean {
  */
 export function decodeLatin1(bytes: Uint8Array): string {
   let out = "";
-  for (let i = 0; i < bytes.byteLength; i++) out += String.fromCharCode(bytes[i]);
+  for (const byte of bytes) out += String.fromCharCode(byte);
   return out;
 }
 

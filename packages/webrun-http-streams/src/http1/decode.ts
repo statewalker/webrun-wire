@@ -113,7 +113,8 @@ export async function decodeRequest(
     if (parts.length !== 3) {
       throw new HttpParseError(`malformed request line: ${quoteLine(startLine)}`);
     }
-    const [method, target, version] = parts;
+    // `parts.length === 3` is checked above, so all three elements are present.
+    const [method, target, version] = parts as [string, string, string];
     if (!isToken(method)) throw new HttpParseError(`invalid method: ${JSON.stringify(method)}`);
     if (!VERSIONS.has(version)) {
       throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
