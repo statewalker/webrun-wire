@@ -29,8 +29,9 @@ export interface SerializedHttpEnvelope<Options> {
 export type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 // Statuses that MUST NOT carry a body — `new Response(body, { status })` throws
-// for these (per the Fetch spec's "null body status" set).
-const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+// for these (per the Fetch spec's "null body status" set). Exported so
+// `fetch.ts` mirrors this exact set rather than redefining it.
+export const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
 
 const REQUEST_FIELDS = [
   "url",
