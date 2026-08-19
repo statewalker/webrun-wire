@@ -231,3 +231,97 @@ describe("emulateMux", () => {
     await server.close();
   });
 });
+
+describe("stream-table lifecycle", () => {
+  it("frees the client-side slot after a normally-completed call", async () => {
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 2 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 2 });
+    server.serve(async function* echo(input) {
+      for await (const chunk of input) yield chunk;
+    });
+
+    // Three sequential calls, each fully drained, against a table of 2.
+    for (let i = 0; i < 3; i++) {
+      const out = await collectBytes(client.call([utf8.encode(`call-${i}`)]));
+      expect(new TextDecoder().decode(out)).toBe(`call-${i}`);
+    }
+
+    await client.close();
+    await server.close();
+  });
+
+  it("frees the server-side slot after a normally-completed call", async () => {
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 8 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 2 });
+    server.serve(async function* echo(input) {
+      for await (const chunk of input) yield chunk;
+    });
+
+    // The server's table is the small one here, so exhaustion proves the
+    // responder side leaks independently of the initiator.
+    for (let i = 0; i < 3; i++) {
+      const out = await collectBytes(client.call([utf8.encode(`s-${i}`)]));
+      expect(new TextDecoder().decode(out)).toBe(`s-${i}`);
+    }
+
+    await client.close();
+    await server.close();
+  });
+
+  it("does not release while our outbound is still pumping after the peer's END", async () => {
+    // Full-duplex: the peer finishes sending before we do. Releasing on
+    // inbound END alone would set `closed`, which pumpOutbound checks — our
+    // remaining chunks would be silently dropped.
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 4 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 4 });
+
+    const received: string[] = [];
+    server.serve(async function* (input) {
+      yield utf8.encode("early-reply");
+      for await (const chunk of input) received.push(new TextDecoder().decode(chunk));
+    });
+
+    async function* slowInput() {
+      for (const part of ["one", "two", "three"]) {
+        await new Promise((r) => setTimeout(r, 15));
+        yield utf8.encode(part);
+      }
+    }
+
+    const out = await collectBytes(client.call(slowInput()));
+    expect(new TextDecoder().decode(out)).toBe("early-reply");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(received.join(",")).toBe("one,two,three");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("frees the slot when the caller cancels the response generator", async () => {
+    // The documented way to abandon a call is `.return()` on the output, which
+    // fires onCancel -> TYPE_CLOSE -> teardown. A caller that neither drains
+    // nor cancels emits no observable signal at all: it never ACKs, so the
+    // peer's pump blocks awaiting that ACK and no END is ever exchanged. That
+    // is a caller-contract violation the mux cannot detect, not a leak.
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 2 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 8 });
+    server.serve(async function* (input) {
+      for await (const chunk of input) yield chunk;
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const out = client.call([utf8.encode(`cancelled-${i}`)]);
+      await out.next();
+      await out.return(undefined);
+    }
+    const out = await collectBytes(client.call([utf8.encode("still-works")]));
+    expect(new TextDecoder().decode(out)).toBe("still-works");
+
+    await client.close();
+    await server.close();
+  });
+});
