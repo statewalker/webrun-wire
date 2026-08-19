@@ -9,8 +9,9 @@ import {
   encodeHeaderLines,
   encodeLatin1,
   getAll,
-  type HeaderList,
+  isBodylessStatus,
   isToken,
+  parseContentLength,
   withoutHeaders,
 } from "./headers.js";
 
@@ -23,8 +24,6 @@ export type ResolvedHttpCodecOptions = {
 /** Headers the codec owns: a caller-supplied copy is dropped and re-derived. */
 const REQUEST_OWNED = ["host", "connection", "transfer-encoding"];
 const RESPONSE_OWNED = ["connection", "transfer-encoding"];
-
-const NO_BODY_STATUSES = new Set([204, 304]);
 
 /**
  * Split a URL into an origin-form request target and an authority *without*
@@ -62,20 +61,6 @@ export function splitTarget(
   const target = rawTarget === "" ? "/" : rawTarget.startsWith("/") ? rawTarget : `/${rawTarget}`;
   assertValidTarget(target);
   return { target, authority };
-}
-
-function declaredLength(headers: HeaderList): number | undefined {
-  const values = getAll(headers, "content-length");
-  if (values.length === 0) return undefined;
-  const unique = new Set(values.map((v) => v.trim()));
-  if (unique.size !== 1) {
-    throw new HttpParseError(`conflicting Content-Length values: ${[...unique].join(", ")}`);
-  }
-  const raw = [...unique][0];
-  if (!/^\d{1,15}$/.test(raw)) {
-    throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);
-  }
-  return Number(raw);
 }
 
 async function* emitBody(
@@ -116,7 +101,7 @@ export async function* encodeRequest(
   }
 
   const carried = withoutHeaders(env.headers, REQUEST_OWNED);
-  const declared = declaredLength(carried);
+  const declared = parseContentLength(getAll(carried, "content-length"));
 
   let head = `${env.method} ${target} HTTP/1.1\r\n`;
   head += `Host: ${authority}\r\n`;
@@ -156,12 +141,12 @@ export async function* encodeResponse(
   // response to HEAD is different: no body is sent on *this* response, but
   // the Content-Length describes the body a GET would have sent, so it stays
   // (M4).
-  const bodylessStatus = env.status < 200 || NO_BODY_STATUSES.has(env.status);
+  const bodylessStatus = isBodylessStatus(env.status);
   const bodyless = bodylessStatus || requestMethod?.toUpperCase() === "HEAD";
 
   const owned = bodylessStatus ? [...RESPONSE_OWNED, "content-length"] : RESPONSE_OWNED;
   const carried = withoutHeaders(env.headers, owned);
-  const declared = declaredLength(carried);
+  const declared = parseContentLength(getAll(carried, "content-length"));
 
   let head = `HTTP/1.1 ${env.status} ${reason}\r\n`;
   head += encodeHeaderLines(carried);

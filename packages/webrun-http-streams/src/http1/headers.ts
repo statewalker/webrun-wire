@@ -174,6 +174,44 @@ export function withoutHeaders(headers: HeaderList, names: string[]): HeaderList
   return headers.filter(([k]) => !drop.has(k.toLowerCase()));
 }
 
+/**
+ * Parse a `Content-Length` field into a single validated value.
+ *
+ * RFC 9110 §8.6 permits the value to be a comma-separated list of identical
+ * numbers (a relay may have appended one), so the list is folded; differing
+ * values are a refusal, not a choice. Shared by `resolveFraming` on decode and
+ * by the encoder's declared-length check, which previously carried its own
+ * copy that did NOT split on commas — so decode accepted `5, 5` while encode
+ * rejected it, and a relay that decoded then re-encoded threw.
+ *
+ * Returns undefined when the field is absent.
+ */
+export function parseContentLength(values: string[]): number | undefined {
+  if (values.length === 0) return undefined;
+  const unique = new Set(values.flatMap((v) => v.split(",").map((s) => s.trim())));
+  if (unique.size !== 1) {
+    throw new HttpParseError(`conflicting Content-Length values: ${[...unique].join(", ")}`);
+  }
+  const raw = [...unique][0];
+  if (!/^\d{1,15}$/.test(raw)) {
+    throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);
+  }
+  return Number(raw);
+}
+
+/**
+ * Statuses that carry no body whatever the headers say (RFC 9110 §8.6): 1xx,
+ * 204 and 304. Defined once because the encoder must not frame a body for
+ * them and the decoder must not try to read one — two lists that agreed today
+ * and were free to drift tomorrow.
+ *
+ * A response to HEAD is also bodyless, but that depends on the request rather
+ * than the status, so callers test it separately.
+ */
+export function isBodylessStatus(status: number): boolean {
+  return status < 200 || status === 204 || status === 304;
+}
+
 export type BodyFraming =
   | { kind: "chunked" }
   | { kind: "length"; length: number }
@@ -209,16 +247,9 @@ export function resolveFraming(headers: HeaderList, version: string): BodyFramin
     return { kind: "chunked" };
   }
 
-  if (cl.length > 0) {
-    const values = new Set(cl.flatMap((v) => v.split(",").map((s) => s.trim())));
-    if (values.size !== 1) {
-      throw new HttpParseError(`conflicting Content-Length values: ${[...values].join(", ")}`);
-    }
-    const raw = [...values][0];
-    if (!/^\d{1,15}$/.test(raw)) {
-      throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);
-    }
-    return { kind: "length", length: Number(raw) };
+  const length = parseContentLength(cl);
+  if (length !== undefined) {
+    return { kind: "length", length };
   }
 
   return { kind: "none" };

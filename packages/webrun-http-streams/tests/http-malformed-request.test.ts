@@ -1,0 +1,54 @@
+import type { Duplex } from "@statewalker/webrun-streams";
+import { describe, expect, it } from "vitest";
+import { httpCodec } from "../src/http1/index.js";
+import { httpServe } from "../src/index.js";
+
+const enc = (s: string) => new TextEncoder().encode(s);
+
+describe("malformed request", () => {
+  it("gets a conforming 400 rather than silence", async () => {
+    const serve: Duplex = httpServe(async () => ({
+      envelope: { status: 200, statusText: "OK", headers: [] },
+      body: [enc("never reached")],
+    }));
+    // Two Host headers: a refusal the decoder raises before any handler runs.
+    const bad = "GET /x HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n";
+    const decoded = await httpCodec.decodeResponse(serve([enc(bad)]), { method: "GET" });
+    expect(decoded.envelope.status).toBe(400);
+    let body = "";
+    for await (const c of decoded.body) body += new TextDecoder().decode(c);
+    expect(body).toMatch(/multiple Host headers/);
+  });
+
+  it("a genuine transport error still propagates, not turned into a 400", async () => {
+    const boom = new Error("transport exploded");
+    const serve: Duplex = httpServe(async () => ({
+      envelope: { status: 200, statusText: "OK", headers: [] },
+      body: [],
+    }));
+    async function* failing(): AsyncGenerator<Uint8Array> {
+      yield enc("GET /x HTTP/1.1\r\n");
+      throw boom;
+    }
+    await expect(async () => {
+      for await (const _c of serve(failing())) {
+        /* drain */
+      }
+    }).rejects.toThrow(/transport exploded/);
+  });
+
+  it("a real peer can read the 400 as conforming HTTP", async () => {
+    const serve: Duplex = httpServe(async () => ({
+      envelope: { status: 200, statusText: "OK", headers: [] },
+      body: [],
+    }));
+    let wire = "";
+    const dec = new TextDecoder();
+    for await (const c of serve([enc("GET /x HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n")])) {
+      wire += dec.decode(c, { stream: true });
+    }
+    wire += dec.decode();
+    expect(wire.startsWith("HTTP/1.1 400 Bad Request\r\n")).toBe(true);
+    expect(wire).toContain("Connection: close\r\n");
+  });
+});

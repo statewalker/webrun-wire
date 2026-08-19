@@ -9,6 +9,7 @@ import {
   type BodyFraming,
   decodeLatin1,
   getAll,
+  isBodylessStatus,
   isToken,
   readHeaderSection,
   resolveFraming,
@@ -180,8 +181,7 @@ export async function decodeResponse(
 
     const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
 
-    const bodyless =
-      status < 200 || status === 204 || status === 304 || method.toUpperCase() === "HEAD";
+    const bodyless = isBodylessStatus(status) || method.toUpperCase() === "HEAD";
     const framing: BodyFraming = bodyless ? { kind: "none" } : resolveFraming(headers, version);
 
     return {

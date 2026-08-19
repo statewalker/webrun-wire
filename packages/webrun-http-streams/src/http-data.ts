@@ -2,7 +2,14 @@ import type { Duplex } from "@statewalker/webrun-streams";
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 import { discard } from "./bytes.js";
 import { defaultCodec } from "./codec-default.js";
-import type { ByteSource, MessageCodec, RequestEnvelope, ResponseEnvelope } from "./message.js";
+import { HttpParseError } from "./http1/errors.js";
+import type {
+  ByteSource,
+  DecodedRequest,
+  MessageCodec,
+  RequestEnvelope,
+  ResponseEnvelope,
+} from "./message.js";
 
 /** Carries the serialized JS error between two webrun peers. */
 export const PEER_ERROR_HEADER = "x-webrun-error";
@@ -59,6 +66,8 @@ function encodeErrorResponse(
   codec: MessageCodec,
   error: unknown,
   method: string,
+  status = 500,
+  statusText = "Internal Server Error",
 ): AsyncGenerator<Uint8Array> {
   const serialized = serializeError(error);
   let detail = asciiJson(serialized);
@@ -68,11 +77,11 @@ function encodeErrorResponse(
   // report "head section exceeds 65536 bytes" instead of the peer's actual
   // error (M3). Truncate unconditionally as the last resort.
   if (detail.length > MAX_DETAIL_CHARS) detail = detail.slice(0, MAX_DETAIL_CHARS);
-  const message = serialized.message ?? "Internal Server Error";
+  const message = serialized.message ?? statusText;
   return codec.encodeResponse(
     {
-      status: 500,
-      statusText: "Internal Server Error",
+      status,
+      statusText,
       headers: [
         ["Content-Type", "text/plain; charset=utf-8"],
         [PEER_ERROR_HEADER, detail],
@@ -155,7 +164,26 @@ export async function httpFetch(
 export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {}): Duplex {
   const codec = options.codec ?? defaultCodec;
   return async function* httpHandlerDuplex(input) {
-    const decoded = await codec.decodeRequest(input);
+    // A refusal to parse the request must still produce a response. Left
+    // uncaught, the exception propagates out of this generator and NOTHING is
+    // written — a real peer waits, then sees the connection end with no status
+    // at all, which is the one place the "a real peer cannot receive a
+    // JavaScript exception" rule was not applied.
+    //
+    // Only HttpParseError is converted: that is the codec's refusal type, so
+    // it means the bytes were malformed. A transport failure is not our 400 to
+    // send and must keep propagating.
+    let decoded: DecodedRequest;
+    try {
+      decoded = await codec.decodeRequest(input);
+    } catch (error) {
+      if (!(error instanceof HttpParseError)) throw error;
+      // The method is unknowable — the request line may be what failed — so
+      // encode as if for GET, which permits a body and so lets the peer read
+      // why it was refused.
+      yield* encodeErrorResponse(codec, error, "GET", 400, "Bad Request");
+      return;
+    }
     // Reply in kind: answer with the codec that actually read the request, so a
     // peer pinned to one format is never answered in the other.
     const replyCodec = decoded.codec ?? codec;
