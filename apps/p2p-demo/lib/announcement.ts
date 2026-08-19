@@ -4,10 +4,10 @@
  * current catalog plus a timestamp; receivers replace the peer's entry on
  * each message rather than merging.
  *
- * Peer presence + multiaddrs are owned by `@libp2p/pubsub-peer-discovery`
- * on a sibling `webrun/<groupId>/peer-discovery` topic, so multiaddrs do
- * not appear in this message. Consumers look them up via
- * `node.peerStore.get(peerId)` at mount time.
+ * Peer presence comes from the relay's reply to a `discoveryClient.announce`
+ * call (see `discovery.ts`), so multiaddrs do not appear in this message.
+ * Consumers construct the dial address directly from the known relay
+ * multiaddr plus the peer id at mount time, rather than looking one up.
  *
  * The `leave: true` flag marks a graceful-shutdown variant. Receivers that
  * see it evict the peer immediately instead of waiting for TTL expiry. The

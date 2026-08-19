@@ -20,6 +20,7 @@
     "server-page",
     "client-page",
     "lib",
+    "tests",
     "vite.server.config.ts",
     "vite.client.config.ts"
   ]

@@ -1,14 +1,11 @@
 /// <reference types="vite/client" />
-import { gossipsub } from "@chainsafe/libp2p-gossipsub";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { identify } from "@libp2p/identify";
-import { pubsubPeerDiscovery } from "@libp2p/pubsub-peer-discovery";
 import { webRTC } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
 import { createLibp2p, type Libp2p } from "libp2p";
-import { peerDiscoveryTopic } from "./group-topics.js";
 
 /**
  * Read the relay multiaddr from the Vite-injected env var. The launcher
@@ -36,18 +33,13 @@ export function readRelayMultiaddr(): string {
  * multiaddrs. The "server" variant additionally listens on `/p2p-circuit`
  * so the relay can advertise a reachable circuit address for it.
  *
- * The factory takes `groupId` because two libp2p services must be
- * registered at node-creation time and need to know the per-group topic:
- *
- * 1. `pubsub: gossipsub()` — required by `joinGroup` (services topic).
- * 2. `peerDiscovery: [pubsubPeerDiscovery({topics: [peerDiscoveryTopic]})]`
- *    — feeds libp2p's discovery pipeline so the connection manager auto-
- *    dials peers in the same group; first `[Mount]` is instant because
- *    the connection is already warm.
+ * Peer discovery and the group's service catalog are both handled by the
+ * relay-mediated request/response discovery protocol (`lib/discovery.ts`),
+ * not by any libp2p service registered here — `groupId` is kept in the
+ * signature only so callers don't need to special-case this factory.
  */
 export function createBrowserLibp2pNode({
   listen,
-  groupId,
 }: {
   listen: string[];
   groupId: string;
@@ -57,15 +49,36 @@ export function createBrowserLibp2pNode({
     transports: [webSockets(), webRTC(), circuitRelayTransport()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
-    peerDiscovery: [
-      pubsubPeerDiscovery({
-        topics: [peerDiscoveryTopic(groupId)],
-        interval: 5_000,
-      }),
-    ],
+    // libp2p 3.x's browser-only default connection gater denies dialling
+    // BOTH insecure `ws://` addresses and private/loopback addresses (see
+    // `libp2p/dist/src/config/connection-gater.browser.js`). This demo's
+    // relay is exactly that: `ws://127.0.0.1:<port>` in `relay/server.ts`.
+    // With the default gater every dial the app makes — to the relay
+    // itself, and to every `${relayMultiaddr}/p2p-circuit/webrtc/p2p/...`
+    // peer address derived from it — is denied before any handshake, so
+    // discovery and mounting never work at all.
+    //
+    // Gated on `import.meta.env.DEV` (false in a production build) rather
+    // than left as a bare relaxation, so a future `apps/p2p-demo/deploy/`
+    // build that reuses this factory unchanged falls back to libp2p's
+    // default posture automatically instead of silently shipping with
+    // its dial protections disabled — a comment alone doesn't stop that,
+    // only a code guard does.
+    connectionGater: import.meta.env.DEV
+      ? {
+          // Local development only: the demo's relay is reached at
+          // /ip4/127.0.0.1/tcp/9090/ws, which libp2p 3.x's browser default
+          // gater denies on two counts — insecure websocket and private
+          // address. The same gater also sees the derived
+          // /p2p-circuit/webrtc/ peer addresses, so both dial paths need it.
+          denyDialMultiaddr: async () => false,
+        }
+      : // Production (see apps/p2p-demo/deploy/): wss:// on a real DNS
+        // name, where libp2p's default posture is the correct one. Do not
+        // relax it here.
+        undefined,
     services: {
       identify: identify(),
-      pubsub: gossipsub({ allowPublishToZeroTopicPeers: true }),
     },
   });
 }

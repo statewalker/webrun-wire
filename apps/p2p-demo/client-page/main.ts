@@ -72,15 +72,11 @@ async function getOrOpenHandle(peerId: string): Promise<CallHandle | undefined> 
   const existing = handles.get(peerId);
   if (existing) return existing;
 
-  // Construct the dial address from the known relay multiaddr. We do NOT
-  // use peerStore multiaddrs because:
-  //   1. pubsub-peer-discovery broadcasts whatever node.getMultiaddrs()
-  //      returns at the moment, which can be local-only / non-/webrtc
-  //      before the server's circuit-relay reservation lands.
-  //   2. libp2p's auto-dial (triggered by pubsub-peer-discovery) may have
-  //      already opened a *limited* relay-only connection using a non-
-  //      /webrtc form. Custom protocols cannot ride on a limited
-  //      connection ("Cannot open protocol stream on limited connection").
+  // Construct the dial address from the known relay multiaddr rather than
+  // any address discovered via peerStore. A limited relay-only connection
+  // (opened via a non-/webrtc form) can't carry custom protocols ("Cannot
+  // open protocol stream on limited connection"), so we must dial with the
+  // exact form below to force the WebRTC upgrade.
   //
   // The /webrtc segment between /p2p-circuit and /p2p/<peer> tells libp2p
   // to upgrade to a direct browser-to-browser WebRTC connection. Doing the
@@ -412,10 +408,13 @@ async function start(): Promise<void> {
 
   // Keep the relay link alive. libp2p does not auto-redial peers we
   // explicitly dialed at boot, so if the WS connection to the relay drops
-  // (browser tab suspended, network change, etc.) gossipsub freezes and
-  // new mounts can't dial through the relay's /p2p-circuit/. Poll every
-  // 10 s and re-dial if there's no open connection to the relay peer.
-  const relayPeerIdStr = multiaddr(relayMultiaddr).getPeerId();
+  // (browser tab suspended, network change, etc.) discovery announces to
+  // the relay start failing and new mounts can't dial through the relay's
+  // /p2p-circuit/. Poll every 10 s and re-dial if there's no open
+  // connection to the relay peer.
+  const relayPeerIdStr = multiaddr(relayMultiaddr)
+    .getComponents()
+    .find((c) => c.name === "p2p")?.value;
   if (relayPeerIdStr) {
     const relayPid = peerIdFromString(relayPeerIdStr);
     setInterval(async () => {
@@ -433,7 +432,7 @@ async function start(): Promise<void> {
     }, 10_000);
   }
 
-  group = await joinGroup({ node, groupId: GROUP_ID });
+  group = await joinGroup({ node, groupId: GROUP_ID, relay: multiaddr(relayMultiaddr) });
   group.on("change", () => {
     // Reconcile: peers that left the state drop their cached handle. The
     // iframe stays mounted as a ghost row until the user unmounts.

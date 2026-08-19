@@ -1,8 +1,34 @@
-import type { Stream } from "@libp2p/interface";
+import type { Stream, StreamCloseEvent } from "@libp2p/interface";
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 
 const TYPE_DATA = 0x00;
 const TYPE_ERROR = 0x02;
+
+/**
+ * Default bound for {@link closeStream}'s wait for a graceful close. Matches
+ * 2.x's own default (`DEFAULT_SEND_CLOSE_WRITE_TIMEOUT`,
+ * `@libp2p/utils@6.7.2/dist/src/abstract-stream.js:7`) — this restores that
+ * bound rather than inventing a new number.
+ */
+const DEFAULT_CLOSE_TIMEOUT_MS = 5000;
+
+/**
+ * Default bound for {@link waitForDrain}'s wait for the peer to make room in
+ * its receive window. Without a bound, a peer that requests something and then
+ * simply stops reading — alive, so no `close` event ever fires — parks the
+ * serving side's outbound pump forever, holding the stream, the handler and
+ * whatever the handler buffered. On the serving side there is no escape hatch:
+ * `connect`'s `.return`/abort override is a *caller*-side affordance.
+ *
+ * The number is deliberately generous, because a bound that is too tight
+ * resets a slow-but-alive peer mid-transfer — exactly what backpressure exists
+ * to avoid. Five minutes covers a peer draining a full yamux receive window
+ * (256 KiB by default) at under 1 KiB/s, i.e. slower than any link on which
+ * the transfer would complete anyway; a peer slower than that is
+ * indistinguishable from one that has stopped reading altogether. Override via
+ * `drainTimeoutMs` when a deployment knows better.
+ */
+export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -27,6 +53,11 @@ export interface DuplexOverStreamOptions {
    * gracefully close vs forcibly abort the underlying stream on teardown.
    */
   onSourceCompleted?(): void;
+  /**
+   * How long to wait for a backpressured stream to drain before giving up on
+   * the peer. Defaults to {@link DEFAULT_DRAIN_TIMEOUT_MS}.
+   */
+  drainTimeoutMs?: number;
 }
 
 /**
@@ -37,7 +68,7 @@ export interface DuplexOverStreamOptions {
  *
  * Types are `DATA` (0x00, body bytes) and `ERROR` (0x02, followed by a
  * JSON-serialised `Error`). Normal end-of-input is signalled by libp2p's
- * `closeWrite()`. The frame layer exists so we can preserve `Error` fidelity
+ * `close()`. The frame layer exists so we can preserve `Error` fidelity
  * across the wire (yamux's native stream reset only carries "stream reset").
  */
 export async function* duplexOverStream(
@@ -55,10 +86,22 @@ export async function* duplexOverStream(
   const outboundSource = framedOutbound(input);
   const outbound = (async () => {
     try {
-      await (stream as unknown as { sink(s: AsyncIterable<Uint8Array>): Promise<void> }).sink(
-        outboundSource,
-      );
-      await stream.closeWrite();
+      // libp2p 3.x streams are push-based (`send()` + drain) rather than
+      // the pull-based `sink(AsyncIterable)` of 2.x, so we pump the framed
+      // outbound generator by hand and honour backpressure by waiting for
+      // the stream's `'drain'` event whenever `send()` reports its buffer
+      // is full. We deliberately do NOT use `stream.onDrain()`: it
+      // memoises a single promise for the stream's whole lifetime and
+      // never clears it (`@libp2p/utils@7.3.2/dist/src/abstract-message-stream.js`),
+      // so past the first backpressure cycle it resolves instantly while
+      // the buffer is still full, defeating flow control entirely.
+      for await (const chunk of outboundSource) {
+        const canAcceptMore = stream.send(chunk);
+        if (!canAcceptMore) {
+          await waitForDrain(stream, opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS);
+        }
+      }
+      await closeStream(stream);
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       try {
@@ -80,7 +123,16 @@ export async function* duplexOverStream(
 
   let sourceCompleted = false;
   try {
-    for await (const frame of parseFrames(stream.source)) {
+    // libp2p 3.x `Stream` is itself the readable `AsyncIterable` (it no
+    // longer exposes a separate `.source`).
+    // INVARIANT: nothing may `await` between acquiring `stream` and the first pull
+    // below. In libp2p 3.x end-of-inbound is an EVENT ('remoteCloseWrite'), and the
+    // async iterator only subscribes on its first next(). Buffered payload bytes are
+    // re-dispatched on subscribe, but a 'remoteCloseWrite' delivered before we
+    // subscribe is lost and this loop would never end. Every current path from
+    // dialProtocol/onStream to here is microtask-only, so a socket FIN cannot
+    // interleave. Inserting an await above would break that.
+    for await (const frame of parseFrames(stream)) {
       if (frame.type === TYPE_DATA) {
         yield frame.payload;
       } else if (frame.type === TYPE_ERROR) {
@@ -106,6 +158,84 @@ export async function* duplexOverStream(
       }
     }
     await outbound;
+  }
+}
+
+/**
+ * Wait for `stream` to signal it can accept more data, per the real
+ * `'drain'` event rather than the broken {@link Stream.onDrain}. Rejects if
+ * the stream closes first (including a remote reset) so a peer that goes
+ * away while we're backpressured unwinds into the caller's existing
+ * `catch` instead of hanging forever — and rejects after `timeoutMs` for the
+ * peer that neither reads nor closes, which produces no event at all. The
+ * expiry is loud (a `console.warn` naming the protocol and the bound) rather
+ * than a silent stall, per this project's "silent failures deserve loud
+ * guards" rule; the rejection itself reaches the outbound pump's `catch`,
+ * which aborts the stream so the peer learns it was dropped.
+ */
+function waitForDrain(stream: Stream, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      stream.removeEventListener("drain", onDrain);
+      stream.removeEventListener("close", onClose);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onClose = (evt: StreamCloseEvent): void => {
+      cleanup();
+      reject(evt.error ?? new Error("stream closed"));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      const message =
+        `[webrun-streams-libp2p] waitForDrain: peer on protocol ${stream.protocol} ` +
+        `did not accept more data within ${timeoutMs}ms and never closed the stream; ` +
+        `dropping it so this side's pump is not parked forever`;
+      console.warn(message);
+      reject(new Error(message));
+    }, timeoutMs);
+    stream.addEventListener("drain", onDrain);
+    stream.addEventListener("close", onClose);
+  });
+}
+
+/**
+ * Close a `Stream`'s writable end, bounded by `timeoutMs`. Plain
+ * `stream.close()` awaits the write queue draining and the peer
+ * acknowledging with no bound of its own — a peer that stops reading
+ * without resetting (a suspended tab, a paused container, `SIGSTOP`) means
+ * it never settles, which would otherwise hang every caller waiting on it
+ * (the outbound pump here, and `connect`/`serve`'s teardown in
+ * `connect-serve.ts`). On timeout we fall back to a hard `abort()` so the
+ * caller is never left hanging.
+ */
+export async function closeStream(
+  stream: Stream,
+  timeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    await stream.close({ signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    const e = err instanceof Error ? err : new Error(String(err));
+    // The bound tripped (or close() otherwise failed): fall back to a hard
+    // abort so the caller is never left hanging. That abort sends a reset to
+    // the peer, silently truncating whatever was still in flight — this
+    // side must not report clean completion without a trace of that, per
+    // this project's own "silent failures deserve loud guards" rule. Not
+    // rethrown: closeStream is called from `finally` blocks, and throwing
+    // here would mask whatever error the caller was already unwinding from.
+    console.warn(
+      `[webrun-streams-libp2p] closeStream: graceful close of protocol ${stream.protocol} ` +
+        `failed (bound ${timeoutMs}ms), aborting instead (peer may see truncated data): ${e.message}`,
+    );
+    try {
+      stream.abort(e);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

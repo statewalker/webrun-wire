@@ -5,8 +5,10 @@ import type { PeerEntry, ServiceAnnouncement } from "./announcement.js";
  * timers, no I/O. All wall-clock injection happens through the `now`
  * argument so behavior is reproducible from tests or replays.
  *
- * Peer presence + multiaddrs are managed by libp2p's discovery pipeline
- * via `@libp2p/pubsub-peer-discovery`; this state holds only the catalog.
+ * Peer presence is established through the relay-mediated announce/reply
+ * protocol (`serveDiscovery`/`discoveryClient` in `discovery.ts`), not
+ * through a libp2p discovery service; this state holds only the catalog,
+ * never multiaddrs.
  */
 export type GroupState = Map<string, PeerEntry>;
 
