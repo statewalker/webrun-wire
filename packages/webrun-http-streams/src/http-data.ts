@@ -178,10 +178,13 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
       decoded = await codec.decodeRequest(input);
     } catch (error) {
       if (!(error instanceof HttpParseError)) throw error;
+      // Answer in the format the peer was speaking, when sniffing got far
+      // enough to know it; otherwise fall back to our write codec.
+      const refusalCodec = (error as { codec?: MessageCodec }).codec ?? codec;
       // The method is unknowable — the request line may be what failed — so
       // encode as if for GET, which permits a body and so lets the peer read
       // why it was refused.
-      yield* encodeErrorResponse(codec, error, "GET", 400, "Bad Request");
+      yield* encodeErrorResponse(refusalCodec, error, "GET", 400, "Bad Request");
       return;
     }
     // Reply in kind: answer with the codec that actually read the request, so a

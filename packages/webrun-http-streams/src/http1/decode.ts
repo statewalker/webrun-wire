@@ -88,6 +88,19 @@ async function* readBody(
   assertNoBufferedBytes(reader);
 }
 
+/**
+ * `readLine`'s bound is best-effort — it is skipped when the line is already
+ * buffered — so a very long start line can reach these messages intact. Since
+ * a refusal is now echoed back to the sender in a 400 body, quote only enough
+ * to diagnose rather than reflecting the whole thing.
+ */
+function quoteLine(line: string): string {
+  const MAX = 120;
+  return line.length <= MAX
+    ? JSON.stringify(line)
+    : `${JSON.stringify(line.slice(0, MAX))} (truncated from ${line.length} chars)`;
+}
+
 export async function decodeRequest(
   input: ByteSource,
   opts: ResolvedHttpCodecOptions,
@@ -98,7 +111,7 @@ export async function decodeRequest(
     const startLine = decodeLatin1(startBytes);
     const parts = startLine.split(" ");
     if (parts.length !== 3) {
-      throw new HttpParseError(`malformed request line: ${JSON.stringify(startLine)}`);
+      throw new HttpParseError(`malformed request line: ${quoteLine(startLine)}`);
     }
     const [method, target, version] = parts;
     if (!isToken(method)) throw new HttpParseError(`invalid method: ${JSON.stringify(method)}`);
@@ -164,7 +177,7 @@ export async function decodeResponse(
 
     const firstSp = startLine.indexOf(" ");
     if (firstSp === -1) {
-      throw new HttpParseError(`malformed status line: ${JSON.stringify(startLine)}`);
+      throw new HttpParseError(`malformed status line: ${quoteLine(startLine)}`);
     }
     const version = startLine.slice(0, firstSp);
     if (!VERSIONS.has(version)) {

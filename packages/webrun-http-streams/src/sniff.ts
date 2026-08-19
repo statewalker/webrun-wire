@@ -45,8 +45,20 @@ export function newSniffingCodec(options: SniffingCodecOptions): MessageCodec {
     encodeResponse: (env, body, o) => write.encodeResponse(env, body, o),
     decodeRequest: async (input) => {
       const picked = await pick(input);
-      const decoded = await picked.codec.decodeRequest(picked.input);
-      return { ...decoded, codec: picked.codec };
+      try {
+        const decoded = await picked.codec.decodeRequest(picked.input);
+        return { ...decoded, codec: picked.codec };
+      } catch (error) {
+        // Sniffing already told us which format the peer is speaking. Carry
+        // that on the error so a refusal can be answered in the peer's own
+        // format — otherwise a peer pinned to the legacy envelope receives its
+        // error response as HTTP/1.1, the same mismatch reply-in-kind avoids
+        // on the success path.
+        if (error !== null && typeof error === "object") {
+          (error as { codec?: MessageCodec }).codec = picked.codec;
+        }
+        throw error;
+      }
     },
     decodeResponse: async (input, o) => {
       const picked = await pick(input);

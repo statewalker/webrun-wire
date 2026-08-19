@@ -74,6 +74,7 @@ const TYPE_CLOSE = 0x06;
 
 const DEFAULT_MAX_STREAMS = 256;
 const DEFAULT_MTU = 64 * 1024;
+const DEFAULT_MAX_STREAM_BUFFER = 8 * 1024 * 1024;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -90,11 +91,18 @@ interface Stream {
   inDone: boolean;
   /** Our outbound pump sent END: nothing more will be sent. */
   outDone: boolean;
+  /** Inbound bytes pushed but not yet taken by the consumer. */
+  queuedBytes: number;
 }
 
 export interface EmulateMuxOptions {
   maxStreams?: number;
   mtu?: number;
+  /**
+   * Cap on inbound bytes one stream may hold for a consumer that has not
+   * drained them. Exceeding it tears down that stream alone.
+   */
+  maxStreamBuffer?: number;
   /**
    * Stream-id allocation side. Initiator uses even ids (2, 4, …); responder
    * uses odd ids (1, 3, …). Pick one per peer so allocations don't collide.
@@ -112,18 +120,11 @@ export function emulateMux(
 } {
   const maxStreams = opts.maxStreams ?? DEFAULT_MAX_STREAMS;
   const mtu = opts.mtu ?? DEFAULT_MTU;
+  const maxStreamBuffer = opts.maxStreamBuffer ?? DEFAULT_MAX_STREAM_BUFFER;
   const side = opts.side ?? "initiator";
 
   const streams = new Map<number, Stream>();
   let nextLocalId = side === "initiator" ? 2 : 1;
-  /**
-   * Highest peer-allocated id accepted so far. Peers allocate monotonically,
-   * so an OPEN at or below this is a repeat of a stream that has already
-   * finished. Before slots were freed on normal completion, the stale map
-   * entry made such a repeat idempotent by accident; now that the entry is
-   * gone, without this check a replayed OPEN would run the handler again.
-   */
-  let peerIdHighWater = 0;
   let handler: Duplex | null = null;
   let muxClosed = false;
 
@@ -193,6 +194,7 @@ export function emulateMux(
       closed: false,
       inDone: false,
       outDone: false,
+      queuedBytes: 0,
     };
     return state;
   };
@@ -284,8 +286,14 @@ export function emulateMux(
     const payload = frame.subarray(offset + 1);
 
     if (type === TYPE_OPEN) {
+      // A duplicate OPEN for a LIVE stream is ignored. A replay of one that
+      // already finished is deliberately not guarded: every transport here is
+      // ordered and reliable, so a replay cannot occur by accident, and a
+      // hostile peer gains nothing by it — opening a fresh id invokes the same
+      // handler just as well. An earlier monotonic high-water mark did guard
+      // it, at the cost of letting one OPEN with a high id permanently refuse
+      // every later stream, including that peer's own legitimate traffic.
       if (streams.has(id)) return;
-      if (id <= peerIdHighWater) return;
       if (streams.size >= maxStreams) {
         sendFrame(
           id,
@@ -300,7 +308,6 @@ export function emulateMux(
       }
       const s = createStream(id);
       streams.set(id, s);
-      peerIdHighWater = id;
       void runHandler(s, handler);
       return;
     }
@@ -310,12 +317,28 @@ export function emulateMux(
 
     switch (type) {
       case TYPE_DATA: {
+        // Flow control is the peer holding one in-flight DATA per stream and
+        // waiting for its ACK — voluntary, and a hostile peer simply does not.
+        // Pushes are fire-and-forget by necessity (see the comment below), so
+        // nothing else bounds this queue: a peer that floods DATA at a handler
+        // which has not started draining retains every payload. Refuse past a
+        // per-stream cap and tear down THAT stream, never the whole mux.
+        s.queuedBytes += payload.byteLength;
+        if (s.queuedBytes > maxStreamBuffer) {
+          const err = new RangeError(
+            `emulateMux: stream ${id} buffered ${s.queuedBytes} bytes past maxStreamBuffer=${maxStreamBuffer} without being drained`,
+          );
+          sendFrame(id, TYPE_ERROR, encodeError(err));
+          teardownStream(s, err);
+          return;
+        }
         const copy = payload.byteLength === 0 ? payload : new Uint8Array(payload);
         // Push fire-and-forget; ACK after the consumer drains. The inbound
         // loop must NOT block on consumer drainage — peer holds one in-flight
         // DATA per stream and waits for ACK, so blocking here causes a
         // cross-direction deadlock where ACK frames can't be processed.
         void s.pushIn(copy).then((handled) => {
+          s.queuedBytes -= copy.byteLength;
           if (handled && !s.closed && !muxClosed) sendFrame(id, TYPE_ACK);
         });
         return;

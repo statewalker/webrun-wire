@@ -16,12 +16,15 @@ function injectablePair(): {
   a: ByteChannel;
   b: ByteChannel;
   injectToB: (bytes: Uint8Array) => void;
+  sentToA: Uint8Array[];
 } {
   const qa: Uint8Array[] = [];
   const qb: Uint8Array[] = [];
   let pa: ((v: IteratorResult<Uint8Array>) => void) | null = null;
   let pb: ((v: IteratorResult<Uint8Array>) => void) | null = null;
+  const sentToA: Uint8Array[] = [];
   const deliver = (t: "a" | "b", bytes: Uint8Array): void => {
+    if (t === "a") sentToA.push(bytes);
     const q = t === "a" ? qa : qb;
     const p = t === "a" ? pa : pb;
     if (p) {
@@ -57,6 +60,7 @@ function injectablePair(): {
       close: () => {},
     },
     injectToB: (bytes) => deliver("b", bytes),
+    sentToA,
   };
 }
 
@@ -130,6 +134,75 @@ describe("handleFrame survives hostile frames", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(await roundTrip(client.call, "after-burst")).toBe("after-burst");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("caps what one undrained stream may buffer, and spares the rest of the mux", async () => {
+    // Flow control is voluntary: the peer is meant to hold one in-flight DATA
+    // per stream and wait for its ACK. A hostile peer does not, and pushes are
+    // fire-and-forget, so without a cap one stream retains everything sent.
+    const { a, b, injectToB, sentToA } = injectablePair();
+    const client = emulateMux(a, { side: "initiator" });
+    const server = emulateMux(b, { side: "responder", maxStreamBuffer: 256 * 1024 });
+    let invocations = 0;
+    server.serve(async function* maybeStalled(input) {
+      invocations += 1;
+      if (invocations === 1) {
+        // The flooded stream: never drains `input`, which is what lets the
+        // inbound queue grow. Later streams echo normally, so the control
+        // call below measures the mux rather than this handler.
+        await new Promise((r) => setTimeout(r, 5_000));
+        return;
+      }
+      for await (const chunk of input) yield chunk;
+    });
+
+    injectToB(new Uint8Array([0x03, 0x01])); // OPEN id 3
+    await new Promise((r) => setTimeout(r, 10));
+    expect(invocations).toBe(1);
+
+    // 40 x 64 KiB with no ACK ever returned: 2.5 MiB against a 256 KiB cap.
+    for (let i = 0; i < 40; i++) {
+      const frame = new Uint8Array(2 + 64 * 1024);
+      frame[0] = 0x03;
+      frame[1] = 0x02; // DATA
+      injectToB(frame);
+    }
+    await new Promise((r) => setTimeout(r, 30));
+
+    // The cap fired: the flooded stream was refused with an ERROR frame.
+    const TYPE_ERROR = 0x05;
+    const refusal = sentToA.find((f) => f[0] === 0x03 && f[1] === TYPE_ERROR);
+    expect(refusal, "expected an ERROR frame tearing down the flooded stream").toBeDefined();
+    expect(dec.decode((refusal as Uint8Array).subarray(2))).toMatch(/maxStreamBuffer/);
+
+    // And only that stream: the mux still serves everyone else.
+    expect(await roundTrip(client.call, "unaffected")).toBe("unaffected");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("ignores a duplicate OPEN for a live stream without disturbing the mux", async () => {
+    const { a, b, injectToB } = injectablePair();
+    const client = emulateMux(a, { side: "initiator" });
+    const server = emulateMux(b, { side: "responder" });
+    let opens = 0;
+    server.serve(async function* counting(input) {
+      opens += 1;
+      for await (const chunk of input) yield chunk;
+    });
+
+    injectToB(new Uint8Array([0x05, 0x01])); // OPEN id 5
+    await new Promise((r) => setTimeout(r, 10));
+    injectToB(new Uint8Array([0x05, 0x01])); // same id again, stream still live
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(opens).toBe(1);
+    // And a forged id does not lock the peer out of its own later streams.
+    expect(await roundTrip(client.call, "alive")).toBe("alive");
 
     await client.close();
     await server.close();

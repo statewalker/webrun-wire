@@ -1,4 +1,5 @@
 import { concatChunks, toAsyncIterator } from "./bytes.js";
+import { HttpParseError } from "./http1/errors.js";
 import type {
   ByteSource,
   DecodedRequest,
@@ -11,6 +12,9 @@ import type {
 export type { RequestEnvelope, ResponseEnvelope } from "./message.js";
 
 const NEWLINE = 0x0a;
+
+/** Mirrors the HTTP/1.1 codec's default `maxHeaderBytes`. */
+const MAX_ENVELOPE_BYTES = 65536;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -51,7 +55,7 @@ export async function decodeMessage<E>(
   while (true) {
     const next = await iter.next();
     if (next.done) {
-      throw new Error(
+      throw new HttpParseError(
         `decodeMessage: stream ended after ${accumLen} bytes without delimiter (\\n)`,
       );
     }
@@ -61,6 +65,15 @@ export async function decodeMessage<E>(
     if (nl === -1) {
       accum.push(chunk);
       accumLen += chunk.byteLength;
+      // The envelope is one line, so a peer that never sends the delimiter is
+      // sending garbage — without a bound this loop buffers it all and then
+      // concatenates a second copy. The HTTP/1.1 path refuses the same flood
+      // via maxHeaderBytes; this is its counterpart.
+      if (accumLen > MAX_ENVELOPE_BYTES) {
+        throw new HttpParseError(
+          `decodeMessage: envelope exceeds ${MAX_ENVELOPE_BYTES} bytes without delimiter (\\n)`,
+        );
+      }
       continue;
     }
     accum.push(chunk.subarray(0, nl));
@@ -74,7 +87,7 @@ export async function decodeMessage<E>(
   try {
     envelope = JSON.parse(decoder.decode(before)) as E;
   } catch (err) {
-    throw new Error(
+    throw new HttpParseError(
       `decodeMessage: malformed envelope JSON at bytes 0..${before.byteLength}: ${(err as Error).message}`,
     );
   }
