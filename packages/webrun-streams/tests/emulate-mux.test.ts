@@ -270,34 +270,60 @@ describe("stream-table lifecycle", () => {
     await server.close();
   });
 
-  it("does not release while our outbound is still pumping after the peer's END", async () => {
-    // Full-duplex: the peer finishes sending before we do. Releasing on
-    // inbound END alone would set `closed`, which pumpOutbound checks — our
-    // remaining chunks would be silently dropped.
+  it("keeps pumping outbound after the peer's END, and frees the slot at our own END", async () => {
+    // The initiator must be able to sit half-closed-inbound while still
+    // sending. Releasing on inbound END alone would set `closed`, which
+    // pumpOutbound checks, and the remaining chunks would be dropped.
+    //
+    // Driven at frame level rather than through a handler: a handler that
+    // ends its response while something else keeps draining is exactly the
+    // shape runHandler now tears down, so it cannot produce this state.
     const { a, b } = makePipePair();
-    const client = emulateMux(a, { side: "initiator", maxStreams: 4 });
-    const server = emulateMux(b, { side: "responder", maxStreams: 4 });
+    const client = emulateMux(a, { side: "initiator", maxStreams: 1 });
 
+    const TYPE_DATA = 0x02;
+    const TYPE_ACK = 0x03;
+    const TYPE_END = 0x04;
+    const dec = new TextDecoder();
     const received: string[] = [];
-    server.serve(async function* (input) {
-      yield utf8.encode("early-reply");
-      for await (const chunk of input) received.push(new TextDecoder().decode(chunk));
-    });
+    let sentEarlyEnd = false;
+
+    void (async () => {
+      for await (const frame of b.recv) {
+        const id = frame[0];
+        const type = frame[1];
+        if (type === TYPE_DATA) {
+          received.push(dec.decode(frame.subarray(2)));
+          b.send(new Uint8Array([id, TYPE_ACK]));
+          if (!sentEarlyEnd) {
+            // Our side is done replying while theirs is still going.
+            sentEarlyEnd = true;
+            b.send(new Uint8Array([id, TYPE_END]));
+          }
+        }
+      }
+    })();
 
     async function* slowInput() {
       for (const part of ["one", "two", "three"]) {
-        await new Promise((r) => setTimeout(r, 15));
+        await new Promise((r) => setTimeout(r, 10));
         yield utf8.encode(part);
       }
     }
 
     const out = await collectBytes(client.call(slowInput()));
-    expect(new TextDecoder().decode(out)).toBe("early-reply");
+    expect(new TextDecoder().decode(out)).toBe("");
     await new Promise((r) => setTimeout(r, 60));
+    // All three arrived: the early END did not truncate our outbound.
     expect(received.join(",")).toBe("one,two,three");
 
+    // And the slot was freed at our own END, despite maxStreams: 1.
+    const second = client.call([utf8.encode("after")]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(received.join(",")).toBe("one,two,three,after");
+    await second.return(undefined);
+
     await client.close();
-    await server.close();
   });
 
   it("frees the slot when the caller cancels the response generator", async () => {
@@ -320,6 +346,48 @@ describe("stream-table lifecycle", () => {
     }
     const out = await collectBytes(client.call([utf8.encode("still-works")]));
     expect(new TextDecoder().decode(out)).toBe("still-works");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("frees the responder's slot when the caller cancels", async () => {
+    // The cancel test above sizes the server table generously, so a
+    // responder-side cancel leak would go unnoticed there.
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 8 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 1 });
+    server.serve(async function* (input) {
+      for await (const chunk of input) yield chunk;
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const out = client.call([utf8.encode(`cancel-${i}`)]);
+      await out.next();
+      await out.return(undefined);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const out = await collectBytes(client.call([utf8.encode("after-cancels")]));
+    expect(new TextDecoder().decode(out)).toBe("after-cancels");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("frees the slot on both peers when the handler throws", async () => {
+    const { a, b } = makePipePair();
+    const client = emulateMux(a, { side: "initiator", maxStreams: 1 });
+    const server = emulateMux(b, { side: "responder", maxStreams: 1 });
+    server.serve(async function* throwingHandler() {
+      // Same shape as `errorHandler` above: the unreachable yield keeps this a
+      // generator for the linter without changing behaviour.
+      if ((0 as number) === 0) throw new Error("handler boom");
+      yield new Uint8Array(0);
+    });
+
+    for (let i = 0; i < 3; i++) {
+      await expect(collectBytes(client.call([utf8.encode("x")]))).rejects.toThrow(/handler boom/);
+    }
 
     await client.close();
     await server.close();

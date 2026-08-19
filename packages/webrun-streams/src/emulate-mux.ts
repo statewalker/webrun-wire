@@ -116,6 +116,14 @@ export function emulateMux(
 
   const streams = new Map<number, Stream>();
   let nextLocalId = side === "initiator" ? 2 : 1;
+  /**
+   * Highest peer-allocated id accepted so far. Peers allocate monotonically,
+   * so an OPEN at or below this is a repeat of a stream that has already
+   * finished. Before slots were freed on normal completion, the stale map
+   * entry made such a repeat idempotent by accident; now that the entry is
+   * gone, without this check a replayed OPEN would run the handler again.
+   */
+  let peerIdHighWater = 0;
   let handler: Duplex | null = null;
   let muxClosed = false;
 
@@ -235,6 +243,19 @@ export function emulateMux(
       return;
     }
     await pumpOutbound(s, outbound);
+    // The response is complete. If the handler never consumed the request
+    // body, nothing will ever drain the inbound queue, so no ACK is sent, the
+    // caller's pump parks forever awaiting one, and neither peer frees the
+    // slot — while the caller's `for await` completes normally, so nothing
+    // looks wrong from user code. Tell the peer we no longer want the body.
+    //
+    // This is why a handler must consume `input` within its generator's
+    // lifetime: draining it from a detached task is indistinguishable, from
+    // here, from not draining it at all.
+    if (!s.inDone && !s.closed && !muxClosed) {
+      sendFrame(s.id, TYPE_CLOSE);
+      teardownStream(s);
+    }
   };
 
   const handleFrame = (frame: Uint8Array): void => {
@@ -246,6 +267,7 @@ export function emulateMux(
 
     if (type === TYPE_OPEN) {
       if (streams.has(id)) return;
+      if (id <= peerIdHighWater) return;
       if (streams.size >= maxStreams) {
         sendFrame(
           id,
@@ -260,6 +282,7 @@ export function emulateMux(
       }
       const s = createStream(id);
       streams.set(id, s);
+      peerIdHighWater = id;
       void runHandler(s, handler);
       return;
     }
