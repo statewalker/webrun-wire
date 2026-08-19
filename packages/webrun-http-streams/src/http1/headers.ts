@@ -29,7 +29,7 @@ export function isToken(value: string): boolean {
  */
 export function decodeLatin1(bytes: Uint8Array): string {
   let out = "";
-  for (let i = 0; i < bytes.byteLength; i++) out += String.fromCharCode(bytes[i]);
+  for (const byte of bytes) out += String.fromCharCode(byte);
   return out;
 }
 
@@ -214,7 +214,9 @@ export function resolveFraming(headers: HeaderList, version: string): BodyFramin
     if (values.size !== 1) {
       throw new HttpParseError(`conflicting Content-Length values: ${[...values].join(", ")}`);
     }
-    const raw = [...values][0];
+    // `values.size === 1` is checked above, so this spread always has exactly
+    // one element.
+    const raw = [...values][0]!;
     if (!/^\d{1,15}$/.test(raw)) {
       throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);
     }

@@ -39,7 +39,12 @@ export async function discard(source: ByteSource | undefined): Promise<void> {
 }
 
 export function concatChunks(parts: Uint8Array[], totalLen: number): Uint8Array {
-  if (parts.length === 1) return parts[0];
+  if (parts.length === 1) {
+    const only = parts[0];
+    // `parts.length === 1` guarantees index 0 exists; falls through to the
+    // general path below in the unreachable case where it somehow doesn't.
+    if (only !== undefined) return only;
+  }
   const out = new Uint8Array(totalLen);
   let off = 0;
   for (const p of parts) {
