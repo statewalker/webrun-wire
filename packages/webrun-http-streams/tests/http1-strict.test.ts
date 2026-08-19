@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeRequest } from "../src/http1/decode.js";
 import type { ResolvedHttpCodecOptions } from "../src/http1/encode.js";
+import { HttpParseError } from "../src/http1/errors.js";
 
 const BASE: ResolvedHttpCodecOptions = {
   scheme: "http",
@@ -106,10 +107,36 @@ const CORPUS: { name: string; wire: string; pattern: RegExp; maxHeaderBytes?: nu
     wire: "POST /a b HTTP/1.1\r\nHost: h.test\r\n\r\n",
     pattern: /malformed request line/,
   },
+  {
+    name: "trailing bytes after a bodyless request (pipelined second request)",
+    wire: "GET /x HTTP/1.1\r\nHost: h.test\r\n\r\nGET /second HTTP/1.1\r\nHost: h.test\r\n\r\n",
+    pattern: /trailing bytes after a complete message/,
+  },
+  {
+    // RFC 9112 §2.2 permits a recipient to tolerate one leading CRLF before
+    // the request-line ("SHOULD ignore"). This codec's strict posture
+    // declines that leniency — see README.md and ADR-0006.
+    name: "leading CRLF before the request line (RFC 9112 §2.2 leniency, deliberately refused)",
+    wire: "\r\nGET /x HTTP/1.1\r\nHost: h.test\r\n\r\n",
+    pattern: /malformed request line/,
+  },
 ];
 
-describe("strictness: every ambiguous message is refused, never guessed (17 cases)", () => {
+describe("strictness: every ambiguous message is refused, never guessed (19 cases)", () => {
   it.each(CORPUS)("rejects $name", async ({ wire, pattern, maxHeaderBytes }) => {
     await expect(parse(wire, maxHeaderBytes)).rejects.toThrow(pattern);
+  });
+
+  // I2: every refusal from decodeRequest/decodeResponse — including a bare LF
+  // (a ByteStreamError from the underlying ByteReader, not an HttpParseError
+  // by construction) — must reach the caller as HttpParseError. Otherwise
+  // `catch (e) { if (e instanceof HttpParseError) ... }`, the obvious way to
+  // consume this codec's documented error contract, crashes on exactly the
+  // kind of malformed input it exists to catch.
+  it.each(CORPUS)("rejects $name with HttpParseError specifically", async ({
+    wire,
+    maxHeaderBytes,
+  }) => {
+    await expect(parse(wire, maxHeaderBytes)).rejects.toThrow(HttpParseError);
   });
 });

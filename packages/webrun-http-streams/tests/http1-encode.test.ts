@@ -62,6 +62,21 @@ describe("splitTarget", () => {
   it("strips userinfo from the authority before it reaches Host", () => {
     expect(splitTarget("http://user:pass@host/x", OPTS).authority).toBe("host");
   });
+
+  it("rejects a bare-path target smuggling a second request line via CRLF", () => {
+    expect(() =>
+      splitTarget(
+        "/search?q=a\r\nX-Injected: yes\r\nGET /admin HTTP/1.1\r\nHost: h.test\r\n\r\n",
+        OPTS,
+      ),
+    ).toThrow(/invalid request-target/);
+  });
+
+  it("rejects an authority smuggling a header via CRLF", () => {
+    expect(() => splitTarget("http://ho\r\nX-Inj: 1\r\nst.test/x", OPTS)).toThrow(
+      /invalid Host header/,
+    );
+  });
 });
 
 describe("encodeRequest", () => {
@@ -155,6 +170,29 @@ describe("encodeRequest", () => {
     expect(out.match(/Transfer-Encoding/g)).toBeNull();
   });
 
+  it("throws rather than emit a declared Content-Length with no body at all", async () => {
+    await expect(
+      wire(
+        encodeRequest(
+          { url: "/x", method: "POST", headers: [["Content-Length", "5"]] },
+          undefined,
+          OPTS,
+        ),
+      ),
+    ).rejects.toThrow(/body is 0 bytes but Content-Length declares 5/);
+  });
+
+  it("allows a declared Content-Length of 0 with no body", async () => {
+    const out = await wire(
+      encodeRequest(
+        { url: "/x", method: "POST", headers: [["Content-Length", "0"]] },
+        undefined,
+        OPTS,
+      ),
+    );
+    expect(out).toContain("Content-Length: 0\r\n");
+  });
+
   it("rejects an invalid method", async () => {
     await expect(
       wire(encodeRequest({ url: "/x", method: "BAD METHOD", headers: [] }, undefined, OPTS)),
@@ -177,6 +215,35 @@ describe("encodeResponse", () => {
     expect(out).toBe("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
   });
 
+  it("drops a caller-supplied Content-Length on a 204 (RFC 9110 §8.6)", async () => {
+    const out = await wire(
+      encodeResponse(
+        { status: 204, statusText: "No Content", headers: [["Content-Length", "5"]] },
+        undefined,
+        OPTS,
+      ),
+    );
+    expect(out).not.toMatch(/content-length/i);
+  });
+
+  it("keeps a caller-supplied Content-Length on a response to HEAD", async () => {
+    const out = await wire(
+      encodeResponse(
+        { status: 200, statusText: "OK", headers: [["Content-Length", "12"]] },
+        undefined,
+        OPTS,
+        "HEAD",
+      ),
+    );
+    expect(out).toContain("Content-Length: 12\r\n");
+  });
+
+  it("rejects a control character in statusText", async () => {
+    await expect(
+      wire(encodeResponse({ status: 200, statusText: "OK\x01here", headers: [] }, undefined, OPTS)),
+    ).rejects.toThrow(/control character/);
+  });
+
   it("emits no body for a response to HEAD", async () => {
     const out = await wire(
       encodeResponse(
@@ -187,6 +254,29 @@ describe("encodeResponse", () => {
       ),
     );
     expect(out).toBe("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n");
+  });
+
+  it("throws rather than emit a declared Content-Length with no body at all", async () => {
+    await expect(
+      wire(
+        encodeResponse(
+          { status: 200, statusText: "OK", headers: [["Content-Length", "5"]] },
+          undefined,
+          OPTS,
+        ),
+      ),
+    ).rejects.toThrow(/body is 0 bytes but Content-Length declares 5/);
+  });
+
+  it("allows a declared Content-Length of 0 with no body", async () => {
+    const out = await wire(
+      encodeResponse(
+        { status: 200, statusText: "OK", headers: [["Content-Length", "0"]] },
+        undefined,
+        OPTS,
+      ),
+    );
+    expect(out).toContain("Content-Length: 0\r\n");
   });
 
   it("rejects a status outside 100..599", async () => {

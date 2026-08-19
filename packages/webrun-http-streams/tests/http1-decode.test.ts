@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeRequest, decodeResponse } from "../src/http1/decode.js";
 import type { ResolvedHttpCodecOptions } from "../src/http1/encode.js";
+import { HttpParseError } from "../src/http1/errors.js";
 
 const OPTS: ResolvedHttpCodecOptions = {
   scheme: "http",
@@ -90,10 +91,41 @@ describe("decodeRequest", () => {
     ).rejects.toThrow(/asterisk-form/);
   });
 
+  it("rejects a control character embedded in the request target", async () => {
+    await expect(
+      decodeRequest([enc("GET /a\x00b\rc HTTP/1.1\r\nHost: h.test\r\n\r\n")], OPTS),
+    ).rejects.toThrow(/invalid request-target/);
+  });
+
   it("rejects an unsupported version", async () => {
     await expect(
       decodeRequest([enc("GET /x HTTP/2.0\r\nHost: h.test\r\n\r\n")], OPTS),
     ).rejects.toThrow(/unsupported HTTP version/);
+  });
+
+  it("converts a ByteStreamError raised while draining the body into HttpParseError", async () => {
+    // The chunk-size line's CRLF never arrives — a ByteStreamError from the
+    // ByteReader, raised well after decodeRequest itself already resolved.
+    // I2: it must still reach the caller as HttpParseError, not leak the
+    // internal, unexported ByteStreamError class.
+    const { body } = await decodeRequest(
+      [enc("POST /x HTTP/1.1\r\nHost: h.test\r\nTransfer-Encoding: chunked\r\n\r\n5")],
+      OPTS,
+    );
+    await expect(text(body)).rejects.toThrow(HttpParseError);
+  });
+
+  it("propagates a genuine transport error unchanged, not wrapped as HttpParseError", async () => {
+    // I2 is explicit that only ByteStreamError is converted; a real failure
+    // from the underlying source (a dropped socket, say) must reach the
+    // caller as itself.
+    const boom = new Error("socket reset");
+    const source: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return { next: () => Promise.reject(boom) };
+      },
+    };
+    await expect(decodeRequest(source, OPTS)).rejects.toBe(boom);
   });
 
   it("rejects a truncated Content-Length body", async () => {
@@ -136,6 +168,32 @@ describe("decodeRequest", () => {
       OPTS,
     );
     expect(envelope.url).toBe("http://example.test:8080/x");
+  });
+
+  it("accepts a punycode Host with underscores and a trailing dot", async () => {
+    const { envelope } = await decodeRequest(
+      [enc("GET /x HTTP/1.1\r\nHost: xn--fsq.my_host.test.\r\n\r\n")],
+      OPTS,
+    );
+    expect(envelope.url).toBe("http://xn--fsq.my_host.test./x");
+  });
+
+  it("rejects a Host smuggling a second authority via a sub-delim (Host grammar tightening)", async () => {
+    // HOST_REG_NAME used to admit sub-delims, so "a.test,b.test" passed
+    // grammar validation *and* survived `new URL()` intact — the fail-safe
+    // argument for keeping sub-delims was narrower than believed.
+    await expect(
+      decodeRequest([enc("GET /x HTTP/1.1\r\nHost: a.test,b.test\r\n\r\n")], OPTS),
+    ).rejects.toThrow(/invalid Host header/);
+  });
+
+  it("rejects an assembled url that new URL() itself refuses, even though Host grammar passed", async () => {
+    // Belt-and-braces: "999.999.999.999" is legal under the tightened
+    // HOST_REG_NAME grammar (digits and dots), but is not a value `new URL()`
+    // accepts as a host.
+    await expect(
+      decodeRequest([enc("GET /x HTTP/1.1\r\nHost: 999.999.999.999\r\n\r\n")], OPTS),
+    ).rejects.toThrow(/decoded url is not a valid URL/);
   });
 });
 

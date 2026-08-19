@@ -1,4 +1,5 @@
 import { ByteReader } from "./bytes.js";
+import { HttpParseError } from "./http1/errors.js";
 import type { ByteSource, MessageCodec } from "./message.js";
 
 export type SniffingCodecOptions = {
@@ -24,11 +25,11 @@ export function newSniffingCodec(options: SniffingCodecOptions): MessageCodec {
     const reader = new ByteReader(input);
     const first = await reader.peekByte();
     if (first === undefined) {
-      throw new Error("sniff: stream ended before any bytes arrived");
+      throw new HttpParseError("sniff: stream ended before any bytes arrived");
     }
     const codec = accept.find((c) => c.sniff(first));
     if (!codec) {
-      throw new Error(
+      throw new HttpParseError(
         `sniff: no accepted codec recognises a message starting with byte 0x${first
           .toString(16)
           .padStart(2, "0")}`,

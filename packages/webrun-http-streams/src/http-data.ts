@@ -35,6 +35,9 @@ export type HttpDataHandler = (
   body: AsyncIterable<Uint8Array>,
 ) => Promise<HttpDataHandlerResult>;
 
+/** Hard cap on the peer-error header (M3): see `encodeErrorResponse`. */
+const MAX_DETAIL_CHARS = 4096;
+
 /**
  * JSON with every non-printable-ASCII character escaped, so the result is a
  * legal latin-1 header value whatever the error message contained.
@@ -59,7 +62,12 @@ function encodeErrorResponse(
 ): AsyncGenerator<Uint8Array> {
   const serialized = serializeError(error);
   let detail = asciiJson(serialized);
-  if (detail.length > 4096) detail = asciiJson({ message: serialized.message });
+  if (detail.length > MAX_DETAIL_CHARS) detail = asciiJson({ message: serialized.message });
+  // The fallback above is itself unbounded — a >64 KiB handler message would
+  // still blow the head past maxHeaderBytes, and the client would then
+  // report "head section exceeds 65536 bytes" instead of the peer's actual
+  // error (M3). Truncate unconditionally as the last resort.
+  if (detail.length > MAX_DETAIL_CHARS) detail = detail.slice(0, MAX_DETAIL_CHARS);
   const message = serialized.message ?? "Internal Server Error";
   return codec.encodeResponse(
     {

@@ -156,4 +156,50 @@ describe("conformance against a real HTTP implementation", () => {
       await new Promise<void>((resolve) => netServer.close(() => resolve()));
     },
   );
+
+  // I3: proves the same HEAD plumbing that tests/http-streams.test.ts checks
+  // against a loopback, this time against a real HTTP/1.1 implementation —
+  // node:http suppresses the response body for a HEAD request itself, while
+  // still sending the Content-Length it was given, so a client that gets the
+  // request method wrong tries to read bytes a conforming server never sends.
+  it(
+    "HEAD: node:http answers our HEAD request, and we read no body from its response",
+    { timeout: 15000 },
+    async () => {
+      const server = createServer((req, res) => {
+        res.writeHead(200, "OK", { "content-type": "text/plain", "content-length": "5" });
+        res.end("hello");
+        // Close the connection once the response is flushed, so a client that
+        // mistakenly tries to read a body (see the mutation this guards
+        // against) fails fast with "body truncated" instead of hanging on a
+        // keep-alive socket that never sends more bytes.
+        res.on("finish", () => req.socket.end());
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      const { port } = server.address() as AddressInfo;
+
+      const socket = netConnect(port, "127.0.0.1");
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", () => resolve());
+        socket.once("error", reject);
+      });
+
+      for await (const chunk of httpCodec.encodeRequest(
+        { url: `http://127.0.0.1:${port}/x`, method: "HEAD", headers: [] },
+        undefined,
+      )) {
+        socket.write(chunk);
+      }
+
+      const decoded = await httpCodec.decodeResponse(asByteSource(socket), { method: "HEAD" });
+      expect(decoded.envelope.status).toBe(200);
+      expect(decoded.envelope.headers.some(([k]) => k.toLowerCase() === "content-length")).toBe(
+        true,
+      );
+      expect(await text(decoded.body)).toBe("");
+
+      socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  );
 });

@@ -3,6 +3,9 @@ import type { ByteSource, RequestEnvelope, ResponseEnvelope } from "../message.j
 import { encodeChunked } from "./chunked.js";
 import { HttpParseError } from "./errors.js";
 import {
+  assertValidHost,
+  assertValidStatusText,
+  assertValidTarget,
   encodeHeaderLines,
   encodeLatin1,
   getAll,
@@ -34,7 +37,13 @@ export function splitTarget(
   url: string,
   opts: ResolvedHttpCodecOptions,
 ): { target: string; authority: string } {
-  if (url.startsWith("/")) return { target: url, authority: opts.host };
+  if (url.startsWith("/")) {
+    // Neither field is trusted just because it came from a caller's own url:
+    // an unvalidated CRLF here would splice a second request line (or an
+    // extra header) onto the wire — see C1.
+    assertValidTarget(url);
+    return { target: url, authority: opts.host };
+  }
   const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]*)([^#]*)/.exec(url);
   if (!match) {
     throw new HttpParseError(`cannot derive a request target from url: ${JSON.stringify(url)}`);
@@ -47,9 +56,11 @@ export function splitTarget(
   // `user:pass@` prefix so credentials never end up in a header proxies log.
   const at = rawAuthority.lastIndexOf("@");
   const authority = at === -1 ? rawAuthority : rawAuthority.slice(at + 1);
+  assertValidHost(authority);
 
   const rawTarget = match[2];
   const target = rawTarget === "" ? "/" : rawTarget.startsWith("/") ? rawTarget : `/${rawTarget}`;
+  assertValidTarget(target);
   return { target, authority };
 }
 
@@ -115,7 +126,16 @@ export async function* encodeRequest(
   head += "\r\n";
   yield encodeLatin1(head);
 
-  if (body === undefined) return;
+  if (body === undefined) {
+    // A head promising `declared` bytes with no body at all is a knowingly
+    // truncated message — the failure must land here, not on the peer that
+    // trusted the header. Content-Length: 0 is the one declared length an
+    // absent body actually satisfies. See I1.
+    if (declared !== undefined && declared !== 0) {
+      throw new HttpParseError(`body is 0 bytes but Content-Length declares ${declared}`);
+    }
+    return;
+  }
   yield* emitBody(body, declared);
 }
 
@@ -129,12 +149,18 @@ export async function* encodeResponse(
     throw new HttpParseError(`invalid status: ${env.status}`);
   }
   const reason = env.statusText ?? "";
-  if (/[\r\n]/.test(reason)) throw new HttpParseError("statusText contains CR or LF");
+  assertValidStatusText(reason);
 
-  const bodyless =
-    env.status < 200 || NO_BODY_STATUSES.has(env.status) || requestMethod?.toUpperCase() === "HEAD";
+  // RFC 9110 §8.6: a 1xx or 204 MUST NOT carry Content-Length — there is no
+  // body to measure, ever, regardless of what the caller supplied. A
+  // response to HEAD is different: no body is sent on *this* response, but
+  // the Content-Length describes the body a GET would have sent, so it stays
+  // (M4).
+  const bodylessStatus = env.status < 200 || NO_BODY_STATUSES.has(env.status);
+  const bodyless = bodylessStatus || requestMethod?.toUpperCase() === "HEAD";
 
-  const carried = withoutHeaders(env.headers, RESPONSE_OWNED);
+  const owned = bodylessStatus ? [...RESPONSE_OWNED, "content-length"] : RESPONSE_OWNED;
+  const carried = withoutHeaders(env.headers, owned);
   const declared = declaredLength(carried);
 
   let head = `HTTP/1.1 ${env.status} ${reason}\r\n`;
@@ -146,8 +172,17 @@ export async function* encodeResponse(
   head += "\r\n";
   yield encodeLatin1(head);
 
-  if (bodyless || body === undefined) {
-    await discard(bodyless ? body : undefined);
+  if (bodyless) {
+    await discard(body);
+    return;
+  }
+  if (body === undefined) {
+    // Same truncation guard as encodeRequest — see I1. Not reached when
+    // bodyless: a response to HEAD legitimately keeps a declared
+    // Content-Length with no body (M4), and that is not a truncation.
+    if (declared !== undefined && declared !== 0) {
+      throw new HttpParseError(`body is 0 bytes but Content-Length declares ${declared}`);
+    }
     return;
   }
   yield* emitBody(body, declared);

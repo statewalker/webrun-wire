@@ -93,6 +93,54 @@ describe("httpFetch / httpServe (data layer)", () => {
       /boom/,
     );
   });
+
+  // I3: the HEAD plumbing is composed across two seams — httpServe must tell
+  // the codec which request method it is answering (src/http1/index.ts:33),
+  // and httpFetch must tell the codec which method it sent (index.ts:34).
+  // Neither seam is exercised by the http1/decode.ts and http1/encode.ts unit
+  // tests, which pass a literal "HEAD" directly; only a full round trip
+  // through httpFetch/httpServe proves the wiring itself is correct.
+  describe("HEAD plumbing (I3)", () => {
+    it("never puts Transfer-Encoding on the wire for a HEAD response, even though the handler returns a body", async () => {
+      // Catches the server-side mutation: if httpServe forgot to tell the
+      // codec the request was HEAD, encodeResponse would treat this as an
+      // ordinary response and chunk the handler's body onto the wire.
+      const handler: Duplex = httpServe(async () => ({
+        envelope: { status: 200, statusText: "OK", headers: [["Content-Type", "text/plain"]] },
+        body: (async function* () {
+          yield new TextEncoder().encode("must never reach the wire for HEAD");
+        })(),
+      }));
+      const call = loopback(handler);
+      const { envelope, body } = await httpFetch(call, { url: "/x", method: "HEAD", headers: [] });
+      expect(envelope.status).toBe(200);
+      expect(envelope.headers.some(([k]) => k.toLowerCase() === "transfer-encoding")).toBe(false);
+      let out = "";
+      const dec = new TextDecoder();
+      for await (const chunk of body) out += dec.decode(chunk, { stream: true });
+      expect(out).toBe("");
+    });
+
+    it("a client that trusts its own request method reads no body despite a declared Content-Length", async () => {
+      // Catches the client-side mutation: if httpFetch's decode call forgot
+      // which method it actually sent, it would try to read a body governed
+      // by the Content-Length the handler legitimately kept for HEAD (M4) —
+      // a body that a correct server never sends and that will never arrive.
+      const handler: Duplex = httpServe(async () => ({
+        envelope: { status: 200, statusText: "OK", headers: [["Content-Length", "5"]] },
+        body: (async function* () {
+          yield new TextEncoder().encode("hello");
+        })(),
+      }));
+      const call = loopback(handler);
+      const { envelope, body } = await httpFetch(call, { url: "/x", method: "HEAD", headers: [] });
+      expect(envelope.status).toBe(200);
+      let out = "";
+      const dec = new TextDecoder();
+      for await (const chunk of body) out += dec.decode(chunk, { stream: true });
+      expect(out).toBe("");
+    });
+  });
 });
 
 describe("fetchOverDuplex / serveFetchOverDuplex (Request/Response layer)", () => {

@@ -116,6 +116,30 @@ describe("handler errors under HTTP framing", () => {
     expect(await text(decoded.body)).toContain("boom");
   });
 
+  it("truncates a huge handler error message so the head still fits maxHeaderBytes (M3)", async () => {
+    // A >64 KiB message must not blow the PEER_ERROR_HEADER header past
+    // maxHeaderBytes: the client would then report "head section exceeds
+    // 65536 bytes" instead of the peer's actual error, hiding it entirely.
+    const hugeMessage = "x".repeat(100_000);
+    const call = loopback(
+      httpServe(async () => {
+        throw new Error(hugeMessage);
+      }),
+    );
+    const wire = call(
+      httpCodec.encodeRequest({ url: "http://h.test/x", method: "GET", headers: [] }),
+    );
+    // decodeResponse itself would throw "head section exceeds 65536 bytes"
+    // if the fix were missing; this must resolve.
+    const decoded = await httpCodec.decodeResponse(wire, { method: "GET" });
+    expect(decoded.envelope.status).toBe(500);
+    const peerErrorHeader = decoded.envelope.headers.find(
+      ([k]) => k.toLowerCase() === PEER_ERROR_HEADER,
+    );
+    expect(peerErrorHeader).toBeDefined();
+    expect(peerErrorHeader?.[1].length).toBeLessThanOrEqual(4096);
+  });
+
   it("preserves the error name across peers", async () => {
     const call = loopback(
       httpServe(async () => {

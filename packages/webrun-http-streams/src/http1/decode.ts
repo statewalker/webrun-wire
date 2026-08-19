@@ -1,9 +1,11 @@
-import { ByteReader } from "../bytes.js";
+import { ByteReader, ByteStreamError } from "../bytes.js";
 import type { ByteSource, DecodedRequest, DecodedResponse } from "../message.js";
 import { decodeChunked } from "./chunked.js";
 import type { ResolvedHttpCodecOptions } from "./encode.js";
 import { HttpParseError } from "./errors.js";
 import {
+  assertValidHost,
+  assertValidTarget,
   type BodyFraming,
   decodeLatin1,
   getAll,
@@ -15,27 +17,6 @@ import {
 const VERSIONS = new Set(["HTTP/1.1", "HTTP/1.0"]);
 const ABSOLUTE_FORM = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
-// RFC 3986 `authority` grammar, restricted to `host [ ":" port ]` (no
-// userinfo — RFC 9110 §7.2 excludes it from Host). Two shapes: an IP-literal
-// in brackets, or a reg-name of unreserved/sub-delims/pct-encoded characters,
-// which by construction excludes "@", "/", "?", "#", whitespace, and every
-// control character.
-const HOST_IP_LITERAL = /^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/;
-const HOST_REG_NAME = /^[A-Za-z0-9._~%!$&'()*+,;=-]+(:\d{1,5})?$/;
-
-/**
- * Validates a `Host` header value taken off the wire. Untrusted input, so an
- * unrecognised shape is a refusal, not a guess — a present-but-empty value or
- * one carrying userinfo (`evil.com@good.com`) would otherwise splice
- * unchecked into the reconstructed URL. Never applied to `opts.host`, which
- * is trusted configuration.
- */
-function assertValidHost(host: string): void {
-  if (!HOST_IP_LITERAL.test(host) && !HOST_REG_NAME.test(host)) {
-    throw new HttpParseError(`invalid Host header: ${JSON.stringify(host)}`);
-  }
-}
-
 /**
  * One message per Duplex call (ADR-0006), so bytes after a complete message
  * are an error. Checked against what is ALREADY BUFFERED rather than by
@@ -46,6 +27,32 @@ function assertNoBufferedBytes(reader: ByteReader): void {
   const extra = reader.bufferedLength();
   if (extra > 0) {
     throw new HttpParseError(`${extra} trailing bytes after a complete message`);
+  }
+}
+
+/**
+ * The public error contract (I2): everything leaving `decodeRequest` /
+ * `decodeResponse` is an `HttpParseError`, whether the refusal happened
+ * synchronously (a malformed start line or header) or lazily while the body
+ * is later drained. `ByteStreamError` — the `ByteReader`'s own class, never
+ * exported — is the one thing converted here, message and all preserved via
+ * `cause`. Anything else is a genuine failure of the underlying source (a
+ * dropped socket, say) and must reach the caller unchanged: blanket-catching
+ * would hide that distinction.
+ */
+function toHttpParseError(err: unknown): never {
+  if (err instanceof ByteStreamError) {
+    throw new HttpParseError(err.message, { cause: err });
+  }
+  throw err;
+}
+
+/** Applies `toHttpParseError` across the whole lifetime of a body generator. */
+async function* convertBodyErrors(source: AsyncGenerator<Uint8Array>): AsyncGenerator<Uint8Array> {
+  try {
+    yield* source;
+  } catch (err) {
+    toHttpParseError(err);
   }
 }
 
@@ -85,45 +92,63 @@ export async function decodeRequest(
   opts: ResolvedHttpCodecOptions,
 ): Promise<DecodedRequest> {
   const reader = new ByteReader(input);
-  const startBytes = await reader.readLine(opts.maxHeaderBytes);
-  const startLine = decodeLatin1(startBytes);
-  const parts = startLine.split(" ");
-  if (parts.length !== 3) {
-    throw new HttpParseError(`malformed request line: ${JSON.stringify(startLine)}`);
-  }
-  const [method, target, version] = parts;
-  if (!isToken(method)) throw new HttpParseError(`invalid method: ${JSON.stringify(method)}`);
-  if (!VERSIONS.has(version)) {
-    throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
-  }
-  if (target === "*") {
-    throw new HttpParseError("asterisk-form request target is not supported");
-  }
-
-  const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
-
-  const hosts = getAll(headers, "host");
-  if (hosts.length > 1) throw new HttpParseError("multiple Host headers");
-  const host = hosts[0];
-
-  let url: string;
-  if (target.startsWith("/")) {
-    if (version === "HTTP/1.1" && host === undefined) {
-      throw new HttpParseError("HTTP/1.1 request has no Host header");
+  try {
+    const startBytes = await reader.readLine(opts.maxHeaderBytes);
+    const startLine = decodeLatin1(startBytes);
+    const parts = startLine.split(" ");
+    if (parts.length !== 3) {
+      throw new HttpParseError(`malformed request line: ${JSON.stringify(startLine)}`);
     }
-    if (host !== undefined) assertValidHost(host);
-    // The scheme is not on the wire in origin-form; it comes from config.
-    url = `${opts.scheme}://${host ?? opts.host}${target}`;
-  } else if (ABSOLUTE_FORM.test(target)) {
-    url = target;
-  } else {
-    throw new HttpParseError(`unsupported request target: ${JSON.stringify(target)}`);
-  }
+    const [method, target, version] = parts;
+    if (!isToken(method)) throw new HttpParseError(`invalid method: ${JSON.stringify(method)}`);
+    if (!VERSIONS.has(version)) {
+      throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
+    }
+    if (target === "*") {
+      throw new HttpParseError("asterisk-form request target is not supported");
+    }
+    // A relay that decodes then re-encodes must never be able to put a
+    // control character (a raw CR chief among them) back onto a request
+    // line — see C1.
+    assertValidTarget(target);
 
-  return {
-    envelope: { url, method, headers },
-    body: readBody(reader, resolveFraming(headers, version), opts, false),
-  };
+    const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
+
+    const hosts = getAll(headers, "host");
+    if (hosts.length > 1) throw new HttpParseError("multiple Host headers");
+    const host = hosts[0];
+
+    let url: string;
+    if (target.startsWith("/")) {
+      if (version === "HTTP/1.1" && host === undefined) {
+        throw new HttpParseError("HTTP/1.1 request has no Host header");
+      }
+      if (host !== undefined) assertValidHost(host);
+      // The scheme is not on the wire in origin-form; it comes from config.
+      url = `${opts.scheme}://${host ?? opts.host}${target}`;
+    } else if (ABSOLUTE_FORM.test(target)) {
+      url = target;
+    } else {
+      throw new HttpParseError(`unsupported request target: ${JSON.stringify(target)}`);
+    }
+
+    // `Host` grammar alone is not sufficient proof that the assembled url is
+    // sane — this is a fail-safe belt-and-braces check, not a
+    // re-serialisation: the parsed `URL` is discarded, and `url` itself is
+    // what reaches the envelope untouched.
+    try {
+      new URL(url);
+    } catch {
+      throw new HttpParseError(`decoded url is not a valid URL: ${JSON.stringify(url)}`);
+    }
+
+    return {
+      envelope: { url, method, headers },
+      body: convertBodyErrors(readBody(reader, resolveFraming(headers, version), opts, false)),
+    };
+  } catch (err) {
+    toHttpParseError(err);
+  }
 }
 
 export async function decodeResponse(
@@ -132,34 +157,38 @@ export async function decodeResponse(
   method: string,
 ): Promise<DecodedResponse> {
   const reader = new ByteReader(input);
-  const startBytes = await reader.readLine(opts.maxHeaderBytes);
-  const startLine = decodeLatin1(startBytes);
+  try {
+    const startBytes = await reader.readLine(opts.maxHeaderBytes);
+    const startLine = decodeLatin1(startBytes);
 
-  const firstSp = startLine.indexOf(" ");
-  if (firstSp === -1) {
-    throw new HttpParseError(`malformed status line: ${JSON.stringify(startLine)}`);
+    const firstSp = startLine.indexOf(" ");
+    if (firstSp === -1) {
+      throw new HttpParseError(`malformed status line: ${JSON.stringify(startLine)}`);
+    }
+    const version = startLine.slice(0, firstSp);
+    if (!VERSIONS.has(version)) {
+      throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
+    }
+    const afterVersion = startLine.slice(firstSp + 1);
+    const secondSp = afterVersion.indexOf(" ");
+    const codeText = secondSp === -1 ? afterVersion : afterVersion.slice(0, secondSp);
+    if (!/^\d{3}$/.test(codeText)) {
+      throw new HttpParseError(`invalid status code: ${JSON.stringify(codeText)}`);
+    }
+    const status = Number(codeText);
+    const statusText = secondSp === -1 ? "" : afterVersion.slice(secondSp + 1);
+
+    const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
+
+    const bodyless =
+      status < 200 || status === 204 || status === 304 || method.toUpperCase() === "HEAD";
+    const framing: BodyFraming = bodyless ? { kind: "none" } : resolveFraming(headers, version);
+
+    return {
+      envelope: { status, statusText, headers },
+      body: convertBodyErrors(readBody(reader, framing, opts, !bodyless)),
+    };
+  } catch (err) {
+    toHttpParseError(err);
   }
-  const version = startLine.slice(0, firstSp);
-  if (!VERSIONS.has(version)) {
-    throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
-  }
-  const afterVersion = startLine.slice(firstSp + 1);
-  const secondSp = afterVersion.indexOf(" ");
-  const codeText = secondSp === -1 ? afterVersion : afterVersion.slice(0, secondSp);
-  if (!/^\d{3}$/.test(codeText)) {
-    throw new HttpParseError(`invalid status code: ${JSON.stringify(codeText)}`);
-  }
-  const status = Number(codeText);
-  const statusText = secondSp === -1 ? "" : afterVersion.slice(secondSp + 1);
-
-  const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
-
-  const bodyless =
-    status < 200 || status === 204 || status === 304 || method.toUpperCase() === "HEAD";
-  const framing: BodyFraming = bodyless ? { kind: "none" } : resolveFraming(headers, version);
-
-  return {
-    envelope: { status, statusText, headers },
-    body: readBody(reader, framing, opts, !bodyless),
-  };
 }

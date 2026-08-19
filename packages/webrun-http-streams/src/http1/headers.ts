@@ -45,19 +45,74 @@ export function encodeLatin1(text: string): Uint8Array {
   return out;
 }
 
-export function assertValidHeaderValue(name: string, value: string): void {
+// RFC 3986 `authority` grammar, restricted to `host [ ":" port ]` (no
+// userinfo — RFC 9110 §7.2 excludes it from Host). Two shapes: an IP-literal
+// in brackets, or a reg-name. Shared by the decoder (validating a Host header
+// taken off the wire) and the encoder (validating the authority `splitTarget`
+// derives from a caller-supplied url) so the grammar is defined exactly once.
+const HOST_IP_LITERAL = /^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$/;
+const HOST_REG_NAME = /^[A-Za-z0-9._~-]+(:\d{1,5})?$/;
+
+/**
+ * Validates a value that is about to become (or was read as) a `Host`
+ * header: untrusted input either way, so an unrecognised shape is a refusal,
+ * not a guess. Rejects a present-but-empty value, one carrying userinfo
+ * (`evil.com@good.com`), and — the reason this also runs on encode — one
+ * smuggling a CRLF-terminated line into the authority of a caller-supplied
+ * url. Never applied to trusted configuration (a codec's `opts.host`).
+ */
+export function assertValidHost(host: string): void {
+  if (!HOST_IP_LITERAL.test(host) && !HOST_REG_NAME.test(host)) {
+    throw new HttpParseError(`invalid Host header: ${JSON.stringify(host)}`);
+  }
+}
+
+/**
+ * A request-target must be entirely visible ASCII (RFC 9110 VCHAR) — nothing
+ * `<= 0x20` (space and every control character, CR/LF included) and nothing
+ * `>= 0x7F` (DEL and beyond). Applied on encode (`splitTarget`, so a
+ * caller-supplied url can never inject a second request line) and on decode
+ * (so a relay that decodes then re-encodes can never put an embedded control
+ * character back on the wire).
+ */
+export function assertValidTarget(target: string): void {
+  for (let i = 0; i < target.length; i++) {
+    const code = target.charCodeAt(i);
+    if (code <= SP || code >= 0x7f) {
+      throw new HttpParseError(`invalid request-target: ${JSON.stringify(target)}`);
+    }
+  }
+}
+
+/**
+ * Shared control-character check behind both `assertValidHeaderValue` and
+ * `assertValidStatusText` — the two were previously checked by different,
+ * looser rules (statusText only rejected CR/LF), which is exactly the
+ * asymmetry class C1 and M5 are both instances of. `label` is prepended
+ * verbatim to each message, so callers keep their own wording.
+ */
+function assertNoControlChars(label: string, value: string): void {
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (code === 0x0d || code === 0x0a) {
-      throw new HttpParseError(`header "${name}" value contains CR or LF`);
+      throw new HttpParseError(`${label} contains CR or LF`);
     }
     if ((code < SP && code !== HTAB) || code === 0x7f) {
-      throw new HttpParseError(`header "${name}" value contains a control character`);
+      throw new HttpParseError(`${label} contains a control character`);
     }
     if (code > 0xff) {
-      throw new HttpParseError(`header "${name}" value is not latin-1 encodable`);
+      throw new HttpParseError(`${label} is not latin-1 encodable`);
     }
   }
+}
+
+export function assertValidHeaderValue(name: string, value: string): void {
+  assertNoControlChars(`header "${name}" value`, value);
+}
+
+/** Same character class as a header value (M5) — CR/LF, every C0 control, and DEL. */
+export function assertValidStatusText(value: string): void {
+  assertNoControlChars("statusText", value);
 }
 
 export function encodeHeaderLines(headers: HeaderList): string {

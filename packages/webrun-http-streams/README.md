@@ -64,6 +64,12 @@ after a complete message are an error. Bodies use `Content-Length` when the
 caller declares one and chunked transfer coding otherwise; a message declaring
 both is refused.
 
+The codec is deliberately strict: every ambiguity is a refusal rather than a
+guess. One consequence worth calling out explicitly — RFC 9112 §2.2 permits a
+recipient to *tolerate* a single leading CRLF sent before the request-line
+("SHOULD ignore"). This codec declines that leniency and refuses it as a
+malformed request line; see ADR-0006.
+
 ### Choosing a codec
 
 ```ts

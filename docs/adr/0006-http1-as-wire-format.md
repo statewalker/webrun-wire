@@ -40,6 +40,14 @@ URL is reconstructed from it. Without that check an empty `Host:` produced
 `http:///x`, which `new URL()` parses with host `x` and path `/` — silently
 turning the request path into the hostname it then routes on.
 
+The strictness also covers a case RFC 9112 §2.2 explicitly leaves to the
+recipient's discretion: a single CRLF sent before the request-line, which a
+server "SHOULD ignore" for robustness. This codec refuses it — a leading
+CRLF produces an empty first line, which fails the request-line's `method
+target version` shape and is rejected as malformed, the same as any other
+ambiguous input. This was an agreed remedy that was not delivered when the
+strictness posture above was first written; it is recorded here as closed.
+
 ## Consequences
 
 **The three defect classes return, and are answered by verification.** The

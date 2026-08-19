@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultCodec } from "../src/codec-default.js";
 import { jsonEnvelopeCodec } from "../src/envelope.js";
+import { HttpParseError } from "../src/http1/errors.js";
 import { httpCodec } from "../src/http1/index.js";
 import { newSniffingCodec } from "../src/sniff.js";
 
@@ -60,14 +61,18 @@ describe("sniffing codec", () => {
     expect(await text(decoded.body)).toBe("hi");
   });
 
-  it("refuses a first byte no accepted codec claims", async () => {
+  it("refuses a first byte no accepted codec claims, as HttpParseError (I2)", async () => {
     await expect(defaultCodec.decodeRequest([new Uint8Array([0x00])])).rejects.toThrow(
       /no accepted codec/,
     );
+    await expect(defaultCodec.decodeRequest([new Uint8Array([0x00])])).rejects.toThrow(
+      HttpParseError,
+    );
   });
 
-  it("refuses an empty stream", async () => {
+  it("refuses an empty stream, as HttpParseError (I2)", async () => {
     await expect(defaultCodec.decodeRequest([])).rejects.toThrow(/ended before any bytes/);
+    await expect(defaultCodec.decodeRequest([])).rejects.toThrow(HttpParseError);
   });
 
   it("can be configured to write the legacy format", async () => {
