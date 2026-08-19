@@ -1,6 +1,7 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
+import { NULL_BODY_STATUSES } from "./http-stubs.js";
 
 /**
  * Connection-scoped headers. The codec surfaces them verbatim (decision 12),
@@ -101,11 +102,27 @@ export async function fetchOverDuplex(
   };
   const body = request.body ? readableToAsyncIterable(request.body) : undefined;
   const { envelope, body: respBody } = await httpFetch(call, env, body, options);
-  return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), {
+  const responseInit: ResponseInit = {
     status: envelope.status,
     statusText: envelope.statusText,
     headers: forwardableHeaders(envelope.headers),
-  });
+  };
+  // `new Response(body, { status })` throws for the null-body-status set, and
+  // HEAD/OPTIONS carry no body either — drain the abandoned body stream
+  // before returning a bodyless Response. Mirrors `http-stubs.ts`'s client
+  // stub; skipping the drain would abandon the body iterator mid-stream,
+  // which over a `Duplex` can leave the stream unterminated or leak the
+  // producer.
+  if (
+    request.method === "HEAD" ||
+    request.method === "OPTIONS" ||
+    NULL_BODY_STATUSES.has(envelope.status)
+  ) {
+    const returnable = respBody as AsyncIterable<Uint8Array> & { return?: () => unknown };
+    await returnable.return?.();
+    return new Response(null, responseInit);
+  }
+  return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);
 }
 
 /**
@@ -132,6 +149,18 @@ export function serveFetchOverDuplex(
       statusText: response.statusText,
       headers: headersToArray(response.headers),
     };
+    // Mirror the client direction: put no bytes on the wire for a
+    // null-body-status response or a HEAD/OPTIONS request, even if the
+    // handler's Response carries a body stream. Cancel it so the producer
+    // isn't left hanging.
+    if (
+      env.method === "HEAD" ||
+      env.method === "OPTIONS" ||
+      NULL_BODY_STATUSES.has(response.status)
+    ) {
+      await response.body?.cancel();
+      return { envelope: respEnv, body: undefined };
+    }
     return {
       envelope: respEnv,
       body: response.body ? readableToAsyncIterable(response.body) : undefined,
