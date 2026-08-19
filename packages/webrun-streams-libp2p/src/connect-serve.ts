@@ -1,4 +1,11 @@
-import type { Connection, Libp2p, PeerId, Stream } from "@libp2p/interface";
+import type {
+  Connection,
+  DialProtocolOptions,
+  Libp2p,
+  PeerId,
+  Stream,
+  StreamHandlerOptions,
+} from "@libp2p/interface";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
 import { closeStream, duplexOverStream } from "./duplex-over-stream.js";
@@ -15,6 +22,20 @@ export interface ConnectLibp2pParams {
    * peer; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes).
    */
   drainTimeoutMs?: number;
+  /**
+   * How many outgoing streams for this protocol libp2p allows to be open at
+   * the same time on one connection; passed through to `node.dialProtocol`.
+   * Left unset, libp2p's own default (64) applies.
+   */
+  maxOutboundStreams?: number;
+  /**
+   * Opt-in to dialing over a connection with limits on how much data can be
+   * transferred or how long it can be open for (e.g. a relayed circuit);
+   * passed through to `node.dialProtocol`. Left unset, libp2p refuses to open
+   * this protocol's stream on such a connection — this package does not
+   * decide that trade-off for the caller, it only exposes the knob.
+   */
+  runOnLimitedConnection?: boolean;
 }
 
 export interface ServeLibp2pParams {
@@ -28,6 +49,48 @@ export interface ServeLibp2pParams {
    * closing, since the caller-side `.return`/abort escape does not exist here.
    */
   drainTimeoutMs?: number;
+  /**
+   * How many incoming streams for this protocol libp2p allows to be open at
+   * the same time on one connection; passed through to `node.handle`. Left
+   * unset, libp2p's own default (32) applies — past it, a new inbound stream
+   * is reset rather than queued, so a caller that opens one stream per
+   * in-flight request will start seeing rejected calls above that count.
+   */
+  maxInboundStreams?: number;
+  /**
+   * How many outgoing streams for this protocol libp2p allows to be open at
+   * the same time on one connection; passed through to `node.handle`. Left
+   * unset, libp2p's own default (64) applies.
+   */
+  maxOutboundStreams?: number;
+  /**
+   * Opt-in to accepting streams for this protocol over a connection with
+   * limits on how much data can be transferred or how long it can be open
+   * for (e.g. a relayed circuit); passed through to `node.handle`. Left
+   * unset, libp2p refuses to open this protocol's stream on such a
+   * connection — this package does not decide that trade-off for the
+   * consumer, it only exposes the knob.
+   */
+  runOnLimitedConnection?: boolean;
+}
+
+/**
+ * Builds the options object passed to `node.dialProtocol`/`node.handle`,
+ * omitting any field the caller didn't supply rather than setting it to
+ * `undefined` — so an unset field falls back to libp2p's own default instead
+ * of an explicit `undefined` overriding it.
+ */
+function definedOptions<T extends Record<string, unknown>>(fields: T): Partial<T> | undefined {
+  const options: Partial<T> = {};
+  let any = false;
+  for (const key of Object.keys(fields) as (keyof T)[]) {
+    const value = fields[key];
+    if (value !== undefined) {
+      options[key] = value;
+      any = true;
+    }
+  }
+  return any ? options : undefined;
 }
 
 /**
@@ -39,13 +102,19 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
   peer,
   protocol,
   drainTimeoutMs,
+  maxOutboundStreams,
+  runOnLimitedConnection,
 }) => {
   const proto = protocol ?? DEFAULT_PROTOCOL;
+  const dialOptions: DialProtocolOptions | undefined = definedOptions({
+    maxOutboundStreams,
+    runOnLimitedConnection,
+  });
   const open = new Set<Stream>();
   const call: Duplex = (input) => {
     let streamRef: Stream | null = null;
     const gen = (async function* () {
-      const stream = await node.dialProtocol(peer, [proto]);
+      const stream = await node.dialProtocol(peer, [proto], dialOptions);
       streamRef = stream;
       open.add(stream);
       let sourceCompleted = false;
@@ -131,10 +200,22 @@ export type ServeConnectionsHandler = (context: ConnectionContext) => Duplex;
  * peer libp2p proved on that connection.
  */
 export async function serveConnections(
-  { node, protocol, drainTimeoutMs }: ServeLibp2pParams,
+  {
+    node,
+    protocol,
+    drainTimeoutMs,
+    maxInboundStreams,
+    maxOutboundStreams,
+    runOnLimitedConnection,
+  }: ServeLibp2pParams,
   makeHandler: ServeConnectionsHandler,
 ): Promise<() => Promise<void>> {
   const proto = protocol ?? DEFAULT_PROTOCOL;
+  const handleOptions: StreamHandlerOptions | undefined = definedOptions({
+    maxInboundStreams,
+    maxOutboundStreams,
+    runOnLimitedConnection,
+  });
 
   const onStream = (stream: Stream, connection: Connection): void => {
     void (async () => {
@@ -169,7 +250,7 @@ export async function serveConnections(
     });
   };
 
-  await node.handle(proto, onStream);
+  await node.handle(proto, onStream, handleOptions);
 
   let torn = false;
   return async () => {
