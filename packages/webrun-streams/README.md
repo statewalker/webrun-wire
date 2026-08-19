@@ -2,6 +2,8 @@
 
 Async-iterator and `ReadableStream` primitives: `collect` / `collectBytes` / `collectString`, text and JSONL codecs, line splitting/joining, a backpressure-aware queue-based generator, a chunk protocol for pushing iterators across transports, conversions between async iterators and WHATWG `ReadableStream<Uint8Array>`, and serialisable `Error` objects.
 
+It also defines the **`Duplex` seam** the whole `webrun-streams-*` transport family implements, and `emulateMux` — a stream multiplexer that turns any message-oriented byte channel into many concurrent `Duplex` calls.
+
 ## Why it exists
 
 Every higher-level package in the `webrun-*` family (and its consumers — scanners, indexers, chat pipelines) needs the same small set of building blocks:
@@ -35,6 +37,9 @@ npm install @statewalker/webrun-streams
 | `recieveIterator(installer)` | Inverse of `sendIterator`: wire an installer's chunk callback into a new `AsyncGenerator<T>`. |
 | `toReadableStream(it)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
 | `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as `AsyncGenerator<Uint8Array>`. |
+| `emulateMux(channel, opts?)` | Multiplex many concurrent `Duplex` calls over one `ByteChannel`; returns `{ call, serve, close }`. |
+| `normalizeToUint8Array(value)` | Coerce a `ByteLike` (string, ArrayBuffer, typed array) to `Uint8Array`. |
+| `toChunks(it, size)` | Re-chunk an `AsyncIterable<Uint8Array>` into pieces of at most `size` bytes. |
 | `serializeError(error)` | Turn an `Error` (or anything) into a plain `{message, stack, …}` object preserving subclass fields. |
 | `deserializeError(obj \| string)` | Reconstruct an `Error` from a serialised form, restoring extra fields. |
 
@@ -160,6 +165,89 @@ console.log(restored instanceof Error); // true
 console.log(restored.status);           // 404
 ```
 
+## The `Duplex` seam
+
+Everything in the `webrun-streams-*` family speaks one shape:
+
+```ts
+type Duplex = (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) => AsyncGenerator<Uint8Array>;
+```
+
+One `Duplex` invocation carries **one logical call**: the caller emits bytes,
+the peer yields bytes back. Because both sides have the same shape, an
+in-process test can wire `const caller = handler` and run with no transport at
+all.
+
+Iterator semantics carry every signal, which is why no separate close/abort API
+exists:
+
+| Signal | Mechanism |
+| --- | --- |
+| Consumer is done early | `.return()` on the output → producer's `finally` runs |
+| Producer failed | `throw` → consumer's `for await` throws |
+| Either side finished normally | Normal exhaustion → matching end on the other side |
+
+`Connect<P>` and `Serve<P>` are the adapter-side factories that stand up a
+transport and produce or register a `Duplex`.
+
+> **Caller obligation.** Either drain the returned generator or `.return()` it.
+> Dropping the reference without doing either emits no observable signal: the
+> abandoned consumer never acknowledges inbound data, so the peer's outbound
+> pump blocks awaiting that acknowledgement, no end-of-stream is exchanged, and
+> both peers hold the stream open. An unreferenced generator is not observable,
+> so no transport can detect this for you.
+
+## `emulateMux`
+
+Turns one `ByteChannel` — anything with `send` / `recv` / `closed` / `close` —
+into many concurrent `Duplex` calls. Used by the MessagePort, WebSocket,
+LiveKit, PeerJS and signaling adapters; transports with native multiplexing
+(libp2p) don't need it.
+
+```ts
+import { emulateMux } from "@statewalker/webrun-streams";
+
+const { call, serve, close } = emulateMux(channel, { side: "initiator" });
+
+// caller side
+const response = call([new TextEncoder().encode("ping")]);
+for await (const chunk of response) { /* … */ }
+
+// responder side
+const stop = serve(async function* handler(input) {
+  for await (const chunk of input) yield chunk; // echo
+});
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `side` | `"initiator"` | Id allocation: initiator uses even ids, responder odd. Pick one per peer so they cannot collide. |
+| `maxStreams` | `256` | Concurrent streams before new calls are refused. |
+| `mtu` | `65536` | Largest payload per DATA frame; bigger chunks are split. |
+| `maxStreamBuffer` | `8388608` | Inbound bytes one stream may hold for a consumer that has not drained them. Exceeding it tears down that stream alone. |
+
+### Flow control
+
+One in-flight DATA frame per stream. The sender waits for an `ACK`, and the ACK
+is sent only once the consumer has pulled *past* that chunk — so a fast producer
+cannot run ahead of a slow consumer, and outbound is bounded to one `mtu` per
+stream even against a peer that never acknowledges.
+
+Backpressure is **per-stream**, so a stalled stream does not block the others,
+and it applies symmetrically in both directions.
+
+There is deliberately **no stall timeout**: a peer that never acknowledges
+blocks that producer indefinitely, exactly as a TCP receiver that never reads
+blocks its sender. `maxStreams` and `maxStreamBuffer` bound what that can cost.
+
+### Behaviour on hostile input
+
+A `ByteChannel` is message-oriented, so frames are discrete and a corrupt one
+cannot desync the next. A frame that cannot be parsed is therefore **dropped**
+rather than failing the connection — otherwise one malformed frame would tear
+down every stream sharing the mux. A stream that exceeds `maxStreamBuffer` is
+torn down on its own, with an error frame sent to the peer.
+
 ## Internals
 
 ### `newAsyncGenerator` — backpressure queue
@@ -210,9 +298,11 @@ strict one-way converters: no queuing strategy tricks, no transform.
 - **British/American spelling kept.** `recieveIterator` uses the
   historical misspelling to stay wire-compatible with `webrun-ports`
   consumers.
-- **No tight coupling to any transport.** Nothing here mentions
-  `MessagePort`, `fetch`, `Worker`, etc. Those belong to the consuming
-  packages.
+- **No tight coupling to any transport.** `ByteChannel` is the only
+  transport-facing type, and it is an interface — nothing here mentions
+  `MessagePort`, `WebSocket`, `fetch`, `Worker`, etc. Those belong to the
+  `webrun-streams-*` adapters, each of which supplies a `ByteChannel` and lets
+  `emulateMux` do the rest.
 
 ### Constraints
 

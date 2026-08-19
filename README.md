@@ -51,17 +51,23 @@ beyond other `@statewalker/webrun-*` packages in the same workspace.
 ## Dependency graph
 
 ```
-webrun-streams        (foundation — iterator + stream + error + text/jsonl/lines primitives)
+webrun-streams        (foundation — the Duplex seam, emulateMux, iterator/stream/error/text/jsonl primitives)
 webrun-msgpack        (foundation — length-prefixed MessagePack frame codec)
     ▲
-    ├── webrun-ports              (MessagePort RPC)
-    │       ▲
-    │       └── webrun-ports-ws   (WebSocket ↔ MessagePort bridge)
+    ├── transport adapters — each supplies a ByteChannel; emulateMux does the rest
+    │     webrun-streams-port        (MessagePort)
+    │     webrun-streams-ws          (WebSocket)
+    │     webrun-streams-livekit     (LiveKit data channel)
+    │     webrun-streams-peerjs      (PeerJS DataConnection)
+    │     webrun-streams-signaling   (WebRTC signaling over a ByteChannel)
+    │     webrun-streams-webrtc      (RTCDataChannel — one channel per Duplex, no mux)
+    │     webrun-streams-libp2p      (libp2p streams — natively multiplexed, no mux)
+    │     webrun-streams-conformance (the suite every adapter must pass)
     │
-    ├── webrun-http               (Request/Response over any byte channel)
+    ├── webrun-http-streams       (HTTP/1.1 request/response over a Duplex)
     │       ▲
     │       ├── webrun-http-browser   (ServiceWorker hosting, relay mode)
-    │       └── webrun-rpc-http       (service-RPC on top of webrun-http)
+    │       └── webrun-rpc-http       (service-RPC on top of webrun-http-streams)
     │
     ├── webrun-site-builder       (files + endpoints + auth → (Request)⇒Response)
     │       ▲
@@ -104,48 +110,20 @@ Length-prefixed MessagePack frame codec for async iterables:
 
 One runtime dep: `@ygoe/msgpack`. Used by downstream scanners and chat pipelines for value framing over any byte transport.
 
-### [`@statewalker/webrun-ports`](./packages/webrun-ports)
+### [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams)
 
-MessagePort utilities — request/response, streaming, bidirectional calls
-— multiplexed over a single `MessagePort` via a `channelName` tag.
+HTTP request / response over a `Duplex`, in three layers — `httpFetch` /
+`httpServe` on envelopes, `fetchOverDuplex` / `serveFetchOverDuplex` on standard
+`Request` / `Response`, and `DuplexSiteBuilder` for hosting a whole site.
 
-- `callPort` / `listenPort` — request/response with timeout.
-- `send` / `recieve` — async-iterator streams.
-- `ioSend` / `ioHandle` — bidirectional half-duplex primitives.
-- `callBidi` / `listenBidi` — high-level full-duplex streaming calls.
+The wire format is conforming **HTTP/1.1**, verified against `node:http` in both
+directions, behind a `MessageCodec` seam that also retains the legacy JSON
+envelope so the two ends of a peer pair can be upgraded in either order. The
+codec is deliberately strict: every ambiguity is a refusal rather than a guess.
+See [ADR-0006](./docs/adr/0006-http1-as-wire-format.md).
 
-Zero runtime dependencies. The narrow-waist transport any higher-level
-MessagePort protocol can build on.
-
-### [`@statewalker/webrun-ports-ws`](./packages/webrun-ports-ws)
-
-**WebSocket ↔ MessagePort bridge.** Wire a `WebSocket` to a
-`MessagePort` with `bindWebSocketToPort(ws, port)` and every helper in
-`webrun-ports` (request/response, streaming, bidi) runs unchanged.
-Transport-neutral: JSON text frames, binary as transferable
-`ArrayBuffer`, idempotent cleanup, works with browser `WebSocket` or
-Node's [`ws`](https://www.npmjs.com/package/ws) package. No RPC layer,
-no new wire format.
-
-Zero runtime dependencies.
-
-### [`@statewalker/webrun-http`](./packages/webrun-http)
-
-Transport-agnostic `Request` / `Response` streaming over async
-iterators. Two layers:
-
-- **Stubs** — `newHttpClientStub` / `newHttpServerStub` (de)serialise
-  HTTP envelopes against any `(envelope) ⇒ envelope` transport you
-  provide.
-- **Pipes** — `newHttpServer` / `newHttpClient` give you a server that
-  is `AsyncIterable<Uint8Array> ⇒ AsyncIterable<Uint8Array>`, and a
-  client that wires a `Request` through such a pipe.
-
-Plus `HttpError`, and `toReadableStream` / `fromReadableStream` helpers
-re-exported from `webrun-streams`.
-
-Zero runtime dependencies. Peers on standard `Request` / `Response` /
-`ReadableStream` / `TextEncoder` / `TextDecoder`.
+Zero runtime dependencies beyond `webrun-streams`. Peers on standard `Request` /
+`Response` / `ReadableStream` / `TextEncoder` / `TextDecoder`.
 
 ### [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser)
 
@@ -253,7 +231,7 @@ concrete combinations:
 | Cross-origin RPC from an embed (Observable, unpkg) | `webrun-rpc-http` + `webrun-http-browser` (relay mode) + `webrun-http` |
 | Static site + dynamic API + auth, served from anywhere | `webrun-site-builder` + any `FilesApi` + a transport of your choice |
 | In-browser static site + dynamic API with zero SW boilerplate | `webrun-site-host` — wraps the builder + the SW adapter in one `.build()` call |
-| Node ↔ browser RPC over a WebSocket | `webrun-ports` + `webrun-ports-ws` on each end; optionally pipe `webrun-http` through for `Request`/`Response` semantics |
+| Node ↔ browser RPC over a WebSocket | `webrun-streams-ws` on each end; pipe `webrun-http-streams` through it for `Request`/`Response` semantics |
 | Unit tests for an RPC service | `webrun-rpc-http` with `fetch: (req) => handler(req)` — no network at all |
 | Deploying the same handler to a real edge runtime | `webrun-rpc-http` handler drops straight into Deno / Cloudflare Workers / Bun |
 
@@ -287,13 +265,18 @@ Via [Changesets](./PUBLISHING.md).
 ## Transport adapters
 
 Each adapter binds the `webrun-streams` `Duplex`/`ByteChannel` seam to a concrete
-transport, so the same handler code runs over any of them:
+transport, so the same handler code runs over any of them. Most supply a
+`ByteChannel` and let `emulateMux` provide concurrency; `webrun-streams-webrtc`
+opens one data channel per `Duplex` and `webrun-streams-libp2p` uses libp2p's
+own multiplexing, so neither needs it.
 
 | Package | Transport |
 | --- | --- |
 | [`@statewalker/webrun-streams-ws`](packages/webrun-streams-ws) | WebSocket. |
 | [`@statewalker/webrun-streams-webrtc`](packages/webrun-streams-webrtc) | WebRTC data channels. |
-| [`@statewalker/webrun-streams-peerjs`](packages/webrun-streams-peerjs) | PeerJS. |
+| [`@statewalker/webrun-streams-peerjs`](packages/webrun-streams-peerjs) | PeerJS `DataConnection`. |
+| [`@statewalker/webrun-streams-livekit`](packages/webrun-streams-livekit) | LiveKit reliable data channel. |
+| [`@statewalker/webrun-streams-signaling`](packages/webrun-streams-signaling) | WebRTC signaling carried over a `ByteChannel`. |
 | [`@statewalker/webrun-streams-libp2p`](packages/webrun-streams-libp2p) | libp2p. |
 | [`@statewalker/webrun-streams-port`](packages/webrun-streams-port) | `MessagePort` — workers, iframes, in-process pipes. |
 | [`@statewalker/webrun-streams-conformance`](packages/webrun-streams-conformance) | The shared conformance suite every adapter above must pass. |

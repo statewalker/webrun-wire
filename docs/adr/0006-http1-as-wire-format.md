@@ -93,14 +93,28 @@ cancel is not safe inside the codec's decode logic itself, where the same
 object can still be read from *and* written back to (a server replying on the
 socket it just read the request from).
 
-**A related leak exists upstream, unfixed.** `emulateMux`'s inbound generator
-frees the client-side stream-table entry from its own `finally`, but only by
-calling `onCancel()`, and only `if (!doneCalled)`. On a normally-completed
-call the `TYPE_END` frame handler sets `doneCalled` before that `finally`
-runs, so `onCancel()` never fires and the entry is never freed — a leak on
-the happy path, independent of the peer-error leak above and not something
-this package fixes. Anything using `emulateMux` as its transport should treat
-this as a known issue.
+**A related leak existed upstream, since fixed.** `emulateMux`'s inbound
+generator freed the client-side stream-table entry from its own `finally`, but
+only by calling `onCancel()`, and only `if (!doneCalled)`. On a normally
+completed call the `TYPE_END` handler set `doneCalled` before that `finally`
+ran, so `onCancel()` never fired and the entry was never freed — a leak on the
+happy path, independent of the peer-error leak above, and one that affected
+*both* peers. `emulateMux` now tracks the two half-closes separately and
+releases the slot once both directions have finished. The cancel this package
+performs on the peer-error path remains necessary: it covers the case where
+the client abandons the call rather than completing it.
+
+**A request that cannot be parsed is answered, not dropped.** A decode refusal
+used to propagate out of the serving `Duplex` with nothing written, so a real
+peer saw the connection end with no status — the one place the reasoning above
+("a real peer cannot receive a JavaScript exception") was not applied. Such a
+request now receives a conforming `400`, carrying the reason in the body and
+the serialized error in `x-webrun-error`. Only refusals are converted: a
+transport failure is not this codec's to answer and still propagates. Because
+the request method is unknowable when the request line itself is what failed,
+the response is encoded as if for `GET`, which permits the body that explains
+the refusal. The refusal is answered in whichever format the peer was speaking,
+so a peer pinned to the legacy envelope is not replied to in HTTP/1.1.
 
 **Keep-alive and pipelining are permanently out of scope.** A `Duplex` carries
 one logical call (ADR-0004); a bridge that needs connection reuse owns that
