@@ -19,6 +19,14 @@ export type Duplex = (
  * Adapter-side factory that stands up a transport connection and yields a
  * caller `Duplex`. One `Connect` invocation owns one transport; each call
  * to the resolved `call` opens a new sub-stream on it.
+ *
+ * A caller must either drain the returned generator or `.return()` it.
+ * Dropping the reference without doing either emits no observable signal:
+ * the abandoned consumer never acknowledges inbound data, so the peer's
+ * outbound pump blocks awaiting that acknowledgement, no end-of-stream is
+ * ever exchanged, and both peers hold the stream's slot open. There is no
+ * way for the transport to detect this — an unreferenced generator is not
+ * observable — so it is the consumer's obligation.
  */
 export type Connect<P> = (params: P) => Promise<{
   call: Duplex;
@@ -78,6 +86,10 @@ interface Stream {
   resolveAck: (() => void) | null;
   rejectAck: ((err: Error) => void) | null;
   closed: boolean;
+  /** Peer sent END (or the stream was torn down): nothing more arrives. */
+  inDone: boolean;
+  /** Our outbound pump sent END: nothing more will be sent. */
+  outDone: boolean;
 }
 
 export interface EmulateMuxOptions {
@@ -104,6 +116,14 @@ export function emulateMux(
 
   const streams = new Map<number, Stream>();
   let nextLocalId = side === "initiator" ? 2 : 1;
+  /**
+   * Highest peer-allocated id accepted so far. Peers allocate monotonically,
+   * so an OPEN at or below this is a repeat of a stream that has already
+   * finished. Before slots were freed on normal completion, the stale map
+   * entry made such a repeat idempotent by accident; now that the entry is
+   * gone, without this check a replayed OPEN would run the handler again.
+   */
+  let peerIdHighWater = 0;
   let handler: Duplex | null = null;
   let muxClosed = false;
 
@@ -135,6 +155,22 @@ export function emulateMux(
     streams.delete(s.id);
   };
 
+  /**
+   * Graceful counterpart to `teardownStream`. A stream occupies a slot in
+   * `streams` until BOTH directions finish; releasing on inbound END alone
+   * would set `closed` while our own `pumpOutbound` is still sending, and it
+   * checks that flag to decide whether to keep going.
+   *
+   * Without this, only abnormal endings (cancel, ERROR, CLOSE, transport
+   * failure) ever freed a slot, so every normally-completed call leaked one
+   * until `maxStreams` began rejecting new calls.
+   */
+  const releaseIfComplete = (s: Stream): void => {
+    if (s.closed || !s.inDone || !s.outDone) return;
+    s.closed = true;
+    streams.delete(s.id);
+  };
+
   const failAll = (err: Error): void => {
     if (muxClosed) return;
     muxClosed = true;
@@ -155,6 +191,8 @@ export function emulateMux(
       resolveAck: null,
       rejectAck: null,
       closed: false,
+      inDone: false,
+      outDone: false,
     };
     return state;
   };
@@ -180,7 +218,11 @@ export function emulateMux(
           off = end;
         }
       }
-      if (!s.closed && !muxClosed) sendFrame(s.id, TYPE_END);
+      if (!s.closed && !muxClosed) {
+        sendFrame(s.id, TYPE_END);
+        s.outDone = true;
+        releaseIfComplete(s);
+      }
     } catch (err) {
       if (!s.closed && !muxClosed) {
         const e = err instanceof Error ? err : new Error(String(err));
@@ -201,6 +243,19 @@ export function emulateMux(
       return;
     }
     await pumpOutbound(s, outbound);
+    // The response is complete. If the handler never consumed the request
+    // body, nothing will ever drain the inbound queue, so no ACK is sent, the
+    // caller's pump parks forever awaiting one, and neither peer frees the
+    // slot — while the caller's `for await` completes normally, so nothing
+    // looks wrong from user code. Tell the peer we no longer want the body.
+    //
+    // This is why a handler must consume `input` within its generator's
+    // lifetime: draining it from a detached task is indistinguishable, from
+    // here, from not draining it at all.
+    if (!s.inDone && !s.closed && !muxClosed) {
+      sendFrame(s.id, TYPE_CLOSE);
+      teardownStream(s);
+    }
   };
 
   const handleFrame = (frame: Uint8Array): void => {
@@ -212,6 +267,7 @@ export function emulateMux(
 
     if (type === TYPE_OPEN) {
       if (streams.has(id)) return;
+      if (id <= peerIdHighWater) return;
       if (streams.size >= maxStreams) {
         sendFrame(
           id,
@@ -226,6 +282,7 @@ export function emulateMux(
       }
       const s = createStream(id);
       streams.set(id, s);
+      peerIdHighWater = id;
       void runHandler(s, handler);
       return;
     }
@@ -253,7 +310,9 @@ export function emulateMux(
         return;
       }
       case TYPE_END: {
+        s.inDone = true;
         void s.doneIn();
+        releaseIfComplete(s);
         return;
       }
       case TYPE_ERROR: {
