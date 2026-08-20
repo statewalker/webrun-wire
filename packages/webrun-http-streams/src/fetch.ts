@@ -2,6 +2,7 @@ import type { Duplex } from "@statewalker/webrun-streams";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { NULL_BODY_STATUSES } from "./http-stubs.js";
+import type { ByteSource } from "./message.js";
 
 /**
  * Connection-scoped headers. The codec surfaces them verbatim (decision 12),
@@ -63,6 +64,59 @@ async function* readableToAsyncIterable(
   }
 }
 
+/**
+ * Whether this runtime implements *request* body streams — both halves of it:
+ * a readable `Request.prototype.body`, and a `ReadableStream` accepted as
+ * `init.body` by the `Request` constructor. The two ship together, so one
+ * check governs both directions below.
+ *
+ * Firefox (146 at the time of writing) implements neither. It is not that
+ * `body` is `undefined` on the instance —
+ * `Object.getOwnPropertyDescriptor(Request.prototype, "body")` is `null`, the
+ * accessor is genuinely absent — and because a `ReadableStream` is then not a
+ * recognised `BodyInit`, the constructor falls through to the string branch
+ * and stores the literal text `[object ReadableStream]`. Chromium and Node
+ * implement both.
+ *
+ * A capability check, never a user-agent test: the question is what this
+ * runtime does, and the answer flips on its own the day Firefox ships request
+ * streams. Evaluated per call rather than cached at module load so that a test
+ * can install a `Request` without the capability and exercise the real branch
+ * under Node.
+ */
+function supportsRequestStreams(): boolean {
+  return (
+    typeof Request === "function" &&
+    Object.getOwnPropertyDescriptor(Request.prototype, "body") != null
+  );
+}
+
+/**
+ * Drain a body iterable into one contiguous buffer. Only the fallback below
+ * needs it. Allocates its own buffer rather than reusing `bytes.ts`'s
+ * `concatChunks`, which passes a single chunk straight through: that chunk is a
+ * view onto the decoder's own read buffer, and the result here is handed to
+ * `new Request` and outlives the decode. The allocation is also what makes it a
+ * `Uint8Array<ArrayBuffer>`, which `BodyInit` accepts and the looser
+ * `Uint8Array<ArrayBufferLike>` does not.
+ */
+async function collectBytes(source: AsyncIterable<Uint8Array>): Promise<Uint8Array<ArrayBuffer>> {
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of source) {
+    if (chunk.byteLength === 0) continue;
+    parts.push(chunk);
+    total += chunk.byteLength;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.byteLength;
+  }
+  return out;
+}
+
 function asyncIterableToReadable(iter: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
   const it = iter[Symbol.asyncIterator]();
   return new ReadableStream<Uint8Array>({
@@ -100,7 +154,30 @@ export async function fetchOverDuplex(
     method: request.method,
     headers: headersToArray(request.headers),
   };
-  const body = request.body ? readableToAsyncIterable(request.body) : undefined;
+  let body: ByteSource | undefined;
+  if (request.body != null) {
+    // The streaming path stays first and unconditional: a runtime that has
+    // request streams never reaches the fallback, and never buffers an upload.
+    body = readableToAsyncIterable(request.body);
+  } else if (!supportsRequestStreams()) {
+    // Firefox. Without `request.body` there is nothing to stream from, so the
+    // only way to see the payload at all is to buffer the whole of it. Two
+    // consequences, both real, neither worth rediscovering:
+    //
+    //  1. Request streaming is lost outright on this path. A 1 GiB upload from
+    //     a Firefox page is a 1 GiB allocation here, where Chromium would have
+    //     streamed it chunk by chunk.
+    //  2. Buffering cannot distinguish an absent body from an empty one.
+    //     Chromium's `new Request(url, { method: "POST", body: "" })` yields a
+    //     non-null empty stream, so an empty body envelope goes on the wire
+    //     (with the HTTP/1.1 codec, a chunked body whose only chunk is the
+    //     terminator); here a zero-length `arrayBuffer()` is indistinguishable
+    //     from no body and we send none. Both decode to the same empty body at
+    //     the far end — `kind: "none"` framing on a request means zero bytes,
+    //     not read-to-EOF — so only the framing differs, but it does differ.
+    const buffered = new Uint8Array(await request.arrayBuffer());
+    if (buffered.byteLength > 0) body = [buffered];
+  }
   const { envelope, body: respBody } = await httpFetch(call, env, body, options);
   const responseInit: ResponseInit = {
     status: envelope.status,
@@ -139,8 +216,23 @@ export function serveFetchOverDuplex(
       headers: forwardableHeaders(env.headers),
     };
     if (env.method !== "GET" && env.method !== "HEAD") {
-      reqInit.body = asyncIterableToReadable(body);
-      (reqInit as RequestInit & { duplex?: string }).duplex = "half";
+      if (supportsRequestStreams()) {
+        reqInit.body = asyncIterableToReadable(body);
+        (reqInit as RequestInit & { duplex?: string }).duplex = "half";
+      } else {
+        // Firefox again, and this is the half that fails *silently*. The
+        // constructor does not reject a `ReadableStream` here, it stringifies
+        // it: the handler would read the literal text `[object ReadableStream]`
+        // and answer 200 with corrupt data, where the outbound direction at
+        // least fails loudly with a 500. Bytes it does accept, so drain first.
+        //
+        // Same cost as the outbound fallback: the whole upload is held in
+        // memory, and a handler that wanted to stream its request body cannot.
+        // Unlike outbound, an empty body is still passed through — the
+        // streaming branch above always sets `body` for these methods, and
+        // passing a zero-length `Uint8Array` keeps that true.
+        reqInit.body = await collectBytes(body);
+      }
     }
     const request = new Request(env.url, reqInit);
     const response = await handler(request);
