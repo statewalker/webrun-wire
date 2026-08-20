@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defaultCodec } from "../src/codec-default.js";
 import { fetchOverDuplex, serveFetchOverDuplex } from "../src/fetch.js";
 import { httpServe } from "../src/http-data.js";
+import { NoStreamsRequest, withoutRequestStreams } from "./support/no-streams-request.js";
 
 /**
  * Request-streams regression test (Task 21): Firefox 146 implements neither
@@ -22,65 +23,6 @@ import { httpServe } from "../src/http-data.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-/**
- * A `Request` with no request-stream support. Faithful on both counts that
- * matter: the class defines no `body` accessor anywhere on its prototype, and
- * its constructor treats anything that is neither a string nor a `BufferSource`
- * as a `USVString` — which is precisely how a `ReadableStream` ends up stored
- * as the text `[object ReadableStream]` in Firefox.
- */
-class NoStreamsRequest {
-  readonly url: string;
-  readonly method: string;
-  readonly headers: Headers;
-  readonly signal: AbortSignal | undefined;
-  readonly #bytes: Uint8Array;
-
-  constructor(input: string, init: RequestInit = {}) {
-    this.url = input;
-    this.method = init.method ?? "GET";
-    this.headers = new Headers(init.headers);
-    this.signal = init.signal ?? undefined;
-    this.#bytes = NoStreamsRequest.#toBytes(init.body);
-  }
-
-  static #toBytes(body: BodyInit | null | undefined): Uint8Array {
-    if (body == null) return new Uint8Array(0);
-    if (typeof body === "string") return encoder.encode(body);
-    if (ArrayBuffer.isView(body)) {
-      return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-    }
-    if (body instanceof ArrayBuffer) return new Uint8Array(body);
-    return encoder.encode(String(body));
-  }
-
-  async arrayBuffer(): Promise<ArrayBuffer> {
-    return this.#bytes.slice().buffer as ArrayBuffer;
-  }
-
-  async text(): Promise<string> {
-    return decoder.decode(this.#bytes);
-  }
-
-  async json(): Promise<unknown> {
-    return JSON.parse(await this.text());
-  }
-}
-
-/** Swap the global `Request` for the Firefox-shaped one for the duration of a test. */
-function withoutRequestStreams(): () => void {
-  const original = globalThis.Request;
-  const install = (value: unknown): void => {
-    Object.defineProperty(globalThis, "Request", {
-      configurable: true,
-      writable: true,
-      value,
-    });
-  };
-  install(NoStreamsRequest);
-  return () => install(original);
-}
 
 /**
  * A `Duplex` that records the raw request bytes and replies with a canned
