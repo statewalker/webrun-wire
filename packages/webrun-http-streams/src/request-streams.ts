@@ -6,18 +6,32 @@
  */
 
 /**
- * Whether this runtime implements *request* body streams — both halves of it:
- * a readable `Request.prototype.body`, and a `ReadableStream` accepted as
- * `init.body` by the `Request` constructor. The two ship together, so one
- * check governs every call site.
+ * Whether `Request.prototype` exposes a `body` accessor. Two call sites read
+ * that property, and two more depend on the constructor accepting a
+ * `ReadableStream` as `init.body`; this predicate answers for all four.
  *
- * Firefox (146 at the time of writing) implements neither. It is not that
- * `body` is `undefined` on the instance —
+ * What was verified, and all that is claimed here: Firefox (146 at the time of
+ * writing) has *neither*, and Chromium and Node have *both*. On Firefox it is
+ * not that `body` is `undefined` on the instance —
  * `Object.getOwnPropertyDescriptor(Request.prototype, "body")` is `null`, the
  * accessor is genuinely absent — and because a `ReadableStream` is then not a
- * recognised `BodyInit`, the constructor falls through to the string branch
- * and stores the literal text `[object ReadableStream]`. Chromium and Node
- * implement both.
+ * recognised `BodyInit`, the constructor falls through to the string branch and
+ * stores the literal text `[object ReadableStream]`.
+ *
+ * The two halves are NOT guaranteed to ship together, so do not read this as a
+ * test for "request streams" in general. Safari is the counterexample: it has
+ * had `Request.body` since 11.1 but only accepts a stream as `init.body` from
+ * Technology Preview 250, so a shipping Safari has the reader half without the
+ * upload half and this returns `true` there. That looks benign — WebKit appears
+ * to store the stream on the `Request` rather than stringify it, and its error
+ * comes from `fetch()`, which this package never calls on the objects it builds
+ * — but it is untested, and it is the case to look at first if a Safari report
+ * arrives. The sharper probe, if one is ever needed, is whether
+ * `new Request(url, {method:"POST", body:new ReadableStream(), duplex:"half"})`
+ * has a `content-type` of `text/plain;charset=UTF-8` (stringified) or `null`
+ * (stored); it is not used here because it costs a `Request` and a
+ * `ReadableStream` per call and agrees with the descriptor check on every
+ * runtime measured.
  *
  * A capability check, never a user-agent test: the question is what this
  * runtime does, and the answer flips on its own the day Firefox ships request

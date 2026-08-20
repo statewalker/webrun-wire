@@ -133,17 +133,32 @@ export async function fetchOverDuplex(
     headers: forwardableHeaders(envelope.headers),
   };
   // `new Response(body, { status })` throws for the null-body-status set, and
-  // HEAD/OPTIONS carry no body either — drain the abandoned body stream
-  // before returning a bodyless Response. Mirrors `http-stubs.ts`'s client
-  // stub; skipping the drain would abandon the body iterator mid-stream,
-  // which over a `Duplex` can leave the stream unterminated or leak the
-  // producer.
+  // HEAD/OPTIONS carry no body either, so return a bodyless Response and try to
+  // let go of the body we were handed.
   //
-  // The bare `.return()` is deliberate and is *not* the bug `discard` exists
-  // for: `respBody` comes back from `codec.decodeResponse`, which has already
-  // pulled from it to read the head, so it is never in suspended start and its
-  // `finally` does unwind. `http-stubs.ts` cannot assume that — the content it
-  // drains has not been touched by anyone — and uses `discard` accordingly.
+  // KNOWN GAP — this `.return()` does not actually release the producer, and
+  // `discard` would not fix it either. Do not read it as a working drain.
+  //
+  // `respBody` is *not* the generator the codec pulled from. `decodeResponse`
+  // pulls from its `input` (the `output` generator returned by `call(...)`) to
+  // read the head, and hands back a freshly constructed one —
+  // `convertBodyErrors(readBody(...))` in `http1/decode.ts`. Nobody has pulled
+  // from that, so it is in suspended start and `.return()` on it is a no-op,
+  // exactly as in the two sites `http-stubs.ts` fixed. Measured: the producer's
+  // `finally` does not run for 204, 205, 304, HEAD+200 or OPTIONS+200.
+  //
+  // `discard` does not help because the release has to reach further down.
+  // `ByteReader` never propagates `.return()` to its own `#iter`, so only
+  // `await output.return()` frees the underlying call — and `fetchOverDuplex`
+  // has no handle on `output`, since `httpFetch` returns only `{envelope,
+  // body}`. Closing this needs `httpFetch` to expose the call for cancellation;
+  // that is a design change, not a patch here.
+  //
+  // Worth knowing which shapes leak a *populated* body rather than an empty
+  // one: `decodeResponse`'s own bodyless test covers status < 200, 204, 304 and
+  // HEAD, so for 205 and for OPTIONS the decoder frames a real body that is
+  // then abandoned. `http-data.ts` (see `throwIfPeerError`) spells out the cost
+  // on a mux transport — one stream-table slot per call, until `maxStreams`.
   if (
     request.method === "HEAD" ||
     request.method === "OPTIONS" ||

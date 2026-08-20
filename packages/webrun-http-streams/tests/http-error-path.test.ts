@@ -304,6 +304,12 @@ describe("peer-error response body is actually drained", () => {
         [Symbol.asyncIterator]() {
           return this;
         },
+        // Required to satisfy `AsyncGenerator`. Routed through `return()` like
+        // a real one, so disposing this stub fails the same way closing it does
+        // — which is the behaviour the test is built around.
+        async [Symbol.asyncDispose](): Promise<void> {
+          await this.return(undefined);
+        },
       };
       return output;
     };

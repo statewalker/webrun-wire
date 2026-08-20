@@ -24,6 +24,8 @@
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"
   },
