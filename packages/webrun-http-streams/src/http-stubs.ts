@@ -1,4 +1,5 @@
 import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
+import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
 export interface SerializedHttpRequest {
   url: string;
@@ -46,6 +47,13 @@ const REQUEST_FIELDS = [
   "keepalive",
 ] as const;
 
+/** `SerializedHttpEnvelope.content` is never absent, only empty. */
+async function* noBytes(): AsyncGenerator<Uint8Array> {}
+
+async function* oneChunk(chunk: Uint8Array): AsyncGenerator<Uint8Array> {
+  yield chunk;
+}
+
 /**
  * Returns an HTTP handler that serializes a Request, hands the envelope to
  * `send` for transport, and deserializes the reply into a Response. Used on
@@ -64,9 +72,25 @@ export function newHttpClientStub(
       const val = (request as unknown as Record<string, unknown>)[field];
       if (val !== undefined && field !== "url") (options as Record<string, unknown>)[field] = val;
     }
-    const content = request.body
-      ? fromReadableStream(request.body as ReadableStream<Uint8Array>)
-      : (async function* () {})();
+    let content: AsyncIterable<Uint8Array>;
+    if (request.body != null) {
+      // The streaming path stays first and unconditional: a runtime that has
+      // request streams never reaches the fallback, and never buffers an upload.
+      content = fromReadableStream(request.body as ReadableStream<Uint8Array>);
+    } else if (!supportsRequestStreams()) {
+      // Firefox. Without `request.body` there is nothing to stream from, so the
+      // only way to see the payload at all is to buffer the whole of it, and
+      // request streaming is lost outright on this path — a 1 GiB upload from a
+      // Firefox page is a 1 GiB allocation here.
+      //
+      // The empty-versus-absent body divergence that `fetch.ts` has to live
+      // with does not arise on this transport: `SerializedHttpEnvelope` always
+      // carries a `content` iterable, so a zero-length body and no body are
+      // already the same thing here, whichever runtime produced it.
+      content = oneChunk(new Uint8Array(await request.arrayBuffer()));
+    } else {
+      content = noBytes();
+    }
 
     const result = await send({ options, content });
 
@@ -112,22 +136,26 @@ export function newHttpServerStub(
     for (const [key, value] of headers) requestHeaders.append(key, value);
 
     const hasBody = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
-    let body: ReadableStream<Uint8Array> | undefined;
-    if (hasBody) {
-      body = toReadableStream(content[Symbol.asyncIterator]());
-    } else {
-      const returnable = content as AsyncIterable<Uint8Array> & { return?: () => unknown };
-      await returnable.return?.();
-    }
-
     const requestInit: RequestInit & { duplex?: "half" } = {
       ...forwardable,
       method,
       headers: requestHeaders,
     };
-    if (hasBody) {
-      requestInit.body = body;
+    if (!hasBody) {
+      const returnable = content as AsyncIterable<Uint8Array> & { return?: () => unknown };
+      await returnable.return?.();
+    } else if (supportsRequestStreams()) {
+      requestInit.body = toReadableStream(content[Symbol.asyncIterator]());
       requestInit.duplex = "half";
+    } else {
+      // Firefox again, and this is the half that fails *silently*. The
+      // constructor does not reject a `ReadableStream` here, it stringifies it:
+      // the handler would read the literal text `[object ReadableStream]` and
+      // answer 200 with corrupt data, where the client direction above at least
+      // sends an empty body a JSON endpoint rejects loudly. Bytes it does
+      // accept, so drain first — at the same cost as above, the whole upload in
+      // memory and no streaming left for the handler.
+      requestInit.body = await collectBytes(content);
     }
 
     const request = new Request(url, requestInit);
