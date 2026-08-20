@@ -1,4 +1,5 @@
 import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
+import { discard } from "./bytes.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
 export interface SerializedHttpRequest {
@@ -102,14 +103,14 @@ export function newHttpClientStub(
     const method = options.method;
     // `new Response(body, ...)` throws for null-body statuses (204/205/304), and
     // HEAD/OPTIONS carry no body either — drain the (empty) content stream and
-    // emit a bodyless response.
+    // emit a bodyless response. `discard` rather than a bare `.return()`: see
+    // the note at the matching site in `newHttpServerStub` below.
     if (
       method === "HEAD" ||
       method === "OPTIONS" ||
       NULL_BODY_STATUSES.has(responseOptions.status)
     ) {
-      const returnable = result.content as AsyncIterable<Uint8Array> & { return?: () => unknown };
-      await returnable.return?.();
+      await discard(result.content);
       return new Response(null, responseOptions);
     }
     return new Response(toReadableStream(result.content[Symbol.asyncIterator]()), responseOptions);
@@ -142,8 +143,19 @@ export function newHttpServerStub(
       headers: requestHeaders,
     };
     if (!hasBody) {
-      const returnable = content as AsyncIterable<Uint8Array> & { return?: () => unknown };
-      await returnable.return?.();
+      // `discard`, not a bare `.return()`. GET/HEAD/OPTIONS arrive with a
+      // `content` iterable the transport built but nobody has pulled from yet,
+      // and `.return()` on an async generator still in *suspended start* is a
+      // no-op: the body never runs, its `try/finally` never unwinds, and
+      // whatever the producer holds open — a socket, a port subscription — is
+      // never released. `discard` calls `.next()` first for exactly this
+      // reason; see its comment in `bytes.ts`.
+      //
+      // `fetch.ts` has the same shape at its null-body-status branch and is
+      // *safe* there without this, because the codec has already pulled from
+      // that generator to read the response head, so it is never in suspended
+      // start. Do not copy the bare form back here on the strength of that one.
+      await discard(content);
     } else if (supportsRequestStreams()) {
       requestInit.body = toReadableStream(content[Symbol.asyncIterator]());
       requestInit.duplex = "half";
