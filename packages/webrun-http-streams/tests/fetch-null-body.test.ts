@@ -24,7 +24,12 @@ async function* socketToBytes(socket: Socket): AsyncGenerator<Uint8Array> {
   }
 }
 
-async function writeAll(socket: Socket, input: AsyncIterable<Uint8Array>): Promise<void> {
+// Takes both shapes because that is what `Duplex` hands its implementation:
+// `input` is `AsyncIterable<Uint8Array> | Iterable<Uint8Array>`.
+async function writeAll(
+  socket: Socket,
+  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+): Promise<void> {
   for await (const chunk of input) {
     if (!socket.write(chunk)) await once(socket, "drain");
   }

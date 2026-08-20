@@ -25,6 +25,17 @@ export interface SerializedHttpResponse {
 
 export interface SerializedHttpEnvelope<Options> {
   options: Options;
+  /**
+   * The body bytes. Must be *productive*: it has to yield or finish on its own,
+   * because a body neither stub is allowed to read (a GET/HEAD/OPTIONS request,
+   * a null-body-status response) is released with `discard`, and `discard` must
+   * await one `.next()` before `.return()` — a bare `.return()` is a no-op on a
+   * generator in suspended start and would leak the producer. So a `content`
+   * that blocks forever without yielding makes the stub block with it, where an
+   * earlier version returned immediately and leaked instead. Every transport in
+   * this repo satisfies this; a `content` that waits on a peer that may never
+   * send should carry its own timeout.
+   */
   content: AsyncIterable<Uint8Array>;
 }
 
@@ -151,10 +162,12 @@ export function newHttpServerStub(
       // never released. `discard` calls `.next()` first for exactly this
       // reason; see its comment in `bytes.ts`.
       //
-      // `fetch.ts` has the same shape at its null-body-status branch and is
-      // *safe* there without this, because the codec has already pulled from
-      // that generator to read the response head, so it is never in suspended
-      // start. Do not copy the bare form back here on the strength of that one.
+      // `fetch.ts` has the same shape at its null-body-status branch and still
+      // uses the bare form — not because it is safe there (it is not; its
+      // producer's `finally` does not run either) but because `discard` cannot
+      // fix it: the release has to reach the `output` generator that
+      // `fetchOverDuplex` has no handle on. See the KNOWN GAP note there. Here
+      // the producer is reachable, so here it gets released.
       await discard(content);
     } else if (supportsRequestStreams()) {
       requestInit.body = toReadableStream(content[Symbol.asyncIterator]());

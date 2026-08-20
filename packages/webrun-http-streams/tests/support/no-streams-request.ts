@@ -56,7 +56,16 @@ export class NoStreamsRequest {
   }
 }
 
-/** Swap the global `Request` for the Firefox-shaped one. Call the result to undo. */
+/**
+ * Swap the global `Request` for the Firefox-shaped one. Call the result to undo.
+ *
+ * Models one runtime shape only — both halves absent at once. It structurally
+ * cannot express the split Safari has (a readable `Request.body`, but no
+ * `ReadableStream` accepted as `init.body`), because installing this class
+ * removes the accessor and the constructor support together. If that case ever
+ * needs covering it wants a second stand-in, not a flag on this one; see the
+ * note on `supportsRequestStreams` in `src/request-streams.ts`.
+ */
 export function withoutRequestStreams(): () => void {
   const original = globalThis.Request;
   const install = (value: unknown): void => {
