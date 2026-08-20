@@ -138,6 +138,12 @@ export async function fetchOverDuplex(
   // stub; skipping the drain would abandon the body iterator mid-stream,
   // which over a `Duplex` can leave the stream unterminated or leak the
   // producer.
+  //
+  // The bare `.return()` is deliberate and is *not* the bug `discard` exists
+  // for: `respBody` comes back from `codec.decodeResponse`, which has already
+  // pulled from it to read the head, so it is never in suspended start and its
+  // `finally` does unwind. `http-stubs.ts` cannot assume that — the content it
+  // drains has not been touched by anyone — and uses `discard` accordingly.
   if (
     request.method === "HEAD" ||
     request.method === "OPTIONS" ||
