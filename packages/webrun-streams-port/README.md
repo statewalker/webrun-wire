@@ -15,6 +15,12 @@ const server = await serve({ port: channel.port2 }, async function* echo(input) 
 const { call } = await connect({ port: channel.port1 });
 ```
 
+Both take an optional `side: "initiator" | "responder"` — the `emulateMux`
+stream-id allocation side. It defaults asymmetrically (`"initiator"` on
+`connect`, `"responder"` on `serve`) so the ordinary pairing above needs no
+configuration; set it explicitly only when both ends of a port are `connect`s
+or both are `serve`s.
+
 ## Conformance
 
 Passes every level of `@statewalker/webrun-streams-conformance` against a `MessageChannel` pair.
