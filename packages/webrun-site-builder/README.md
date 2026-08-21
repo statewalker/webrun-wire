@@ -2,10 +2,10 @@
 
 Compose a **`SiteHandler = (Request) ⇒ Promise<Response>`** from three ingredients:
 
-- **Static files** from any [`@statewalker/webrun-files`](../../..
-  /webrun-files/packages/webrun-files) source — memory, Node FS,
-  S3, the browser's File System Access API, or a `CompositeFilesApi`
-  stitching several together.
+- **Static files** from any
+  [`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files)
+  source — memory, Node FS, S3, the browser's File System Access API, or a
+  `CompositeFilesApi` stitching several together.
 - **Dynamic endpoints** registered as
   `(Request, env) ⇒ Response` functions with URLPattern-based
   matching (`/todo/:id`, `/api/*`, …). `env` carries the per-request
@@ -21,8 +21,8 @@ definition and platform hosting. The same handler drops into every host:
 | Host | Package |
 | --- | --- |
 | Browser + ServiceWorker | [`HostedSiteBuilder`](../webrun-site-host) |
-| MessagePort (any `webrun-port-*` transport) | [`PortSiteBuilder`](../webrun-http-port) |
-| Node / Deno / Bun | (future `*SiteBuilder` siblings — same shape) |
+| Any `webrun-streams-*` transport (MessagePort, WebSocket, WebRTC, libp2p, …) | [`DuplexSiteBuilder`](../webrun-http-streams) |
+| Node / Deno / Bun / Cloudflare Workers | none needed — a `SiteHandler` *is* their handler shape |
 
 ```ts
 const handler: SiteHandler = new SiteBuilder()
@@ -30,9 +30,10 @@ const handler: SiteHandler = new SiteBuilder()
   .setFiles("/", clientFiles)
   .build();
 
-// Host it wherever — every *SiteBuilder takes a SiteHandler.
-await new HostedSiteBuilder().setHandler(handler).build();           // browser + SW
-new PortSiteBuilder(remotePort).setHandler(handler).start();          // MessagePort peer
+// Host it wherever — every host takes the same SiteHandler.
+await new HostedSiteBuilder().setHandler(handler).build();          // browser + SW
+await new DuplexSiteBuilder().setHandler(handler).start(serve, params); // any Duplex peer
+export default { fetch: handler };                                   // Deno / Bun / CF Workers
 ```
 
 ## Why it exists
@@ -198,8 +199,8 @@ Default is a plain `500 Internal Server Error` when any layer throws.
 
 ### Dispatch order
 
-On each request, the handler built by `.build()` runs three layers in
-this fixed order:
+On each request, the handler built by `.build()` runs three layers, then
+falls through, in this fixed order:
 
 1. **Auth** — every registered predicate whose pattern matches the
    request runs in registration order. The first one that returns a

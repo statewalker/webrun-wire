@@ -22,7 +22,9 @@ What it intentionally did not solve is **bare specifiers**: every
 `import` statement in user source had to point at a relative file path.
 Anything from npm — React, Zod, Lodash — was out of reach. That's Step 2
 of the in-browser build pipeline described in
-[notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md](../../../../notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md).
+`notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md`,
+which lives outside this repository, so there is no link to follow from
+here.
 
 This demo is the first proof of Step 2. It introduces:
 
@@ -55,40 +57,54 @@ The demo's `main.ts` wires four things and hands the result to
 1. A `MemFilesApi` for `/client` holding `index.html`, `style.css`,
    `main.tsx`, plus a shared `package.json`.
 2. A `MemFilesApi` for `/server` holding `api/index.ts`.
-3. A `JspmResolver` (single-file module in this app), constructed once
-   with the shared `package.json`'s `dependencies`. It exposes one method:
-   `resolveAndPrefetch(sourceFs[]) → { rewrittenSourceFs, externalFs, manifest }`.
+3. A `CdnResolver` (single-file module in this app), configured with the
+   shared `package.json`'s `dependencies` and a `CdnProvider`. It exposes one
+   terminal method: `resolveAndPrefetch() → { outputs, external, manifest }`,
+   where `outputs` is a `Map` keyed by the mount paths passed to `addSource`.
 4. The standard `SiteBuilder` + `HostedSiteBuilder` chain from the spike,
    pointed at the rewritten outputs instead of the raw sources.
 
 ```ts
-const sharedPkg = JSON.parse(packageJsonSource);
 const clientFiles = recordToFilesApi(clientResources);
 const serverFiles = recordToFilesApi(serverResources);
 
-const { client, server, external, manifest } = await new JspmResolver()
-  .setPackageJson(sharedPkg)
+const { outputs, external, manifest } = await new CdnResolver()
   .setSiteKey("jspm")
-  .setTransform(newScriptTransform())  // sucrase from the spike
+  .setPackageJson(JSON.parse(sharedPackageJson))
+  .setCdnProvider(provider)          // jspm | esm.sh | jsdelivr | a composite
   .addSource("/client", clientFiles)
   .addSource("/server", serverFiles)
+  .setLogger((event) => log(formatResolverEvent(event)))
   .resolveAndPrefetch();
 
+let baseUrl = "";
 const handler = new SiteBuilder()
-  .setFiles("/client", client)
-  .setFiles("/server", server)
+  .setFiles("/client", outputs.get("/client"))
+  .setFiles("/server", outputs.get("/server"))
   .setFiles("/external", external)
   .setEndpoint(
+    // `.js`, not `.ts`: the resolver transpiles up front, so what the site
+    // serves under /server is already JavaScript.
     "/api",
-    newServerRunner("/server/api/index.ts", () => baseUrl, {
+    newServerRunner("/server/api/index.js", () => baseUrl, {
       service: "site-builder-jspm-demo",
     }),
   )
   .build();
 
+const site = await new HostedSiteBuilder()
+  .setSiteKey("jspm")
+  .setHandler(handler)
+  .build();
+baseUrl = site.baseUrl;
+
 // `manifest` is a JSON import-map artifact (resolution manifest);
 // emit it as a sidecar file or expose it in the UI for inspection.
 ```
+
+The `setSiteKey` on the resolver and the one on `HostedSiteBuilder` must
+agree — the resolver bakes that prefix into the `/external/` paths it
+rewrites imports to.
 
 ## Examples
 
@@ -144,7 +160,7 @@ import { z } from "../../external/zod@3.23.8/index.js";
 ```
 
 The host page realm dynamic-imports this rewritten module via
-`setServerRunner` — exactly as in the spike — and the import resolves
+`newServerRunner` — exactly as in the spike — and the import resolves
 without needing a runtime import map.
 
 ### `/external/*` contents (illustrative)
@@ -181,13 +197,13 @@ seed a future static-bundling step.
 
 ```ts
 // 1. Bare specifier discovered in source but absent from package.json.
-//    JspmResolver throws synchronously during resolveAndPrefetch() with
-//    the offending specifier and the path of the file that introduced it.
+//    resolveAndPrefetch() rejects, naming the offending specifier, its
+//    package, and the path of the file that introduced it.
 
-// 2. ga.jspm.io unreachable during prefetch.
-//    resolveAndPrefetch() rejects with a network error wrapped with the
-//    failing pkg@v/file. The demo's main.ts displays it in the on-page
-//    log; the iframe is not mounted.
+// 2. The CDN is unreachable during prefetch.
+//    resolveAndPrefetch() rejects with `Failed to fetch <url>: HTTP <status>`.
+//    The demo's main.ts displays it in the on-page log; the iframe is not
+//    mounted.
 
 // 3. A CDN response is non-ESM (e.g. an HTML 404 body).
 //    Lex pass throws; the resolver wraps with context (URL, status) and
@@ -196,7 +212,7 @@ seed a future static-bundling step.
 
 ## Internals
 
-The pipeline lives in four single-file modules under `src/`:
+The pipeline lives in a handful of single-file modules under `src/`:
 
 - [`script-transform.ts`](./src/script-transform.ts) — sucrase wrapper.
   `transformSource(path, source)` runs the right combination of

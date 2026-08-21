@@ -26,28 +26,33 @@ const site = await new HostedSiteBuilder()
 iframe.src = site.baseUrl;
 ```
 
-The split is intentional: the same `SiteHandler` works in every host
-(browser+SW via `HostedSiteBuilder`, `MessagePort` via
-[`PortSiteBuilder`](../webrun-http-port), Node via a future `NodeSiteBuilder`,
-…). Configuration lives in one place.
+The split is intentional: the same `SiteHandler` works in every host —
+browser + SW via `HostedSiteBuilder`, any `webrun-streams-*` transport via
+[`DuplexSiteBuilder`](../webrun-http-streams), and Node / Deno / Bun /
+Cloudflare Workers directly, since a `SiteHandler` already *is* their handler
+shape. Configuration lives in one place.
 
 ## Cross-application HTTP (no domains, no certificates)
 
 Because the handler is just a function, you can point it at a remote peer over
-any transport that produces a `MessagePort` (WebSocket, WebRTC, libp2p,
-LiveKit, …). The browser-side host doesn't care:
+any `webrun-streams-*` transport (WebSocket, WebRTC, libp2p, LiveKit,
+MessagePort, …). The browser-side host doesn't care:
 
 ```ts
-import { fetchOverPort } from "@statewalker/webrun-http-port/fetch";
+import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
+import { connect } from "@statewalker/webrun-streams-ws";
 
-const port = await connectToPeer(); // any webrun-port-* adapter
+const { call } = await connect({ url: "wss://peer.example" }); // any adapter
 const site = await new HostedSiteBuilder()
-  .setHandler((request) => fetchOverPort(port, request))
+  .setHandler((request) => fetchOverDuplex(call, request))
   .build();
 
 iframe.src = site.baseUrl;
 // Every fetch inside the iframe is now proxied across the peer connection.
 ```
+
+`apps/livekit-demo/client-page/main.ts` and `apps/p2p-demo/client-page/main.ts`
+are both this pattern against a real transport.
 
 ## API
 
@@ -70,6 +75,23 @@ interface HostedSiteBuilderOptions {
   adapterFactory?: AdapterFactory;
 }
 ```
+
+`build()` throws if `setHandler` was not called. `siteKey` defaults to a
+generated UUID and `serviceWorkerUrl` to `/sw-worker.js`. `adapterFactory` is
+the seam the tests use to inject a fake instead of a real ServiceWorker; it
+also takes `SiteAdapter`, `SiteAdapterRegistration` and `AdapterFactory`, all
+exported.
+
+Also exported, for callers that accept "a `FilesApi` or a plain path → content
+map" in their own APIs:
+
+```ts
+type FilesSource = FilesApi | Record<string, string | Uint8Array>;
+function resolveFilesSource(source: FilesSource): Promise<FilesApi>;
+```
+
+`HostedSiteBuilder` itself never calls it — it hosts a `SiteHandler` and owns
+no file configuration.
 
 Plus a standalone utility for the "endpoint is a JS module dynamically
 imported from the site itself" pattern:
@@ -111,9 +133,9 @@ getBaseUrl = () => site.baseUrl;
 
 - [`@statewalker/webrun-site-builder`](../webrun-site-builder) — produces a
   `SiteHandler` from endpoints + files + auth + routing.
-- [`@statewalker/webrun-http-port`](../webrun-http-port) — `PortSiteBuilder`
-  sibling host, plus `fetchOverPort` / `serveFetchOverPort` for routing
-  over `MessagePort`.
+- [`@statewalker/webrun-http-streams`](../webrun-http-streams) —
+  `DuplexSiteBuilder`, the sibling host for any `webrun-streams-*` transport,
+  plus `fetchOverDuplex` / `serveFetchOverDuplex`.
 - [`apps/site-builder-demo`](../../apps/site-builder-demo) and
   [`apps/site-builder-tsx-spike`](../../apps/site-builder-tsx-spike) —
   runnable examples.

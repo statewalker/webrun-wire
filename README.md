@@ -149,17 +149,17 @@ demos (Hono-routed dynamic site and a File System Access API browser).
 **HTTP-based service RPC.** Expose plain object methods as a standard
 `(Request) ⇒ Response` handler; call them from anywhere with `fetch`:
 
-- `newRpcServer(services, {path?})` → a webrun-http handler that
-  routes `GET /`, `GET /{service}`, `GET|POST /{service}/{method}` into
-  method calls.
+- `newRpcServer(services, {path?})` → a `(Request) ⇒ Response` handler
+  that routes `GET /`, `GET /{service}`, `GET|POST /{service}/{method}`
+  into method calls.
 - `newRpcClient({baseUrl, fetch?})` → `{ loadService<T>(name) }` with
   lazy descriptor caching; typed method proxies round-trip through
   `fetch`.
 
-Because the server is a webrun-http handler and the client takes an
-injectable `fetch`, the same RPC code runs unchanged over real HTTP, an
-in-browser ServiceWorker, a MessagePort bridge, or a WebSocket — wire it
-to whichever transport fits the deployment.
+Because the server is a plain `(Request) ⇒ Response` handler and the
+client takes an injectable `fetch`, the same RPC code runs unchanged over
+real HTTP, an in-browser ServiceWorker, a MessagePort bridge, or a
+WebSocket — wire it to whichever transport fits the deployment.
 
 Depends on `@statewalker/webrun-streams` for error serialization.
 
@@ -186,33 +186,40 @@ beyond a peer `@statewalker/webrun-files`.
 
 ### [`@statewalker/webrun-site-host`](./packages/webrun-site-host)
 
-**One-call in-browser hosting** for a `webrun-site-builder` site.
-`HostedSiteBuilder` wraps `SiteBuilder` + `SwHttpAdapter` into a
-single fluent API — you register files, endpoints, and auth hooks the
-same way, and `.build()` takes care of the SW registration, URL
-rewriting, and routing under a site key:
+**In-browser hosting** for any `SiteHandler`. `HostedSiteBuilder` owns
+*where* the site runs — it registers the same-origin ServiceWorker via
+`SwHttpAdapter`, mounts the handler under a site key, and rewrites
+incoming URLs to site-relative form. It owns nothing about *what* the
+site does; files, endpoints and auth stay in `SiteBuilder`:
 
 ```ts
+const handler = new SiteBuilder()
+  .setFiles("/client", clientFiles)
+  .setEndpoint("/api", newServerRunner("/server/api/index.js", () => baseUrl))
+  .build();
+
 const site = await new HostedSiteBuilder()
   .setSiteKey("demo")
-  .setFiles("/client", clientFiles)
-  .setFiles("/server", serverFiles)
-  .setServerRunner("/api", "/server/api/index.js")
+  .setHandler(handler)
   .build();
 // site.baseUrl   → http://localhost:5173/demo/
 // site.stop()    unhooks the handler
 ```
 
-`setServerRunner(pattern, modulePath)` inlines the common pattern of
-"the `/api` endpoint is a JS module served by my own site" — the
-builder generates a dynamic-import endpoint under the hood.
+`newServerRunner(modulePath, getBaseUrl, env?)` is a standalone
+`EndpointHandler` factory for the common "the `/api` endpoint is a JS
+module served by my own site" pattern — it dynamic-imports the module
+per request and calls its default export with `(request, env)`.
 
 ## Runnable demos
 
 | Demo | Path | What it shows |
 | --- | --- | --- |
 | **site-builder-demo** | [`apps/site-builder-demo`](./apps/site-builder-demo) | Vite + TypeScript app; `HostedSiteBuilder` mounts a full site (static client + `/api` dynamic-import endpoint + iframe preview) in ~40 lines. Highest-level wrapping; server-side code is a JS file served by the site itself. |
-| **p2p cross-app HTTP demo** | [`apps/p2p-demo`](./apps/p2p-demo) | Single project bundling a Node libp2p Circuit Relay v2, a server browser page, and a client browser page. Two browser apps exchange HTTP (including SSE) over a direct WebRTC link bootstrapped through the relay. No domains, no TLS certs at the application layer. `pnpm demo:p2p` boots all three. |
+| **p2p cross-app HTTP demo** | [`apps/p2p-demo`](./apps/p2p-demo) | Single project bundling a Node libp2p Circuit Relay v2, a server browser page, and a client browser page. Pages find each other through relay-mediated group discovery — no peer-id paste step — then exchange HTTP (including SSE) over a direct WebRTC link. `pnpm demo:p2p` boots all three. |
+| **livekit cross-app HTTP demo** | [`apps/livekit-demo`](./apps/livekit-demo) | The same shape as `p2p-demo` with a LiveKit room replacing the libp2p relay + WebRTC link. Boots a dev LiveKit server (Docker), a JWT token service, and two Vite pages. |
+| site-builder + JSPM | [`apps/site-builder-jspm-demo`](./apps/site-builder-jspm-demo) | Resolves bare import specifiers through `@jspm/generator` and serves the result from the in-browser site. |
+| site-builder TSX spike | [`apps/site-builder-tsx-spike`](./apps/site-builder-tsx-spike) | `ServeFilesOptions.transform` as a per-mount response filter: sucrase transpiles `.ts` / `.tsx` on the fly, including the dynamic-imported server handler. |
 | Hono dynamic site | [`packages/webrun-http-browser/demo/demo-1.html`](./packages/webrun-http-browser/demo/demo-1.html) | A Hono router running in the browser as the back-end for a relay-SW-hosted site. Demonstrates relay mode + full-framework compatibility. |
 | Local-disk file server | [`packages/webrun-http-browser/demo/demo-2.html`](./packages/webrun-http-browser/demo/demo-2.html) | User picks a folder via `showDirectoryPicker`; the relay SW exposes its contents as a browsable in-browser HTTP site. ~20-line handler. |
 | Minimal same-origin SW | [`packages/webrun-http-browser/public/index.html`](./packages/webrun-http-browser/public/index.html) | The unwrapped `SwHttpAdapter` pattern, ~40 lines of inline JS. Good baseline for debugging the SW lifecycle. |
@@ -227,8 +234,8 @@ concrete combinations:
 
 | Use case | Stack |
 | --- | --- |
-| In-browser service RPC with offline-capable `fetch()` | `webrun-rpc-http` + `webrun-http-browser` (same-origin mode) + `webrun-http` |
-| Cross-origin RPC from an embed (Observable, unpkg) | `webrun-rpc-http` + `webrun-http-browser` (relay mode) + `webrun-http` |
+| In-browser service RPC with offline-capable `fetch()` | `webrun-rpc-http` + `webrun-http-browser` (same-origin mode) |
+| Cross-origin RPC from an embed (Observable, unpkg) | `webrun-rpc-http` + `webrun-http-browser` (relay mode) |
 | Static site + dynamic API + auth, served from anywhere | `webrun-site-builder` + any `FilesApi` + a transport of your choice |
 | In-browser static site + dynamic API with zero SW boilerplate | `webrun-site-host` — wraps the builder + the SW adapter in one `.build()` call |
 | Node ↔ browser RPC over a WebSocket | `webrun-streams-ws` on each end; pipe `webrun-http-streams` through it for `Request`/`Response` semantics |
@@ -246,7 +253,8 @@ pnpm format:fix        # biome check --write --unsafe .
 ```
 
 Tooling: **pnpm workspace**, **turborepo**, **biome**, **vitest**,
-**rolldown**, **TypeScript**. No eslint / prettier / rollup / mocha.
+**rolldown** (**tsdown** in `webrun-streams` and `webrun-msgpack`),
+**TypeScript**. No eslint / prettier / rollup / mocha.
 
 ### Self-contained bundles
 

@@ -28,6 +28,23 @@ const stop = await serveConnections({ node }, (context) => {
 
 `serve` is `serveConnections` with the context ignored, so both share the same framing, teardown and failure handling.
 
+## Stream limits
+
+libp2p caps how many streams for one protocol may be open at once **per connection**, and past the cap a new stream is reset rather than queued. This adapter opens one stream per `call`, so a caller with more concurrent requests than the cap starts seeing rejected calls with no other symptom. The three knobs below are passed straight through to `node.dialProtocol` / `node.handle` — this package sets no defaults of its own, and an option left unset is omitted from the options object entirely so libp2p's own default applies.
+
+| Option | On | libp2p default (3.3.8) |
+| --- | --- | --- |
+| `maxInboundStreams` | `serve` / `serveConnections` | **32** |
+| `maxOutboundStreams` | `connect`, `serve` / `serveConnections` | **64** |
+| `runOnLimitedConnection` | `connect`, `serve` / `serveConnections` | unset — libp2p refuses this protocol on a limited connection |
+
+```ts
+const stop = await serve({ node, maxInboundStreams: 128 }, handler);
+const { call } = await connect({ node, peer, maxOutboundStreams: 128 });
+```
+
+`runOnLimitedConnection` opts in to running over a connection with limits on how much data can be transferred or how long it can stay open — a relayed circuit being the usual case. This package does not decide that trade-off for you; it only exposes the knob. `tests/stream-limits.test.ts` pins both halves: a raised `maxInboundStreams` really does admit more than 32 concurrent streams, and an unconfigured server still stops at exactly 32.
+
 ## Framing
 
 The adapter puts a small frame on top of the libp2p stream:

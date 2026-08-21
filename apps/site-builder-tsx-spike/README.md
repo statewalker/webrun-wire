@@ -18,11 +18,12 @@ The same filter handles three cases uniformly:
 - `client/main.tsx` — typed + JSX (transforms: `typescript` + `jsx`)
 - `client/format.ts` — typed helper imported by `main.tsx` via
   explicit `.ts` extension
-- `server/api/index.ts` — typed `(Request, env) → Response` handler,
-  loaded via `setServerRunner("/api", "/server/api/index.ts", { greeting, service })`
-  and dynamic-imported through the same SW + transform pipeline. The
-  third `setServerRunner` argument is the env bag the module receives
-  alongside the URL params on every call.
+- `server/api/index.ts` — typed `(Request, env) → Response` handler, mounted
+  with `setEndpoint("/api", newServerRunner("/server/api/index.ts", () => baseUrl, { greeting, service }))`
+  and dynamic-imported through the same SW + transform pipeline.
+  `newServerRunner` is the standalone `EndpointHandler` factory from
+  `@statewalker/webrun-site-host`; its third argument is the env bag the
+  module receives alongside the URL params on every call.
 
 No bundler, no service-side build step, no SW-internal wasm. sucrase
 is pure JS, runs on the main thread; the SW just relays. Output is
@@ -36,9 +37,12 @@ cached by source SHA-256 so repeated fetches don't re-transpile.
 /client/format.ts        TS  → transpiled by transform
 /client/main.tsx         TSX → transpiled by transform (typescript + jsx)
 /server/api/index.ts     TS  → transpiled by transform
-/api                     setServerRunner endpoint → dynamic-imports
+/api                     newServerRunner endpoint → dynamic-imports
                          /server/api/index.ts as a module
 ```
+
+All of the above sit under the site key, so the browser sees them as
+`/tsx-spike/client/index.html`, `/tsx-spike/api`, and so on.
 
 Wiring is in [`src/main.ts`](./src/main.ts); the transform is in
 [`src/script-transform.ts`](./src/script-transform.ts).
@@ -53,8 +57,8 @@ Everything that's Step 2+ of the in-browser build pipeline:
 - No `es-module-lexer`, no import rewriting, no source maps, no HMR.
 - No persistent cache — only an in-memory `Map<sha256, code>`.
 
-Step 1 spec:
-[notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md](../../../../notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md).
+The Step 1 spec (`notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md`)
+lives outside this repository, so there is no link to follow from here.
 
 ## Run
 

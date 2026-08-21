@@ -5,11 +5,12 @@ HTTP-based service RPC. Expose plain object methods as a standard
 
 ## Why it exists
 
-The HTTP primitives in [`@statewalker/webrun-http`](../webrun-http) let
-you write a handler that answers `fetch()` — over the wire, in the same
-tab, inside a ServiceWorker, across a MessagePort bridge. What they
-don't give you is a layer above that: a way to take a plain service
-object and turn its methods into addressable endpoints.
+The HTTP primitives in
+[`@statewalker/webrun-http-streams`](../webrun-http-streams) let you write a
+handler that answers `fetch()` — over the wire, in the same tab, inside a
+ServiceWorker, across a MessagePort bridge. What they don't give you is a
+layer above that: a way to take a plain service object and turn its methods
+into addressable endpoints.
 
 `webrun-rpc-http` is that layer. Deliberately small — two factory
 functions plus a handful of types:
@@ -21,17 +22,17 @@ functions plus a handful of types:
   descriptor and returns typed proxies whose method calls round-trip
   through `fetch`.
 
-Because the server is *just* a webrun-http handler and the client is
-*just* `fetch`, the exact same RPC code runs over whatever transport
-you wire it to:
+Because the server is *just* a `(Request) ⇒ Response` handler and the
+client is *just* `fetch`, the exact same RPC code runs over whatever
+transport you wire it to:
 
 | Transport | How |
 | --- | --- |
 | Real HTTP over the network | Default: `fetch = globalThis.fetch`. |
 | An in-browser ServiceWorker | `@statewalker/webrun-http-browser` — the SW intercepts the standard `fetch` call with no special wiring. |
 | In-process tests | Pass `fetch: (request) => handler(request)` — no network at all. |
-| A MessagePort channel | Pipe through the `@statewalker/webrun-http` server/client pair. |
-| A WebSocket | Stack `webrun-ports-ws` + `webrun-http` pipe on top. |
+| A MessagePort channel | `@statewalker/webrun-streams-port` for the `Duplex`, then `fetchOverDuplex` / `serveFetchOverDuplex` from `@statewalker/webrun-http-streams`. |
+| A WebSocket | Same, with `@statewalker/webrun-streams-ws` supplying the `Duplex`. |
 | Deno / Cloudflare Workers / Node's built-in HTTP | The handler is `(Request) ⇒ Response` — drop in as-is. |
 
 ## How to use
@@ -49,7 +50,7 @@ npm install @statewalker/webrun-rpc-http
 | `RpcMethod` | `(params: Json, body?: Blob) ⇒ Promise<Blob \| Json>` — the shape every exposed method must satisfy. |
 | `RpcClient` | Shape of the object returned from `newRpcClient`: `{ loadService<T>(name) }`. |
 | `Json` / `JsonObject` | Recursive JSON types — everything that survives a `JSON` round-trip. |
-| `getInstanceMethods(instance)` | Reflect callable properties of `instance`, walking the prototype chain up to (but not including) `Object.prototype`. Used internally by `newRpcServer`; exposed for callers that need it. |
+| `getInstanceMethods(instance)` | Reflect callable properties of `instance` into a `Record<string, Function>`, walking the prototype chain up to (but not including) `Object.prototype`. Used internally by `newRpcServer`; exposed for callers that need it. |
 
 ## Examples
 
@@ -82,7 +83,7 @@ Out of the box the handler answers:
 | `GET /` | `{ "math": ["add", "bytes"] }` — service descriptor. |
 | `GET /math` | `["add", "bytes"]` — method list. |
 | `POST /math/add` — multipart with `params` JSON | `{ "type": "json", "result": 5 }` |
-| `GET /math/add?a=2&b=3` | Same, URL params parsed into `params`. |
+| `GET /math/add?a=2&b=3` | `{ "type": "json", "result": "23" }` — URL params are parsed into `params`, but as **strings**, so `add` concatenates. POST JSON when the argument type matters. |
 | `POST /math/bytes` — Blob result | `application/octet-stream` body. |
 
 ### Call a service
@@ -184,7 +185,8 @@ attached to a thrown `Error` subclass.
 
 `getInstanceMethods` walks each service's prototype chain and picks up
 every function-valued property except `constructor`, stopping before
-`Object.prototype`. That means:
+`Object.prototype`. It returns a `Record<string, Function>`; the wire
+descriptor is built from its keys. That means:
 
 - Plain object literals `{ foo() {…} }` expose `foo`.
 - Class instances expose methods defined on any ancestor class up to
@@ -226,7 +228,7 @@ The URL tail after `/svc/method/` is injected into `params.$path`:
 ### Design notes
 
 - **Factory, not class.** Matches the rest of the workspace
-  (`newHttpServer`, `newHttpClient`, `newHttpClientStub`, …). No public
+  (`newHttpClientStub`, `newHttpCodec`, `newBasicAuth`, …). No public
   class surface to subclass; behaviour is configured via the options
   object.
 - **Cached descriptor, lazy load.** The first `loadService` call fires
@@ -249,8 +251,8 @@ The URL tail after `/svc/method/` is injected into `params.$path`:
   `Object.prototype`. Methods defined on `Object.prototype` are
   deliberately excluded — you can't accidentally expose `toString`.
 - **No streaming.** A method returns once, with one `Json` or `Blob`.
-  Use the `@statewalker/webrun-http` pipe layer directly for streaming
-  responses.
+  Use `@statewalker/webrun-http-streams` directly (`fetchOverDuplex` /
+  `serveFetchOverDuplex`) for streaming responses.
 - **Path prefix without trailing slash.** `path: "/api"` is right;
   `path: "/api/"` is normalized (trailing slash stripped).
 - **URLSearchParams are strings.** `?a=1` → `params.a === "1"`. POST

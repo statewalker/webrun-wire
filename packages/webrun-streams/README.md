@@ -38,8 +38,8 @@ npm install @statewalker/webrun-streams
 | `toReadableStream(it)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
 | `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as `AsyncGenerator<Uint8Array>`. |
 | `emulateMux(channel, opts?)` | Multiplex many concurrent `Duplex` calls over one `ByteChannel`; returns `{ call, serve, close }`. |
-| `normalizeToUint8Array(value)` | Coerce a `ByteLike` (string, ArrayBuffer, typed array) to `Uint8Array`. |
-| `toChunks(it, size)` | Re-chunk an `AsyncIterable<Uint8Array>` into pieces of at most `size` bytes. |
+| `normalizeToUint8Array(value)` | Coerce a `ByteLike` (string, `ArrayBuffer`, typed array, `Blob`) to `Uint8Array`. Synchronous except for a `Blob`, which returns a `Promise`. |
+| `toChunks(size?)` | Curried: returns a transform that re-chunks an `AsyncIterable<Uint8Array>` into pieces of at most `size` bytes. `size` defaults to 16384. |
 | `serializeError(error)` | Turn an `Error` (or anything) into a plain `{message, stack, …}` object preserving subclass fields. |
 | `deserializeError(obj \| string)` | Reconstruct an `Error` from a serialised form, restoring extra fields. |
 
@@ -80,11 +80,18 @@ async function* chunks() {
   yield new Uint8Array([0x22, 0x3a, 0x31, 0x7d, 0x0a]);
 }
 
-const values = decodeJsonl<{ a: number }>(splitLines(decodeText(chunks())));
+// `decodeJsonl` splits lines itself — do not wrap it in `splitLines`, or a
+// stream carrying more than one value arrives as one concatenated line and
+// `JSON.parse` throws.
+const values = decodeJsonl<{ a: number }>(decodeText(chunks()));
 for await (const v of values) console.log(v); // { a: 1 }
 
-// inverse
-const jsonl = encodeText(joinLines(encodeJsonl([{ a: 1 }, { a: 2 }])));
+// inverse. `encodeJsonl` already terminates each value with "\n", so
+// `joinLines` here would emit a blank line between every record.
+const jsonl = encodeText(encodeJsonl([{ a: 1 }, { a: 2 }]));
+
+// `splitLines` / `joinLines` are for plain string streams, with no JSON involved:
+for await (const line of splitLines(decodeText(byteStream))) console.log(line);
 ```
 
 ### Callback → AsyncGenerator bridge
@@ -112,19 +119,27 @@ for await (const n of tickEverySecond()) console.log(n); // 0 … 4
 ### Iterator chunk protocol
 
 ```ts
-import { sendIterator, recieveIterator } from "@statewalker/webrun-streams";
+import { collect, recieveIterator, sendIterator } from "@statewalker/webrun-streams";
 
 // Drain an iterable across any transport.
 async function transport<T>(chunk: { done: boolean; value?: T; error?: unknown }) {
-  // …send `chunk` over your channel.
+  await myChannel.send(chunk); // …however your channel sends
 }
-await sendIterator(transport, [1, 2, 3]);
 
 // On the other side, rebuild the original iterator.
 const iter = recieveIterator<number>((deliver) => {
   myChannel.onMessage = (chunk) => deliver(chunk);
 });
-for await (const v of iter) console.log(v); // 1, 2, 3
+
+// Start consuming *before* (or concurrently with) draining the source.
+// `deliver` resolves only once the consumer has dequeued the chunk — that is
+// the backpressure — so awaiting `sendIterator` with nobody iterating `iter`
+// deadlocks both sides.
+const [, received] = await Promise.all([
+  sendIterator(transport, [1, 2, 3]),
+  collect(iter),
+]);
+console.log(received); // [1, 2, 3]
 ```
 
 ### WHATWG streams ↔ async iterators

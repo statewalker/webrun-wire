@@ -93,6 +93,12 @@ group a tab is in or what role it plays.
 Open additional server-page tabs to add more services to the same group;
 client-page tabs see the new services within one announcement interval (≤5s).
 
+### Tests
+
+`pnpm test` runs `tests/discovery.test.ts` — the relay-mediated discovery
+protocol over real in-process libp2p nodes (announce/reply, group isolation,
+TTL eviction, empty-group cleanup). No browser involved.
+
 ### End-to-end test
 
 `e2e/browser-to-browser.mjs` drives two real browsers (via Playwright) through
@@ -456,8 +462,12 @@ apps/p2p-demo/
 ├── client-page/
 │   ├── index.html              # H1 (Client: <synth>) + status header + Services in group (live) + Mounted (stacked) + Activity log
 │   └── main.ts                 # shared SwHttpAdapter + cached call handles + explicit relay→circuit→webrtc dial + mount/unmount + ghost rows
+├── tests/
+│   └── discovery.test.ts       # vitest, over real in-process libp2p nodes: relay-mediated announce/reply, group isolation, TTL eviction, empty-group cleanup
 ├── e2e/
 │   └── browser-to-browser.mjs  # Playwright harness: two real browsers through discover → dial → mount; E2E_BROWSER=chromium|firefox
+├── vite.server.config.ts       # serves server-page/ on 5175
+├── vite.client.config.ts       # serves client-page/ on 5176 (+ sw-worker.js)
 └── scripts/
     └── start.sh                 # boots relay, parses multiaddr, injects VITE_RELAY_MULTIADDR + VITE_GROUP_ID
 ```

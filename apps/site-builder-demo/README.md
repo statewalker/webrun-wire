@@ -1,32 +1,45 @@
 # site-builder-demo
 
 A Vite + TypeScript app that mounts a complete in-browser HTTP site
-(static client, dynamic `/api`, server-side module, iframe preview)
-from a single
-[`HostedSiteBuilder`](../../packages/webrun-site-host) call. No
-backend, no disk, nothing leaves the tab.
+(static client, dynamic `/api`, server-side module, iframe preview) from a
+[`SiteBuilder`](../../packages/webrun-site-builder) definition hosted by
+[`HostedSiteBuilder`](../../packages/webrun-site-host). No backend, no disk,
+nothing leaves the tab.
 
 ## Main demonstration point
 
-**The whole site — client assets, server module, and the `/api`
-endpoint that wires them together — is one fluent `.build()` call,
-and the server handler is a JS module served by the same site and
+**The server handler is a JS module served by the same site and
 dynamic-imported per request, called with `(request, env)`.**
 
-That second part is the unusual one: the API endpoint isn't a
-function passed to the builder. It's a URL —
-`/server/api/index.js` — registered via
-`setServerRunner("/api", "/server/api/index.js", { greeting, service })`.
-At request time the builder dynamic-imports that URL through the same
-ServiceWorker that's serving everything else, evaluates the JS as a
-module, and invokes its `default` export with the `Request` plus an
-`env` bag. `env` carries the URL `params` plus the values passed as
-the third `setServerRunner` argument — that's how shared dependencies
-(DB connections, FilesApi instances, secrets) reach a server module
-that lives in a string. Edit the module body and the next request
-picks it up.
+The API endpoint isn't a function passed to the builder. It's a URL —
+`/server/api/index.js` — reached through `newServerRunner`, the standalone
+`EndpointHandler` factory from `@statewalker/webrun-site-host`:
 
-The complete wiring is ~40 lines of TypeScript in
+```ts
+new SiteBuilder()
+  .setFiles("/client", clientFiles)
+  .setFiles("/server", serverFiles)
+  .setEndpoint(
+    "/api",
+    newServerRunner("/server/api/index.js", () => baseUrl, { greeting, service }),
+  )
+  .build();
+```
+
+At request time it dynamic-imports that URL through the same ServiceWorker
+that's serving everything else, evaluates the JS as a module, and invokes its
+`default` export with the `Request` plus an `env` bag. `env` carries the URL
+`params` plus the values passed as the third `newServerRunner` argument —
+that's how shared dependencies (DB connections, FilesApi instances, secrets)
+reach a server module that lives in a string. Edit the module body and the
+next request picks it up.
+
+`newServerRunner` needs the live `baseUrl` to build absolute import URLs, and
+`baseUrl` only exists after `HostedSiteBuilder.build()` — hence the mutable
+ref closed over above and assigned afterwards. [`src/main.ts`](./src/main.ts)
+spells this out.
+
+The complete wiring is ~45 lines of TypeScript in
 [`src/main.ts`](./src/main.ts).
 
 ## What's served
@@ -36,13 +49,13 @@ The complete wiring is ~40 lines of TypeScript in
 /demo/client/style.css        static
 /demo/client/main.js          static
 /demo/server/api/index.js     static  → MemFilesApi (serverResources)
-/demo/api?name=…              endpoint → setServerRunner dynamic-imports
+/demo/api?name=…              endpoint → newServerRunner dynamic-imports
                                          /demo/server/api/index.js
 ```
 
 `clientResources` and `serverResources` are plain `Record<string,
-string>` maps in [`src/site.ts`](./src/site.ts), auto-wrapped by the
-builder into `MemFilesApi` instances.
+string>` maps in [`src/site.ts`](./src/site.ts); `src/main.ts` writes each
+into a `MemFilesApi` before handing it to `SiteBuilder.setFiles`.
 
 ## How a request flows
 
@@ -51,7 +64,7 @@ iframe (/demo/client/index.html)
   └─ fetch("../api?name=Ada")
        └─ ServiceWorker intercepts
             └─ outer page handler (SiteBuilder routes match /api)
-                 └─ dynamic-import("/demo/server/api/index.js")
+                 └─ newServerRunner dynamic-imports "/demo/server/api/index.js"
                       └─ same SW serves the .js text → browser evals
                            └─ module.default(request) → JSON Response
 ```
@@ -100,7 +113,7 @@ URL; the iframe shows the hosted client. Typing into the input fires
 apps/site-builder-demo/
 ├── index.html              — outer page (Vite entry)
 ├── src/
-│   ├── main.ts             — HostedSiteBuilder call + iframe wiring
+│   ├── main.ts             — SiteBuilder + HostedSiteBuilder calls + iframe wiring
 │   └── site.ts             — clientResources + serverResources
 ├── vite.config.js          — copies sw-worker.js to /sw-worker.js
 ├── tsconfig.json
@@ -129,12 +142,12 @@ under SW control — required for `SwHttpAdapter.start()` to resolve.
 
 | Demo | Pattern |
 | --- | --- |
-| **This app** | Same-origin SW + `HostedSiteBuilder` + dynamic-imported server module |
+| **This app** | Same-origin SW + `SiteBuilder` + `HostedSiteBuilder` + dynamic-imported server module |
 | [`site-builder-tsx-spike`](../site-builder-tsx-spike) | Same as this, plus per-mount `transform` filter to serve `.ts/.tsx` on the fly |
 | [`packages/webrun-http-browser/demo/demo-1.html`](../../packages/webrun-http-browser/demo/demo-1.html) | Relay SW + Hono router as the handler |
 | [`packages/webrun-http-browser/demo/demo-2.html`](../../packages/webrun-http-browser/demo/demo-2.html) | Relay SW + File System Access API folder |
 | [`packages/webrun-http-browser/public/index.html`](../../packages/webrun-http-browser/public/index.html) | Bare `SwHttpAdapter`, no `SiteBuilder` |
 
-This is the highest-level wrapping (`HostedSiteBuilder`) plus the
-dynamic-import server-module pattern. The other demos use manual
-handler functions.
+This is the highest-level wrapping (`SiteBuilder` + `HostedSiteBuilder`) plus
+the dynamic-import server-module pattern. The other demos use manual handler
+functions.

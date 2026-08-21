@@ -38,12 +38,18 @@ npm install @statewalker/webrun-http-browser
 
 | Subpath | Purpose |
 | --- | --- |
-| `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, plus re-exports from `@statewalker/webrun-http` (`HttpError`, stubs, stream helpers) |
+| `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs) and `@statewalker/webrun-streams` (stream and error helpers) |
 | `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap |
 | `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin |
 | `@statewalker/webrun-http-browser/sw-worker` | IIFE bundle of the same-origin SW runtime — ditto, for same-origin apps |
 
 ## Examples
+
+> Every example below needs a real browser: a ServiceWorker, and for relay
+> mode an iframe on the relay origin. None of them run under Node, and
+> ServiceWorkers only register over `http://localhost` or HTTPS. The runnable
+> versions are in [`public/`](./public) and [`demo/`](./demo) — see
+> [Running the bundled examples](#running-the-bundled-examples).
 
 ### Relay mode — cross-origin
 
@@ -207,7 +213,7 @@ Why it's interesting:
   of a local HTTP dev server without running one.
 - **Directory picker + request router in <100 lines.** No build step,
   no tooling. Shows how small the glue between a platform API and a
-  webrun-http handler can be.
+  `(Request) ⇒ Response` handler can be.
 
 ## Internals
 
@@ -216,20 +222,23 @@ Why it's interesting:
 ```
 src/
 ├── core/                          ┐
-│   ├── data-calls.ts              │  Transport primitives: one-shot
-│   ├── data-channels.ts           │  `callChannel` / `handleChannelCalls`,
-│   ├── data-send-recieve.ts       │  streaming `sendStream` / `handleStreams`
-│   ├── errors.ts                  │  with backpressure over MessagePort,
-│   ├── message-target.ts          │  plus inlined `newRegistry`, and
-│   ├── new-async-generator.ts     │  `newAsyncGenerator` (queue + cleanup
-│   └── registry.ts                │  generator used for back-pressure).
+│   ├── data-calls.ts              │  Transport primitives over a
+│   ├── data-channels.ts           │  `MessageTarget`: one-shot
+│   ├── message-target.ts          │  `callChannel` / `handleChannelCalls`,
+│   └── registry.ts                │  the request/response
+│                                  │  `newInvokationChannel`, streaming
+│                                  │  `sendStream` / `handleStreams` with
+│                                  │  backpressure, and `newRegistry`.
+│                                  │  Also re-exports
+│                                  │  `@statewalker/webrun-streams`.
 │                                  ┘
 ├── http/                          ┐
 │   ├── http-send-recieve.ts       │  Browser-specific HTTP transport:
 │   │                              │  `handleHttpRequests` /
-│   │                              │  `sendHttpRequest` over `MessageTarget`s.
-│   └── index.ts                   │  Re-exports `@statewalker/webrun-http`
-│                                  ┘  (HttpError, stubs, stream helpers).
+│   │                              │  `sendHttpRequest` over `MessageTarget`s,
+│   │                              │  built on the client/server stubs.
+│   └── index.ts                   │  Re-exports
+│                                  ┘  `@statewalker/webrun-http-streams`.
 ├── sw/                            ┐
 │   ├── sw-dispatcher.ts           │  Same-origin mode:
 │   │                              │  `SwPortHandler` (page) /
@@ -275,18 +284,31 @@ src/
   `Service-Worker-Allowed` header games for a scope wider than the
   bundle's directory.
 - **ESM page-side bundles are self-contained**. `dist/index.js` and
-  `dist/sw.js` inline their dependencies (including `idb-keyval` and
-  `@statewalker/webrun-http`) so a page can load them straight from a
-  static host without a bundler or import map.
-- **`recieveData` uses `newAsyncGenerator`**. The queue-based async
-  generator gives explicit backpressure (each `next(value)` returns a
-  `Promise<boolean>`) and drains in-flight producers on consumer exit.
+  `dist/sw.js` inline their dependencies (`idb-keyval`,
+  `@statewalker/webrun-http-streams`, `@statewalker/webrun-streams`) so a
+  page can load them straight from a static host without a bundler or
+  import map.
+- **Streaming uses `newAsyncGenerator`** (from `@statewalker/webrun-streams`,
+  via `recieveIterator`). The queue-based async generator gives explicit
+  backpressure — each `next(value)` returns a `Promise<boolean>` that resolves
+  once the consumer has dequeued — and drains in-flight producers on consumer
+  exit.
 - **SW client registry is IndexedDB-persisted**. Both `SwPortDispatcher`
   (same-origin) and `relay/index-sw.ts` keep their client-lookup tables in
   IndexedDB so a SW wake-up after idle doesn't lose its bindings.
 
 ### Constraints
 
+- **Request bodies are buffered on Firefox.** The stubs this package uses
+  (`newHttpClientStub` / `newHttpServerStub` from
+  [`@statewalker/webrun-http-streams`](../webrun-http-streams)) stream request
+  bodies wherever the runtime implements `Request.prototype.body`. Firefox
+  does not (checked against 146), so on that browser the whole request body is
+  buffered into memory on both the sending and the receiving side — a large
+  upload is a proportionally large allocation, and a handler that wanted to
+  stream its request body cannot. Response streaming is unaffected on every
+  browser. See that package's README for the details and for the Safari
+  caveat.
 - **ServiceWorker scope rules apply.** A SW registered at `/public/sw-worker.js`
   only controls pages and fetches under `/public/`. If you need a broader
   scope, the SW script must be served with the
@@ -304,8 +326,11 @@ src/
 
 Runtime:
 
-- `@statewalker/webrun-http` — HTTP envelope (de)serialisation, stubs,
-  `HttpError`, stream helpers. Workspace-local.
+- `@statewalker/webrun-http-streams` — the `newHttpClientStub` /
+  `newHttpServerStub` pair this package's MessagePort transport is built
+  on, plus `HttpError`. Workspace-local.
+- `@statewalker/webrun-streams` — iterator/stream primitives and
+  serialisable errors. Workspace-local.
 - `idb-keyval` — tiny (<1 KB) IndexedDB KV used by both SW modes to keep
   client/service registrations across SW restarts.
 
