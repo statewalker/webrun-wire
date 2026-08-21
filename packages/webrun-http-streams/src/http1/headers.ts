@@ -192,7 +192,14 @@ export function parseContentLength(values: string[]): number | undefined {
   if (unique.size !== 1) {
     throw new HttpParseError(`conflicting Content-Length values: ${[...unique].join(", ")}`);
   }
-  const raw = [...unique][0];
+  // `unique.size === 1` is checked directly above, so this spread has exactly
+  // one element. The `!` is what lets a consumer compiling with
+  // `noUncheckedIndexedAccess` build against this source: without it `raw` is
+  // `string | undefined` and the `.test(raw)` below is a type error in THEIR
+  // build, not in this package's own (which does not enable the flag, so it
+  // cannot catch the regression). It was lost once already, in a rebase that
+  // resolved toward a refactor of this function.
+  const raw = [...unique][0]!;
   if (!/^\d{1,15}$/.test(raw)) {
     throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);
   }
