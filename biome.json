@@ -6,6 +6,9 @@
     "useIgnoreFile": true,
     "defaultBranch": "main"
   },
+  "files": {
+    "includes": ["**", "!**/dist/**"]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
