@@ -37,8 +37,8 @@
     "@statewalker/webrun-files": "^0.7.0"
   },
   "devDependencies": {
-    "@statewalker/webrun-files": "workspace:*",
-    "@statewalker/webrun-files-mem": "workspace:*",
+    "@statewalker/webrun-files": "catalog:",
+    "@statewalker/webrun-files-mem": "catalog:",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",

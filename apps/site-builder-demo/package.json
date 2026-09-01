@@ -11,13 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@statewalker/webrun-files-mem": "workspace:*",
+    "@statewalker/webrun-files-mem": "catalog:",
     "@statewalker/webrun-http-browser": "workspace:*",
     "@statewalker/webrun-site-builder": "workspace:*",
     "@statewalker/webrun-site-host": "workspace:*"
   },
   "devDependencies": {
-    "@statewalker/webrun-files": "workspace:*",
+    "@statewalker/webrun-files": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"
   }

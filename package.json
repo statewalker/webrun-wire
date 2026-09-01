@@ -15,8 +15,8 @@
     "url": "git+ssh://git@github.com/statewalker/webrun-wire.git"
   },
   "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
     "demo:p2p": "pnpm --filter @statewalker/p2p-demo start",
     "lint": "biome check --write .",
     "lint:check": "biome check .",
