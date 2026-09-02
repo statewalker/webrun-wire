@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-site-host",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Host a webrun-site-builder site behind a same-origin ServiceWorker in one call: files + endpoints + dynamic server-module runners, no manual SW plumbing",

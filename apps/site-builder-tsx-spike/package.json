@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/site-builder-tsx-spike",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Spike: HostedSiteBuilder serving .tsx source transpiled on-the-fly via sucrase + ServeFilesOptions.transform filter",

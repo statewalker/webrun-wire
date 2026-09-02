@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-msgpack",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Length-prefixed MessagePack frame codec for async iterables. Streams-safe encode/decode for values and Float32Arrays.",

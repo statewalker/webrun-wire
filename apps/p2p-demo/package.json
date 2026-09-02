@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/p2p-demo",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Merged p2p demo: Node libp2p Circuit Relay v2 + browser server page + browser client page, all bootable from one script.",

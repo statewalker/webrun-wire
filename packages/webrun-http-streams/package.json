@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-streams",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "HTTP request/response over Duplex — merge of webrun-http + webrun-http-port",

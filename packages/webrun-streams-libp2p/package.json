@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-libp2p",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "libp2p native multi-stream Connect/Serve adapter in the webrun-streams-* family",

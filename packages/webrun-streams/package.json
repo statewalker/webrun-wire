@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Async-iterator / ReadableStream primitives: collect, text/jsonl codecs, lines, backpressure generators, serialisable errors.",

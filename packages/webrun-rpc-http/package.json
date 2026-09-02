@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-rpc-http",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "HTTP-based service RPC: expose object methods as a (Request) => Response handler and call them with fetch",

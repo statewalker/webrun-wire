@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-conformance",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Conformance test suite for Duplex/Connect/Serve adapters in the webrun-streams-* family",

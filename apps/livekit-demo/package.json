@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/livekit-demo",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Cross-app HTTP+SSE demo using LiveKit as the initialisation and transport layer. Mirror of p2p-demo with a LiveKit room replacing the libp2p relay + WebRTC link.",

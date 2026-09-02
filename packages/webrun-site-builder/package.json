@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-site-builder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Builder for a composable (Request) => Response site: static files (FilesApi), dynamic endpoints, and auth hooks",
