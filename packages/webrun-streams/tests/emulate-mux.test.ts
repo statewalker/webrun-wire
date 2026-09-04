@@ -281,6 +281,7 @@ describe("stream-table lifecycle", () => {
     const { a, b } = makePipePair();
     const client = emulateMux(a, { side: "initiator", maxStreams: 1 });
 
+    const TYPE_OPEN = 0x01;
     const TYPE_DATA = 0x02;
     const TYPE_ACK = 0x03;
     const TYPE_END = 0x04;
@@ -288,13 +289,25 @@ describe("stream-table lifecycle", () => {
     const received: string[] = [];
     let sentEarlyEnd = false;
 
+    // This hand-rolled peer must speak credit now: the client starts at zero
+    // and sends nothing until an advertisement arrives.
+    const ack = (id: number, credit: number): Uint8Array => {
+      const frame = new Uint8Array(6);
+      frame[0] = id;
+      frame[1] = TYPE_ACK;
+      new DataView(frame.buffer).setUint32(2, credit, false);
+      return frame;
+    };
+
     void (async () => {
       for await (const frame of b.recv) {
-        const id = frame[0];
+        const id = frame[0] as number;
         const type = frame[1];
-        if (type === TYPE_DATA) {
+        if (type === TYPE_OPEN) {
+          b.send(ack(id, 64 * 1024));
+        } else if (type === TYPE_DATA) {
           received.push(dec.decode(frame.subarray(2)));
-          b.send(new Uint8Array([id, TYPE_ACK]));
+          b.send(ack(id, frame.byteLength - 2));
           if (!sentEarlyEnd) {
             // Our side is done replying while theirs is still going.
             sentEarlyEnd = true;

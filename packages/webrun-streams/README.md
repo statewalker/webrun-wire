@@ -249,14 +249,18 @@ const stop = serve(async function* handler(input) {
 | `side` | `"initiator"` | Id allocation: initiator uses even ids, responder odd. Pick one per peer so they cannot collide. |
 | `maxStreams` | `256` | Concurrent streams before new calls are refused. |
 | `mtu` | `65536` | Largest payload per DATA frame; bigger chunks are split. |
-| `maxStreamBuffer` | `8388608` | Inbound bytes one stream may hold for a consumer that has not drained them. Exceeding it tears down that stream alone. |
+| `maxStreamBuffer` | `8388608` | The credit this side advertises to the peer, in bytes, and the hard cap on inbound bytes one stream may hold undrained. A peer that honours credit never reaches the cap; one that ignores it has that stream torn down. |
 
 ### Flow control
 
-One in-flight DATA frame per stream. The sender waits for an `ACK`, and the ACK
-is sent only once the consumer has pulled *past* that chunk — so a fast producer
-cannot run ahead of a slow consumer, and outbound is bounded to one `mtu` per
-stream even against a peer that never acknowledges.
+Receiver-advertised credit. Each side puts its `maxStreamBuffer` in the frame it
+opens with — `OPEN` for the caller, the `ACK` answering it for the responder —
+and the sender may only send what it has been granted. Both sides start at zero,
+so a caller pays one round trip per stream before its first DATA frame and none
+thereafter. The receiver grants more once its consumer has actually drained,
+batched at half the window and flushed as soon as its queue empties. A sender
+therefore cannot overrun the receiver's buffer, and `maxStreamBuffer` bounds only
+peers that ignore the protocol.
 
 Backpressure is **per-stream**, so a stalled stream does not block the others,
 and it applies symmetrically in both directions.
@@ -264,6 +268,10 @@ and it applies symmetrically in both directions.
 There is deliberately **no stall timeout**: a peer that never acknowledges
 blocks that producer indefinitely, exactly as a TCP receiver that never reads
 blocks its sender. `maxStreams` and `maxStreamBuffer` bound what that can cost.
+The bound is per stream and there is no mux-wide budget, so the worst case is
+`maxStreams × maxStreamBuffer` — 2 GiB at the defaults, against 16 MiB under the
+one-frame-in-flight rule this replaced. Lower `maxStreamBuffer` if that matters
+more than throughput.
 
 ### Behaviour on hostile input
 

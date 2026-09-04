@@ -136,8 +136,9 @@ dependencies at all. It defines the seam described above and the primitives
 that make it usable:
 
 - **Seam** — `Duplex`, `Connect`, `Serve`, `ByteChannel`, `TransportClosedError`,
-  and `emulateMux` (multi-stream over a single channel, with backpressure, a
-  64 KiB default MTU and an 8 MiB per-stream buffer).
+  and `emulateMux` (multi-stream over a single channel, with receiver-advertised
+  credit flow control, a 64 KiB default MTU and an 8 MiB per-stream credit
+  window).
 - **Collectors** — `collect` / `collectBytes` / `collectString`.
 - **Codecs** — `encodeText` / `decodeText`, `splitLines` / `joinLines`,
   `encodeJsonl` / `decodeJsonl`, `map`, `toChunks`.

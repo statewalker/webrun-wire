@@ -3,9 +3,11 @@ import { type ByteChannel, emulateMux } from "../src/index.js";
 
 const utf8 = new TextEncoder();
 
-// Flow control here is one in-flight DATA frame per stream: the sender waits
-// for an ACK, and the ACK is sent only once the consumer has pulled PAST that
-// chunk (`slot.resolve(true)` runs after the `yield` returns). Without it a
+// Flow control here is receiver-advertised credit. Each side puts its
+// `maxStreamBuffer` in the frame it opens with (`OPEN`, and the `ACK` that
+// answers it); the sender reserves credit before it frames anything and stalls
+// at zero; the receiver grants more only once its consumer has actually
+// drained — `slot.resolve(true)` runs after the `yield` returns. Without it a
 // fast producer would run ahead of a slow consumer without limit.
 //
 // None of this was pinned by any test: removing the ACK await from
@@ -20,14 +22,31 @@ const FRAME_NAMES: Record<number, string> = {
   6: "CLOSE",
 };
 
-function pipePair(): { a: ByteChannel; b: ByteChannel; frames: string[] } {
+/** One credit-bearing ACK, as observed on the wire. */
+interface Grant {
+  dir: "A>B" | "B>A";
+  credit: number;
+}
+
+function pipePair(): {
+  a: ByteChannel;
+  b: ByteChannel;
+  frames: string[];
+  grants: Grant[];
+} {
   const qa: Uint8Array[] = [];
   const qb: Uint8Array[] = [];
   let pa: ((v: IteratorResult<Uint8Array>) => void) | null = null;
   let pb: ((v: IteratorResult<Uint8Array>) => void) | null = null;
   const frames: string[] = [];
+  const grants: Grant[] = [];
   const deliver = (t: "a" | "b", x: Uint8Array): void => {
-    frames.push(`${t === "b" ? "A>B" : "B>A"}:${FRAME_NAMES[x[1]] ?? x[1]}`);
+    const dir = t === "b" ? "A>B" : "B>A";
+    frames.push(`${dir}:${FRAME_NAMES[x[1]] ?? x[1]}`);
+    // Single-byte stream ids only — every test here stays well under 128.
+    if (x[1] === 3 && x.byteLength === 6) {
+      grants.push({ dir, credit: new DataView(x.buffer, x.byteOffset + 2, 4).getUint32(0, false) });
+    }
     const q = t === "a" ? qa : qb;
     const p = t === "a" ? pa : pb;
     if (p) {
@@ -51,6 +70,7 @@ function pipePair(): { a: ByteChannel; b: ByteChannel; frames: string[] } {
     }) as AsyncIterable<Uint8Array>;
   return {
     frames,
+    grants,
     a: {
       send: (x) => deliver("b", x),
       recv: recv("a"),
@@ -68,9 +88,14 @@ function pipePair(): { a: ByteChannel; b: ByteChannel; frames: string[] } {
 
 describe("backpressure", () => {
   it("a slow consumer throttles the producer, in the request direction", async () => {
-    const { a, b } = pipePair();
+    // NOTE: destructure `frames` from `pipePair()` here — the ERROR assertion
+    // below needs it.
+    const { a, b, frames } = pipePair();
     const client = emulateMux(a, { side: "initiator" });
-    const server = emulateMux(b, { side: "responder" });
+    // ~8-byte chunks against a 32-byte window: about four may be in flight.
+    // At the 8 MiB default the window is four orders of magnitude larger than
+    // the whole stream and nothing would ever throttle.
+    const server = emulateMux(b, { side: "responder", maxStreamBuffer: 32 });
     let produced = 0;
     let consumed = 0;
     server.serve(async function* slowConsumer(input) {
@@ -93,10 +118,17 @@ describe("backpressure", () => {
     const ahead = produced - consumed;
     await gen.return(undefined);
 
-    // The producer may sit one chunk ahead (the in-flight one). Far more than
-    // that means it is not waiting for ACKs at all.
+    // The producer may run up to one credit window ahead — 32 bytes, i.e.
+    // four `chunk-NN` chunks, plus the one being framed.
+    //
+    // The upper bound alone does NOT pin credit: delete `reserve` from 3e and
+    // this test still passes, because the receiver's maxStreamBuffer guard
+    // tears the stream down and the teardown does the throttling. The two
+    // assertions below are what make it a credit test rather than a cap test.
+    expect(frames.filter((f) => f.endsWith(":ERROR")).length).toBe(0); // no teardown
+    expect(produced).toBeGreaterThanOrEqual(4); // window really filled
     expect(consumed).toBeGreaterThan(0);
-    expect(ahead).toBeLessThanOrEqual(2);
+    expect(ahead).toBeLessThanOrEqual(6);
     expect(produced).toBeLessThan(50);
 
     await client.close();
@@ -104,8 +136,10 @@ describe("backpressure", () => {
   });
 
   it("a slow consumer throttles the producer, in the response direction too", async () => {
-    const { a, b } = pipePair();
-    const client = emulateMux(a, { side: "initiator" });
+    const { a, b, frames } = pipePair();
+    // The client is the receiver in this direction, so the small window goes
+    // on the client.
+    const client = emulateMux(a, { side: "initiator", maxStreamBuffer: 32 });
     const server = emulateMux(b, { side: "responder" });
     let produced = 0;
     server.serve(async function* fastProducer() {
@@ -127,18 +161,30 @@ describe("backpressure", () => {
     const ahead = produced - consumed;
     await gen.return(undefined);
 
+    // `r-NN` is 3-4 bytes, so a 32-byte window holds eight to ten, plus the
+    // one being framed — hence the bound of 11.
+    //
+    // As in 8c, the ERROR and floor assertions are what distinguish credit
+    // from the buffer cap; without them this passes with `reserve` deleted.
+    expect(frames.filter((f) => f.endsWith(":ERROR")).length).toBe(0);
+    expect(produced).toBeGreaterThanOrEqual(8);
     expect(consumed).toBeGreaterThan(0);
-    expect(ahead).toBeLessThanOrEqual(2);
+    expect(ahead).toBeLessThanOrEqual(11);
     expect(produced).toBeLessThan(50);
 
     await client.close();
     await server.close();
   });
 
-  it("holds exactly one DATA frame in flight while the peer never acks", async () => {
+  it("sends up to the advertised credit and no further while the peer never drains", async () => {
     const { a, b, frames } = pipePair();
     const client = emulateMux(a, { side: "initiator" });
-    const server = emulateMux(b, { side: "responder" });
+    // Four frames' worth of credit: the sender may fill it, then must stop.
+    const server = emulateMux(b, {
+      side: "responder",
+      mtu: 64 * 1024,
+      maxStreamBuffer: 4 * 64 * 1024,
+    });
     server.serve(async function* neverDrains() {
       await new Promise((r) => setTimeout(r, 5_000));
     });
@@ -159,8 +205,11 @@ describe("backpressure", () => {
     })();
     await new Promise((r) => setTimeout(r, 60));
 
-    // Unbounded sending would put all 50 on the wire; flow control puts one.
-    expect(frames.filter((f) => f === "A>B:DATA").length).toBe(1);
+    // Unbounded sending would put all 50 on the wire. Credit bounds it to the
+    // advertised window, and the consumer never drains so none is returned.
+    const sentData = frames.filter((f) => f === "A>B:DATA").length;
+    expect(sentData).toBeGreaterThan(1);
+    expect(sentData).toBeLessThanOrEqual(4);
 
     await client.close();
     await server.close();
@@ -209,10 +258,20 @@ describe("backpressure", () => {
     await server.close();
   });
 
-  it("splits a chunk larger than mtu and acks each piece", async () => {
-    const { a, b, frames } = pipePair();
+  it("splits a chunk larger than mtu and gets credit back for every byte", async () => {
+    const { a, b, frames, grants } = pipePair();
     const client = emulateMux(a, { side: "initiator", mtu: 1024 });
-    const server = emulateMux(b, { side: "responder", mtu: 1024 });
+    // A 4 KiB window against an 8 KiB body: the sender genuinely stalls and
+    // resumes several times, so the grants below are load-bearing.
+    //
+    // 4 KiB, not 2 KiB: the grantor's trigger is half the window, so a 2 KiB
+    // window puts the trigger at exactly one 1 KiB mtu piece. Every single
+    // drain then crosses it, batching is arithmetically impossible, and the
+    // frame-economy bound below is unreachable (measured: 9 grants for 8
+    // frames) whatever the `queueEmpty` flush does. At 4 KiB the trigger is
+    // two pieces, sub-threshold drains exist, and the bound has something to
+    // bite on.
+    const server = emulateMux(b, { side: "responder", mtu: 1024, maxStreamBuffer: 4096 });
     server.serve(async function* echo(input) {
       for await (const chunk of input) yield chunk;
     });
@@ -222,7 +281,16 @@ describe("backpressure", () => {
 
     expect(total).toBe(8 * 1024);
     expect(frames.filter((f) => f === "A>B:DATA").length).toBe(8);
-    expect(frames.filter((f) => f === "B>A:ACK").length).toBe(8);
+    // Credit returned by the responder is its 4096-byte advertisement plus
+    // exactly one byte of grant per byte its handler drained. How the grants
+    // are batched is an implementation detail; the total is not.
+    const returned = grants.filter((g) => g.dir === "B>A").reduce((sum, g) => sum + g.credit, 0);
+    expect(returned).toBe(4096 + 8 * 1024);
+    // Frame economy — this is the ONLY integration coverage of `consumed`'s
+    // `queueEmpty` argument. Hard-coding it to `true` restores one grant per
+    // DATA frame (9 for 8) and the totals above stay green, so without this
+    // bound the whole flush parameter is untested end to end.
+    expect(grants.filter((g) => g.dir === "B>A").length).toBeLessThan(8);
 
     await client.close();
     await server.close();

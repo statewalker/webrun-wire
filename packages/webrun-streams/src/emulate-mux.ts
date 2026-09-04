@@ -1,4 +1,11 @@
 import { deserializeError, serializeError } from "./errors.js";
+import {
+  type CreditGrantor,
+  type CreditLedger,
+  newCreditGrantor,
+  newCreditLedger,
+} from "./flow-control.js";
+import { decodeUint32, encodeUint32 } from "./uint32.js";
 
 /**
  * Canonical seam for the webrun-streams transport family. A `Duplex` carries
@@ -84,8 +91,10 @@ interface Stream {
   inbound: AsyncGenerator<Uint8Array>;
   pushIn: (chunk: Uint8Array) => Promise<boolean>;
   doneIn: (err?: Error) => Promise<boolean>;
-  resolveAck: (() => void) | null;
-  rejectAck: ((err: Error) => void) | null;
+  /** Credit the peer has granted us for sending on this stream. */
+  outboundCredit: CreditLedger;
+  /** Tracks consumer drainage to decide when to grant the peer more credit. */
+  grantor: CreditGrantor;
   closed: boolean;
   /** Peer sent END (or the stream was torn down): nothing more arrives. */
   inDone: boolean;
@@ -101,6 +110,11 @@ export interface EmulateMuxOptions {
   /**
    * Cap on inbound bytes one stream may hold for a consumer that has not
    * drained them. Exceeding it tears down that stream alone.
+   *
+   * It is also the credit this side advertises to the peer, so it must be at
+   * least 1 — a window of 0 authorises nothing and hangs the peer forever —
+   * and it travels in a uint32, so a value above `MAX_UINT32` (4 GiB - 1) is
+   * advertised as `MAX_UINT32`.
    */
   maxStreamBuffer?: number;
   /**
@@ -121,6 +135,12 @@ export function emulateMux(
   const maxStreams = opts.maxStreams ?? DEFAULT_MAX_STREAMS;
   const mtu = opts.mtu ?? DEFAULT_MTU;
   const maxStreamBuffer = opts.maxStreamBuffer ?? DEFAULT_MAX_STREAM_BUFFER;
+  // A window of 0 is not a small window, it is a permanent stall: the peer is
+  // authorised to send nothing and no event would ever grant it more. Refuse
+  // it at construction rather than deadlocking on the first call.
+  if (!(maxStreamBuffer >= 1)) {
+    throw new RangeError(`emulateMux: maxStreamBuffer must be at least 1, got ${maxStreamBuffer}`);
+  }
   const side = opts.side ?? "initiator";
 
   const streams = new Map<number, Stream>();
@@ -146,12 +166,9 @@ export function emulateMux(
   const teardownStream = (s: Stream, err?: Error): void => {
     if (s.closed) return;
     s.closed = true;
-    const resolve = s.resolveAck;
-    const reject = s.rejectAck;
-    s.resolveAck = null;
-    s.rejectAck = null;
-    if (reject && err) reject(err);
-    else resolve?.();
+    // A sender parked in `reserve()` unwinds here: the credit it is waiting
+    // for will never arrive, so fail the ledger rather than leave it queued.
+    s.outboundCredit.fail(err ?? new TransportClosedError("emulateMux: stream closed"));
     void s.doneIn(err);
     streams.delete(s.id);
   };
@@ -189,8 +206,8 @@ export function emulateMux(
       }),
       pushIn: queue.push,
       doneIn: queue.done,
-      resolveAck: null,
-      rejectAck: null,
+      outboundCredit: newCreditLedger(0),
+      grantor: newCreditGrantor(maxStreamBuffer),
       closed: false,
       inDone: false,
       outDone: false,
@@ -210,13 +227,14 @@ export function emulateMux(
         let off = 0;
         while (off < chunk.byteLength) {
           if (s.closed || muxClosed) return;
-          const end = Math.min(off + mtu, chunk.byteLength);
-          const piece = chunk.subarray(off, end);
-          sendFrame(s.id, TYPE_DATA, piece);
-          await new Promise<void>((resolve, reject) => {
-            s.resolveAck = resolve;
-            s.rejectAck = reject;
-          });
+          // Reserve BEFORE framing. `reserve` returns what the peer's window
+          // can actually take, up to one mtu, so a piece is never larger than
+          // the credit that exists for it — which is what stops a sender whose
+          // mtu exceeds the peer's whole window from stalling forever.
+          const take = await s.outboundCredit.reserve(Math.min(mtu, chunk.byteLength - off));
+          if (s.closed || muxClosed) return;
+          const end = off + take;
+          sendFrame(s.id, TYPE_DATA, chunk.subarray(off, end));
           off = end;
         }
       }
@@ -308,6 +326,13 @@ export function emulateMux(
       }
       const s = createStream(id);
       streams.set(id, s);
+      // The opener's advertisement is our whole sending allowance; our own
+      // goes back so the opener can start. Both ledgers begin at zero, so the
+      // advertisement and every later grant are the same operation — an
+      // increment — and the ACK handler needs no special first case.
+      const advertised = decodeUint32(payload);
+      if (advertised !== undefined) s.outboundCredit.grant(advertised);
+      sendFrame(id, TYPE_ACK, encodeUint32(maxStreamBuffer));
       void runHandler(s, handler);
       return;
     }
@@ -317,11 +342,11 @@ export function emulateMux(
 
     switch (type) {
       case TYPE_DATA: {
-        // Flow control is the peer holding one in-flight DATA per stream and
-        // waiting for its ACK — voluntary, and a hostile peer simply does not.
-        // Pushes are fire-and-forget by necessity (see the comment below), so
-        // nothing else bounds this queue: a peer that floods DATA at a handler
-        // which has not started draining retains every payload. Refuse past a
+        // Flow control is the peer spending only the credit we granted it —
+        // voluntary, and a hostile peer simply does not. Pushes are
+        // fire-and-forget by necessity (see the comment below), so nothing
+        // else bounds this queue: a peer that floods DATA at a handler which
+        // has not started draining retains every payload. Refuse past a
         // per-stream cap and tear down THAT stream, never the whole mux.
         s.queuedBytes += payload.byteLength;
         if (s.queuedBytes > maxStreamBuffer) {
@@ -333,21 +358,26 @@ export function emulateMux(
           return;
         }
         const copy = payload.byteLength === 0 ? payload : new Uint8Array(payload);
-        // Push fire-and-forget; ACK after the consumer drains. The inbound
-        // loop must NOT block on consumer drainage — peer holds one in-flight
-        // DATA per stream and waits for ACK, so blocking here causes a
-        // cross-direction deadlock where ACK frames can't be processed.
+        // Push fire-and-forget; grant after the consumer drains. The inbound
+        // loop must NOT block on consumer drainage — our own sender is parked
+        // in `reserve()` waiting for the peer's grants, so blocking here
+        // causes a cross-direction deadlock where ACK frames can't be
+        // processed.
         void s.pushIn(copy).then((handled) => {
           s.queuedBytes -= copy.byteLength;
-          if (handled && !s.closed && !muxClosed) sendFrame(id, TYPE_ACK);
+          if (!handled || s.closed || muxClosed) return;
+          // Grant only for bytes the consumer actually took, batched while the
+          // receiver is behind and flushed the moment its queue empties.
+          const grant = s.grantor.consumed(copy.byteLength, s.queuedBytes === 0);
+          if (grant > 0) sendFrame(id, TYPE_ACK, encodeUint32(grant));
         });
         return;
       }
       case TYPE_ACK: {
-        const r = s.resolveAck;
-        s.resolveAck = null;
-        s.rejectAck = null;
-        r?.();
+        const granted = decodeUint32(payload);
+        // A payload-less ACK is not from a credit-speaking peer; ignore it
+        // rather than granting an arbitrary amount.
+        if (granted !== undefined) s.outboundCredit.grant(granted);
         return;
       }
       case TYPE_END: {
@@ -394,7 +424,7 @@ export function emulateMux(
     nextLocalId += 2;
     const s = createStream(id);
     streams.set(id, s);
-    sendFrame(id, TYPE_OPEN);
+    sendFrame(id, TYPE_OPEN, encodeUint32(maxStreamBuffer));
     void pumpOutbound(s, input);
     return s.inbound;
   };
