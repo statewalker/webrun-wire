@@ -1,18 +1,9 @@
-export type MessageListener = (event: MessageEvent) => void | Promise<void>;
-
-/** An object we can listen for `"message"` events on. */
-export interface MessageSource {
-  addEventListener(type: "message", listener: MessageListener): void;
-  removeEventListener(type: "message", listener: MessageListener): void;
-  start?(): void | Promise<void>;
-}
-
-/** An object we can post messages to (with optional transferable list). */
-export interface MessageSink {
-  postMessage(message: unknown, transfer?: Transferable[]): void;
-}
-
-/** Full-duplex message target: both sends and receives. */
-export interface MessageTarget extends MessageSource, MessageSink {
-  close?(): void | Promise<void>;
-}
+// Moved to @statewalker/webrun-streams so webrun-rpc and webrun-streams-port
+// can use these without depending on this package. Re-exported here so the
+// five internal importers, and this package's public API, are unchanged.
+export type {
+  MessageListener,
+  MessageSink,
+  MessageSource,
+  MessageTarget,
+} from "@statewalker/webrun-streams";

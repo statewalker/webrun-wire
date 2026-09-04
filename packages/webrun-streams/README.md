@@ -310,6 +310,20 @@ Everything is exported from the package root.
 The unit is whatever the caller counts. `emulateMux` counts bytes; a value-
 oriented caller would count values. Nothing in this module interprets it.
 
+### Message passing
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `MessageTarget` | interface | Full-duplex structural view of a message endpoint — a `MessagePort`, a `Worker`, or a ServiceWorker bridge. Extends `MessageSource` and `MessageSink`. |
+| `MessageSource` | interface | `addEventListener`/`removeEventListener` for `"message"`, plus optional `start()`. |
+| `MessageSink` | interface | `postMessage(message, transfer?)`. |
+| `MessageListener` | type | `(event: MessageEvent) => void \| Promise<void>`. |
+
+These are types only — no runtime code — so `webrun-streams` keeps zero
+dependencies. They live here rather than in `webrun-streams-port` so packages
+that are not port-specific can use them without depending on that adapter.
+A `MessagePort` satisfies `MessageTarget` structurally; no adapter is needed.
+
 ### Collectors and codecs
 
 | Export | Purpose |

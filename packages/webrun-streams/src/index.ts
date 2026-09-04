@@ -5,6 +5,7 @@ export * from "./flow-control.js";
 export * from "./jsonl.js";
 export * from "./lines.js";
 export * from "./map.js";
+export * from "./message-target.js";
 export * from "./new-async-generator.js";
 export * from "./normalize.js";
 export * from "./readable-streams.js";

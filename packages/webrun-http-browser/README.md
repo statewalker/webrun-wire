@@ -273,7 +273,7 @@ imports keep working after those extractions. Its own surface is below.
 | `newInvokationChannel(opts)` | function | Multiplexed invocations over one target. |
 | `InvocationChannel` / `NewInvocationChannelOptions` | interface | Its result and options. |
 | `handleStreams(...)` / `StreamHandler<T>` | function / type | Stream-shaped invocations over the same channel. |
-| `MessageTarget` / `MessageSource` / `MessageSink` / `MessageListener` | interface / type | The structural port view everything above accepts — a `MessagePort`, a `Worker`, or a SW bridge. |
+| `MessageTarget` / `MessageSource` / `MessageSink` / `MessageListener` | interface / type | The structural port view everything above accepts — a `MessagePort`, a `Worker`, or a SW bridge. Defined in [`@statewalker/webrun-streams`](../webrun-streams) and re-exported here. |
 | `newRegistry(onError?)` | function | Small cleanup registry used for teardown. |
 | `Registry` / `NewRegistryResult` / `CleanupAction` | interface / type | Its shapes. |
 
