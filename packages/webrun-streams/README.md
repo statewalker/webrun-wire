@@ -290,6 +290,18 @@ Everything is exported from the package root.
 | `EmulateMuxOptions` | type | `maxStreams` (256), `mtu` (64 KiB), `maxStreamBuffer` (8 MiB), `side`. |
 | `TransportClosedError` | class | Thrown when the transport closes with calls in flight. Catch via `instanceof` or `error.name`. |
 
+### Credit
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `newCreditLedger(initial?)` | function | Sender-side credit: `reserve(upTo)` waits for any credit and returns how much it got (`upTo` must be >= 1; less rejects with a `RangeError`), `grant(units)` releases waiters in order, `fail(err)` unwinds them. Starts at zero unless told otherwise. |
+| `CreditLedger` | type | `{ available, reserve, grant, fail }`. |
+| `newCreditGrantor(window, threshold?)` | function | Receiver-side: `consumed(units, queueEmpty)` returns the credit to hand back, batched at `threshold` (default half the window) and flushed once the queue empties. |
+| `CreditGrantor` | type | `{ consumed(units, queueEmpty): number }`. |
+
+The unit is whatever the caller counts. `emulateMux` counts bytes; a value-
+oriented caller would count values. Nothing in this module interprets it.
+
 ### Collectors and codecs
 
 | Export | Purpose |

@@ -1,6 +1,7 @@
 export * from "./collect.js";
 export * from "./emulate-mux.js";
 export * from "./errors.js";
+export * from "./flow-control.js";
 export * from "./jsonl.js";
 export * from "./lines.js";
 export * from "./map.js";
