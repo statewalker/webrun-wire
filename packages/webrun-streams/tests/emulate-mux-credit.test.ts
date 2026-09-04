@@ -515,3 +515,165 @@ describe("credit teardown", () => {
     await expect(ledger.reserve(1)).rejects.toThrow("emulateMux: stream closed");
   });
 });
+
+/**
+ * A one-directional channel for feeding raw, hand-built frames to one side of
+ * `emulateMux` as if a peer had sent them — no mux runs on the other end.
+ * Captures every frame the wrapped side sends back, parsed the same way
+ * `tracedPair` does, so a malformed frame can be injected and a real one
+ * observed without a second `emulateMux` instance racing the injection.
+ */
+function injectionChannel(): {
+  channel: ByteChannel;
+  inject: (bytes: Uint8Array) => void;
+  sent: { id: number; type: string; payload: Uint8Array }[];
+} {
+  const sent: { id: number; type: string; payload: Uint8Array }[] = [];
+  const queue: Uint8Array[] = [];
+  let pending: ((r: IteratorResult<Uint8Array>) => void) | null = null;
+
+  const inject = (bytes: Uint8Array): void => {
+    if (pending) {
+      const resolve = pending;
+      pending = null;
+      resolve({ value: bytes, done: false });
+    } else {
+      queue.push(bytes);
+    }
+  };
+
+  const channel: ByteChannel = {
+    send(bytes) {
+      const { id, type, payload } = frameInfo(bytes);
+      sent.push({ id, type, payload: new Uint8Array(payload) });
+    },
+    recv: {
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          const queued = queue.shift();
+          if (queued) return Promise.resolve({ value: queued, done: false });
+          return new Promise<IteratorResult<Uint8Array>>((resolve) => {
+            pending = resolve;
+          });
+        },
+      }),
+    } as AsyncIterable<Uint8Array>,
+    closed: new Promise<void>(() => {}),
+    close() {},
+  };
+
+  return { channel, inject, sent };
+}
+
+/** Total bytes across every DATA frame the side sent for one stream id. */
+function dataBytesForId(
+  sent: { id: number; type: string; payload: Uint8Array }[],
+  id: number,
+): number {
+  return sent
+    .filter((f) => f.id === id && f.type === "DATA")
+    .reduce((sum, f) => sum + f.payload.byteLength, 0);
+}
+
+describe("malformed credit frames do not poison the ledger", () => {
+  // Regression coverage for the two `!== undefined` guards in emulate-mux.ts
+  // (the OPEN-path advertisement and the ACK-path grant). Removing either
+  // guard leaves the rest of the suite green: `undefined` reaches
+  // `available += units`, the ledger becomes NaN, and the stream parks
+  // forever — a silent, permanent stall, which is exactly the failure class
+  // credit-based flow control exists to eliminate.
+  //
+  // The obvious test — inject the malformed frame and assert nothing is
+  // sent — is vacuous: a guarded ledger stays at 0 and parks, an unguarded
+  // one becomes NaN and parks, and both look identical from outside. The
+  // distinguishing property is recoverability: `0 + n === n`, but
+  // `NaN + n === NaN` forever. So each test below delivers the malformed
+  // frame, THEN a valid one, and asserts the stream actually makes progress
+  // afterwards — which only the guarded path can do.
+
+  it("a payload-less OPEN is ignored, and a later valid ACK still lets the stream progress", async () => {
+    const { channel, inject, sent } = injectionChannel();
+    const server = emulateMux(channel, { side: "responder" });
+    server.serve(async function* pushes() {
+      // Ignores input entirely: the point is to observe the responder's own
+      // outbound ledger (granted by the OPEN payload), not an echo.
+      yield new Uint8Array(2048);
+    });
+
+    const id = 9;
+    // Malformed OPEN: id + type only, no 4-byte advertisement. decodeUint32
+    // returns undefined on this payload.
+    inject(new Uint8Array([id, 0x01]));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Nothing made it out yet either way — 0 blocks exactly like NaN blocks.
+    // This is setup, not the assertion: on its own it would pass whether or
+    // not the guard exists.
+    expect(dataBytesForId(sent, id)).toBe(0);
+
+    // A later, valid grant on the same stream: a real 4-byte advertisement.
+    inject(new Uint8Array([id, 0x03, 0x00, 0x00, 0x08, 0x00])); // ACK, 2048
+
+    const deadline = Date.now() + 1000;
+    while (dataBytesForId(sent, id) < 2048 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // Guarded: ledger was 0, becomes 0 + 2048 = 2048, the parked reserve()
+    // resolves, and the 2048-byte chunk goes out. Unguarded: the OPEN left
+    // the ledger at NaN, and NaN + 2048 is still NaN — the waiter's
+    // `available > 0` check never passes, so this never reaches 2048.
+    expect(dataBytesForId(sent, id)).toBe(2048);
+
+    await server.close();
+  });
+
+  it("a two-byte ACK is ignored, and a later valid ACK still lets the stream progress", async () => {
+    const { channel, inject, sent } = injectionChannel();
+    const client = emulateMux(channel, { side: "initiator" });
+
+    const gen = client.call(
+      (async function* () {
+        yield new Uint8Array(2048);
+      })(),
+    );
+    void (async () => {
+      try {
+        for await (const _c of gen) {
+          /* drain */
+        }
+      } catch {
+        /* stream torn down by the deliberate mutation runs; fine here */
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 10));
+    const open = sent.find((f) => f.type === "OPEN");
+    expect(open).toBeDefined();
+    const id = (open as { id: number }).id;
+
+    // Nothing sent yet: the initiator's outbound ledger starts at 0 and no
+    // grant has arrived.
+    expect(dataBytesForId(sent, id)).toBe(0);
+
+    // Malformed ACK: id + type only, no 4-byte grant.
+    inject(new Uint8Array([id, 0x03]));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Still nothing — the same vacuous-looking state as the guarded case.
+    expect(dataBytesForId(sent, id)).toBe(0);
+
+    // A later, valid grant.
+    inject(new Uint8Array([id, 0x03, 0x00, 0x00, 0x08, 0x00])); // ACK, 2048
+
+    const deadline = Date.now() + 1000;
+    while (dataBytesForId(sent, id) < 2048 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // Guarded: the malformed ACK is dropped, the ledger stays at 0, and the
+    // valid grant unparks it. Unguarded: the malformed ACK poisons the
+    // ledger to NaN and the valid grant afterwards cannot revive it.
+    expect(dataBytesForId(sent, id)).toBe(2048);
+
+    await client.close();
+  });
+});

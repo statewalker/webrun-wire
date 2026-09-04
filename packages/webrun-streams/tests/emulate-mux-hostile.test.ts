@@ -140,8 +140,8 @@ describe("handleFrame survives hostile frames", () => {
   });
 
   it("caps what one undrained stream may buffer, and spares the rest of the mux", async () => {
-    // Flow control is voluntary: the peer is meant to hold one in-flight DATA
-    // per stream and wait for its ACK. A hostile peer does not, and pushes are
+    // Credit is voluntary: the peer is meant to spend only what it was
+    // granted and wait for more. A hostile peer does not, and pushes are
     // fire-and-forget, so without a cap one stream retains everything sent.
     const { a, b, injectToB, sentToA } = injectablePair();
     const client = emulateMux(a, { side: "initiator" });
@@ -177,6 +177,21 @@ describe("handleFrame survives hostile frames", () => {
     const refusal = sentToA.find((f) => f[0] === 0x03 && f[1] === TYPE_ERROR);
     expect(refusal, "expected an ERROR frame tearing down the flooded stream").toBeDefined();
     expect(dec.decode((refusal as Uint8Array).subarray(2))).toMatch(/maxStreamBuffer/);
+
+    // The peer was handed the whole window and ignored it. Exactly one
+    // credit-bearing ACK went out — the reply to its OPEN, carrying the
+    // responder's 256 KiB `maxStreamBuffer` — and no drain grant followed,
+    // because the handler never drained. So the cap is what stopped the
+    // flood, not flow control: a peer that honours credit could never have
+    // sent more than that one advertisement.
+    const TYPE_ACK = 0x03;
+    const grants = sentToA.filter((f) => f[0] === 0x03 && f[1] === TYPE_ACK);
+    expect(grants.length).toBe(1);
+    const advertised = grants[0] as Uint8Array;
+    expect(advertised.byteLength).toBe(6);
+    expect(new DataView(advertised.buffer, advertised.byteOffset + 2, 4).getUint32(0, false)).toBe(
+      256 * 1024,
+    );
 
     // And only that stream: the mux still serves everyone else.
     expect(await roundTrip(client.call, "unaffected")).toBe("unaffected");
