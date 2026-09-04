@@ -3,6 +3,63 @@
 HTTP request / response over a `Duplex` from any `webrun-streams-*` adapter.
 Replaces the retired `webrun-http` + `webrun-http-port` packages.
 
+## Install
+
+```sh
+npm install @statewalker/webrun-http-streams
+```
+
+One runtime dependency, [`@statewalker/webrun-streams`](../webrun-streams); no
+peer dependencies. ESM only (`"type": "module"`). Needs standard `Request`,
+`Response`, `ReadableStream`, `TextEncoder` and `TextDecoder` — present in
+browsers, Node 18+, Deno, Bun and Cloudflare Workers.
+
+Pair it with a transport adapter to get a `Duplex`:
+[`-ws`](../webrun-streams-ws), [`-port`](../webrun-streams-port),
+[`-webrtc`](../webrun-streams-webrtc), [`-libp2p`](../webrun-streams-libp2p),
+[`-livekit`](../webrun-streams-livekit), [`-peerjs`](../webrun-streams-peerjs).
+
+## Getting started
+
+Pick a transport, then move standard `Request` / `Response` objects across it.
+Here the transport is an in-process `MessageChannel`, so the whole exchange runs
+in one process with no network:
+
+```ts
+import { connect, serve } from "@statewalker/webrun-streams-port";
+import { fetchOverDuplex, serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
+
+// --- server side ---
+const channel = new MessageChannel();
+const stop = await serve(
+  { port: channel.port2 },
+  serveFetchOverDuplex(async (request) => {
+    const url = new URL(request.url);
+    return Response.json({ path: url.pathname, method: request.method });
+  }),
+);
+
+// --- client side ---
+const { call, close } = await connect({ port: channel.port1 });
+const response = await fetchOverDuplex(call, new Request("http://local/api/todo/7"));
+
+console.log(response.status);        // 200
+console.log(await response.json());  // { path: "/api/todo/7", method: "GET" }
+
+await close();
+await stop();
+```
+
+Swap `@statewalker/webrun-streams-port` for
+[`-ws`](../webrun-streams-ws), [`-webrtc`](../webrun-streams-webrtc),
+[`-libp2p`](../webrun-streams-libp2p), [`-livekit`](../webrun-streams-livekit)
+or [`-peerjs`](../webrun-streams-peerjs) and nothing else changes — that is the
+whole point of the `Duplex` seam.
+
+Streaming bodies work as you would expect: a `Response` whose body is a
+`ReadableStream` streams across the transport chunk by chunk, which is what
+makes server-sent events work over a `MessagePort` or a WebRTC link.
+
 ## Layers
 
 Three of them sit on the `Duplex` seam, plus one older transport-agnostic pair
@@ -314,6 +371,20 @@ exception.
 | `PEER_ERROR_HEADER` | `"x-webrun-error"`. |
 | `MessageCodec`, `ByteSource`, `RequestEnvelope`, `ResponseEnvelope`, `DecodedRequest`, `DecodedResponse`, `ResponseCodecOptions` | The codec seam's types. |
 
+## Dependencies
+
+| Dependency | Kind | Why |
+| --- | --- | --- |
+| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` seam, chunk collectors and error serialisation. |
+
+No peer dependencies and no runtime dependencies outside the workspace. Relies
+on the platform for `Request`, `Response`, `ReadableStream`, `TextEncoder` and
+`TextDecoder`.
+
+Downstream consumers in this workspace:
+[`webrun-http-browser`](../webrun-http-browser) and
+[`webrun-rpc-http`](../webrun-rpc-http).
+
 ## Scripts
 
 ```sh
@@ -324,4 +395,4 @@ pnpm lint        # biome check src tests
 
 ## License
 
-MIT
+MIT © statewalker — see [LICENSE](../../LICENSE).

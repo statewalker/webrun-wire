@@ -50,6 +50,20 @@ small MIME map labels files, `FilesApi.stats()` + `read({start, length})`
 handle Content-Length + `Range` requests, and auth is a single hook
 returning a short-circuiting `Response`.
 
+## Install
+
+```sh
+npm install @statewalker/webrun-site-builder @statewalker/webrun-files
+```
+
+[`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) is a
+**peer dependency** (`^0.7.0`) — it supplies the `FilesApi` interface that
+`setFiles` mounts. Pick an implementation to go with it:
+`@statewalker/webrun-files-mem` (in-memory), `-node` (Node FS) or `-browser`
+(File System Access API).
+
+No other runtime dependencies. ESM only (`"type": "module"`).
+
 ## How to use
 
 ```sh
@@ -71,6 +85,9 @@ npm install @statewalker/webrun-site-builder @statewalker/webrun-files
 | `getMimeType(path)` | Resolve a `Content-Type` from a file extension; falls back to `application/octet-stream`. |
 | `newRouteMatcher(pattern, method?)` | Thin `URLPattern` wrapper returning extracted groups or `null`. Exposed for building custom layers. |
 | `SiteHandler`, `EndpointHandler`, `EndpointEnv`, `AuthPredicate`, `ErrorHandler` | Type aliases for the contract surface. |
+| `ServeFilesOptions` | Options for `newServeFiles` / `.setFiles`: `getMimeType`, `directoryIndex` (**no default** — without it a directory request is `404`, not `index.html`), and `transform` (a per-mount response filter). |
+| `BasicAuthOptions` | `{ realm?: string }` — realm shown in the `WWW-Authenticate` challenge, default `"Protected"`. |
+| `RouteMatcher` | `{ match(request): Record<string, string> \| null }` — what `newRouteMatcher` returns. |
 
 ## Examples
 
@@ -311,4 +328,4 @@ pnpm lint        # biome check src tests
 
 ## License
 
-MIT © statewalker
+MIT © statewalker — see [LICENSE](../../LICENSE).

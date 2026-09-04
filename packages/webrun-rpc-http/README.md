@@ -35,6 +35,17 @@ transport you wire it to:
 | A WebSocket | Same, with `@statewalker/webrun-streams-ws` supplying the `Duplex`. |
 | Deno / Cloudflare Workers / Node's built-in HTTP | The handler is `(Request) ⇒ Response` — drop in as-is. |
 
+## Install
+
+```sh
+npm install @statewalker/webrun-rpc-http
+```
+
+One runtime dependency, [`@statewalker/webrun-streams`](../webrun-streams) (for
+error serialisation); no peer dependencies. ESM only (`"type": "module"`). The
+server is a plain `(Request) => Response` handler and the client takes an
+injectable `fetch`, so it runs in browsers, Node 18+, Deno, Bun and Workers.
+
 ## How to use
 
 ```sh
@@ -51,6 +62,8 @@ npm install @statewalker/webrun-rpc-http
 | `RpcClient` | Shape of the object returned from `newRpcClient`: `{ loadService<T>(name) }`. |
 | `Json` / `JsonObject` | Recursive JSON types — everything that survives a `JSON` round-trip. |
 | `getInstanceMethods(instance)` | Reflect callable properties of `instance` into a `Record<string, Function>`, walking the prototype chain up to (but not including) `Object.prototype`. Used internally by `newRpcServer`; exposed for callers that need it. |
+| `NewRpcServerOptions` | `{ path?: string }` — URL prefix to mount under; a trailing slash is stripped, empty (default) mounts at the origin root. |
+| `NewRpcClientOptions` | `{ baseUrl: string; fetch?: (request) => Promise<Response> }` — `fetch` defaults to `globalThis.fetch`; pass a webrun-http handler to run in-process. |
 
 ## Examples
 
@@ -284,4 +297,4 @@ pnpm lint        # biome check src tests
 
 ## License
 
-MIT © statewalker
+MIT © statewalker — see [LICENSE](../../LICENSE).

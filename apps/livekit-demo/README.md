@@ -104,3 +104,15 @@ apps/livekit-demo/
 - **Identity collisions** — if two server pages try to join with
   `site-server` simultaneously, LiveKit allows the second one and may kick
   the first. Reload causes a brief blip; usually self-heals.
+
+## Dependencies
+
+Workspace: [`webrun-streams`](../../packages/webrun-streams), [`webrun-streams-livekit`](../../packages/webrun-streams-livekit), [`webrun-http-streams`](../../packages/webrun-http-streams), [`webrun-site-builder`](../../packages/webrun-site-builder), [`webrun-site-host`](../../packages/webrun-site-host).
+
+Vendor: `livekit-client` (^2.18.3), `livekit-server-sdk` (^2.10.0).
+
+Dev: `vite`, `typescript`, `tsx`, `@types/node`, [`webrun-http-browser`](../../packages/webrun-http-browser). Docker is required for the dev LiveKit server.
+
+## License
+
+Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).

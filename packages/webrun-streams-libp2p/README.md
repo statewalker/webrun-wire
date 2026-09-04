@@ -2,6 +2,31 @@
 
 libp2p native multi-stream `Connect` / `Serve` adapter. Each `call(input)` opens a new libp2p `Stream` via `node.dialProtocol(peer, [protocol])`; the responder registers via `node.handle(protocol, ...)`. Default protocol id: `/webrun-streams/1.0.0`. Targets libp2p 3.x.
 
+## Why it exists
+
+libp2p already solves the hard parts of peer-to-peer — transport negotiation,
+NAT traversal, circuit relaying, and an authenticated peer identity from the
+Noise handshake. What it hands an application is a `Stream`, not a request.
+
+This adapter binds that stream to the [`webrun-streams`](../webrun-streams)
+`Duplex` seam, so a handler written for a `MessagePort` or a WebSocket runs
+unchanged across a libp2p network. Because libp2p multiplexes natively, this
+adapter is one of two in the family (with
+[`webrun-streams-webrtc`](../webrun-streams-webrtc)) that needs no `emulateMux`
+— one `call` is one real libp2p stream.
+
+## Install
+
+```sh
+npm install @statewalker/webrun-streams-libp2p libp2p @libp2p/interface @multiformats/multiaddr
+```
+
+`libp2p` (`^3.0.0`), `@libp2p/interface` (`^3.0.0`) and `@multiformats/multiaddr`
+(`^13.0.0`) are **peer dependencies** — you build and own the node, including
+its transports, encryption and muxers.
+
+## Getting started
+
 ```ts
 import { connect, serve } from "@statewalker/webrun-streams-libp2p";
 
@@ -68,6 +93,45 @@ Two bounds keep a misbehaving peer from parking a long-lived server:
 
 One inbound stream failing never takes down the serving process. `duplexOverStream` rejects on the read side when a peer sends an `ERROR` frame or resets mid-request — which happens in ordinary use, a browser tab closed mid-request being enough — and `serveConnections` catches that per stream and logs it. Callers see their own errors as usual: cancelling a `call` (i.e. `.return()` on the returned generator) sends a reset, and `close()` on the connection aborts every stream it still holds open.
 
+## API
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `connect(params)` | `Connect<ConnectLibp2pParams>` | Dials `peer` and resolves `{ call, close }`. Each `call` opens one libp2p stream. |
+| `serve(params, handler)` | `Serve<ServeLibp2pParams>` | Registers `handler` on `protocol`. Returns an idempotent teardown. |
+| `serveConnections(params, makeHandler)` | function | Like `serve`, but builds a handler per inbound stream and passes it the authenticated `ConnectionContext`. |
+| `ServeConnectionsHandler` | type | `(context: ConnectionContext) => Duplex` — the factory `serveConnections` takes. |
+| `duplexOverStream(stream, options?)` | function | Wraps one libp2p `Stream` as a `Duplex`, applying the framing and flow control described above. |
+| `closeStream(stream, ...)` | function | The graceful-close-then-abort sequence, with the 5 s close timeout. |
+| `DEFAULT_PROTOCOL` | const | `"/webrun-streams/1.0.0"` — used when `protocol` is unset. |
+| `DEFAULT_DRAIN_TIMEOUT_MS` | const | `300_000` — the default drain bound (5 minutes). |
+
+### `ConnectLibp2pParams`
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `node` | `Libp2p` | — | The local node. |
+| `peer` | `PeerId \| Multiaddr` | — | Who to dial. |
+| `protocol` | `string` | `DEFAULT_PROTOCOL` | libp2p protocol id. |
+| `drainTimeoutMs` | `number` | `300_000` | Backpressure drain bound before dropping the peer. |
+| `maxOutboundStreams` | `number` | libp2p's (64) | Passed through to `dialProtocol`. |
+| `runOnLimitedConnection` | `boolean` | unset | Opt in to relayed / limited connections. |
+
+### `ServeLibp2pParams`
+
+As above minus `peer`, plus `maxInboundStreams` (libp2p default **32**).
+
+### `ConnectionContext`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `remotePeer` | `PeerId` | The peer id proved by the Noise handshake. Unforgeable by the request payload. |
+
+### `DuplexOverStreamOptions`
+
+`onPeerInputEnd(err?)`, `onSourceCompleted()` and `drainTimeoutMs` — see
+[Flow control](#flow-control-and-what-libp2p-3x-does-not-give-you-for-free).
+
 ## Tests
 
 ```bash
@@ -77,6 +141,18 @@ WEBRUN_STREAMS_LIBP2P=1 pnpm test      # + the framing/conformance suite
 
 The conformance suite is opt-in because it spins up two real libp2p TCP nodes in-process.
 
+## Dependencies
+
+| Dependency | Kind | Why |
+| --- | --- | --- |
+| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` seam and error serialisation. |
+| `libp2p` | **peer** (`^3.0.0`) | The node you build and own. |
+| `@libp2p/interface` | **peer** (`^3.0.0`) | `Libp2p`, `PeerId`, `Stream` types. |
+| `@multiformats/multiaddr` | **peer** (`^13.0.0`) | `Multiaddr` dial targets. |
+| `@chainsafe/libp2p-noise`, `@chainsafe/libp2p-yamux`, `@libp2p/tcp`, `@libp2p/utils` | dev | Two real in-process nodes for the test suite. |
+
+No runtime dependencies outside the workspace. ESM only (`"type": "module"`).
+
 ## License
 
-MIT
+MIT © statewalker — see [LICENSE](../../LICENSE).

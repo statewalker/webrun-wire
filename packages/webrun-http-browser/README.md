@@ -30,6 +30,15 @@ the raw platform APIs, and this package fills them:
 Combining both modes means the same handler code works in an app you
 control *and* in an embed you don't.
 
+## Install
+
+```sh
+npm install @statewalker/webrun-http-browser
+```
+
+Browser-only — it needs `navigator.serviceWorker`, so a secure context
+(`https://` or `localhost`) is required. No peer dependencies.
+
 ## How to use
 
 ```sh
@@ -215,6 +224,74 @@ Why it's interesting:
   no tooling. Shows how small the glue between a platform API and a
   `(Request) ⇒ Response` handler can be.
 
+## Exports
+
+The package root re-exports everything from
+[`@statewalker/webrun-streams`](../webrun-streams) and
+[`@statewalker/webrun-http-streams`](../webrun-http-streams), so existing
+imports keep working after those extractions. Its own surface is below.
+
+### Relay mode
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `newRemoteRelayChannel(opts?)` | function | Embeds the hidden relay iframe, handshakes a `MessageChannel`, resolves a `RemoteRelayChannel`. |
+| `RemoteRelayChannelOptions` | interface | `baseUrl`, `url`, `container` — where the relay lives and what to append the iframe to. |
+| `RemoteRelayChannel` | interface | `{ baseUrl, port, close() }`. |
+| `initHttpService(handler, opts)` | function | Registers `handler` as the server for a service `key` on the relay. Returns a cleanup. |
+| `callHttpService(request, opts)` | function | Sends a `Request` to the service under `key`; resolves its `Response`. |
+| `ServiceOptions` | interface | `{ key: string; port: MessageTarget }` — shared by the two above. |
+| `getRelayWindowMessageHandler(opts?)` | function | The `window.onmessage` handler that runs *inside* the relay iframe. |
+| `RelayWindowHandlerOptions` | interface | `swUrl`, `scopeUrl` for that handler. |
+| `splitServiceUrl(url, separator?)` | function | Splits a relay URL into service key + remaining path (default separator `~`). |
+| `SplitServiceUrl` | interface | Its result shape. |
+
+### ServiceWorker lifecycle
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `initServiceWorker(opts)` | function | Registers a SW and resolves once it is activated **and controlling the page**. |
+| `InitServiceWorkerOptions` | interface | `{ swUrl, scopeUrl?, type? }`. |
+| `newServiceWorkerPort()` | function | A `MessagePort` that transparently bridges to the controlling SW. |
+
+### Connection registry
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `initializeConnection(opts)` | function | Sends `CONNECT` for a service `key`; resolves a `MessagePort`, or `null` if no such service. |
+| `InitializeConnectionOptions` | interface | `{ key, communicationPort, ...extra }` — extra fields ride along in the CONNECT payload. |
+| `registerConnectionsHandler(opts)` | function | Registers a `key` and answers inbound `CONNECT`s. Returns a cleanup that unregisters. |
+| `RegisterConnectionsHandlerOptions` | interface | `{ key, handler, communicationPort }`. |
+
+### Messaging primitives
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `callChannel(target, type, data, port?)` | function | One typed request/response over a `MessageTarget`. |
+| `handleChannelCalls(target, type, handler)` | function | Answer those calls. Returns an unsubscribe. |
+| `ChannelCallHandler` | type | The handler signature the two above exchange. |
+| `newInvokationChannel(opts)` | function | Multiplexed invocations over one target. |
+| `InvocationChannel` / `NewInvocationChannelOptions` | interface | Its result and options. |
+| `handleStreams(...)` / `StreamHandler<T>` | function / type | Stream-shaped invocations over the same channel. |
+| `MessageTarget` / `MessageSource` / `MessageSink` / `MessageListener` | interface / type | The structural port view everything above accepts — a `MessagePort`, a `Worker`, or a SW bridge. |
+| `newRegistry(onError?)` | function | Small cleanup registry used for teardown. |
+| `Registry` / `NewRegistryResult` / `CleanupAction` | interface / type | Its shapes. |
+
+### HTTP over a port
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `sendHttpRequest(port, request)` | function | Ship a `Request` over a `MessagePort`, await the `Response`. |
+| `handleHttpRequests(port, handler)` | function | Serve an `HttpHandler` on the other end of one. |
+
+### Subpath entry points
+
+| Entry | Purpose |
+| --- | --- |
+| `@statewalker/webrun-http-browser/sw` | `SwHttpAdapter` — the same-origin ServiceWorker adapter. |
+| `@statewalker/webrun-http-browser/relay-sw` | IIFE relay SW runtime, loadable via `importScripts(...)`. |
+| `@statewalker/webrun-http-browser/sw-worker` | IIFE same-origin SW runtime, loadable via `importScripts(...)`. |
+
 ## Internals
 
 ### Source layout
@@ -340,4 +417,4 @@ root).
 
 ## License
 
-MIT © statewalker
+MIT © statewalker — see [LICENSE](../../LICENSE).

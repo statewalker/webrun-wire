@@ -2,6 +2,28 @@
 
 Conformance suite for `Duplex` / `Connect` / `Serve` adapters in the `webrun-streams-*` family. Every adapter ships a one-line test file that calls `describeDuplexAdapter(name, makePair)` with its own pair factory.
 
+## Why it exists
+
+The promise of the [`webrun-streams`](../webrun-streams) seam is that a handler
+written once runs over *any* transport. That promise is only as good as the
+weakest adapter — and the failure modes that break it are the quiet ones: an
+adapter that works for small bodies but truncates at 10 MiB, that serialises
+concurrent calls, that drops a handler's `finally` on cancellation, or that
+turns a thrown `Error` into an anonymous disconnect.
+
+None of those show up in an adapter's own happy-path tests. This package makes
+them a shared, executable definition of "correct", so a new transport is a
+day's work rather than a new set of subtle incompatibilities.
+
+## Install
+
+```sh
+npm install --save-dev @statewalker/webrun-streams-conformance
+```
+
+It is a **test-time** dependency: it bundles `vitest` and defines suites via
+`describe` / `it`.
+
 ## Levels asserted
 
 - **L0** Envelope round-trip via an echo handler for body sizes empty / 1 KiB / 1 MiB / 10 MiB.
@@ -35,6 +57,26 @@ A third argument tunes the suite:
 | `concurrency` | `10` | How many concurrent calls L1 runs. |
 | `skipHugeBody` | `false` | Drop L0's 10 MiB case, for transports that rate-limit. |
 
+## API
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `describeDuplexAdapter(name, makePair, options?)` | function | Registers the whole L0–L5 suite for one adapter. |
+| `makeLoopbackPair()` | `MakePair` | The reference in-process pair; the suite's own self-test. |
+| `MakePair` | type | `() => Promise<ConnectServePair>` — called once per test case. |
+| `ConnectServePair` | type | `{ connect(), serve(handler), close() }`. |
+| `DescribeDuplexAdapterOptions` | type | `concurrency` (default 10), `skipHugeBody` (default false). |
+
+## Dependencies
+
+| Dependency | Kind | Why |
+| --- | --- | --- |
+| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` seam under test. |
+| `vitest` | runtime | The suite is defined with `describe` / `it`. |
+
+Consumed as a `devDependency` by every adapter in the family. ESM only
+(`"type": "module"`).
+
 ## License
 
-MIT
+MIT © statewalker — see [LICENSE](../../LICENSE).

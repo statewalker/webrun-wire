@@ -99,7 +99,26 @@ await room.leave();
 - **`parseCompressedSignal(signal): { sessionId, role, description, candidates }`** — reverse of the above.
 - **`encodeSignal(signal): string`** / **`decodeSignal(encoded): CompressedSignal`** — URL-safe base64 (de)serialisation for QR strings.
 
-Types (`ByteChannel`-adjacent handshake shapes) are re-exported from `./types` — `SignalingTransport`, `SignalingMessage`, `RoomLike`, `RoomManagerOptions`, `WebRtcConnectionOptions`, `CompressedSignal`, `DEFAULT_ICE_SERVERS`, and more.
+### Types and constants
+
+All re-exported from `./types` at the package root.
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `SignalingTransport` | interface | The pluggable channel offers/answers travel over. |
+| `SignalingMessage` | union | Offer / answer / ICE-candidate envelopes. |
+| `SessionDescription` / `IceCandidate` | interface | Structural views of the WebRTC handshake payloads (no DOM types required). |
+| `PeerRole` | `"initiator" \| "responder"` | Which side of the handshake this peer plays. |
+| `ConnectionState` | union | Lifecycle state reported by `PeerConnection`. |
+| `PeerConnectionEvents` | interface | The event callbacks `PeerConnection` accepts. |
+| `WebRtcConnectionOptions` | interface | ICE configuration and the injected `rtc` factory. |
+| `RtcPeerConnectionFactory` | type | `(config: RTCConfiguration) => RTCPeerConnection` — the injection seam that keeps native WebRTC out of the import graph. |
+| `DEFAULT_ICE_SERVERS` | const | STUN servers used when none are supplied. |
+| `CompressedSignal` | interface | The compact offer/answer shape behind the QR helpers. |
+| `RoomLike` / `RoomParticipantLike` / `RoomLocalParticipantLike` | interface | Structural view of a LiveKit room, so `livekit-client` stays an optional peer dependency. |
+| `RoomManagerOptions` | interface | Includes `roomFactory`, the injection point for the real `Room`. |
+| `ParticipantInfo` | interface | Identity + metadata for a room participant. |
+| `ROOM_EVENT` | const | Room event-name constants used by `RoomManager`. |
 
 ## Notes
 
@@ -108,6 +127,20 @@ Types (`ByteChannel`-adjacent handshake shapes) are re-exported from `./types` �
 - **`peerjs` is not a dependency.** These helpers use native WebRTC; the peerjs byte transport lives in `@statewalker/webrun-streams-peerjs`.
 - Built red/green TDD.
 
+## Dependencies
+
+| Dependency | Kind | Why |
+| --- | --- | --- |
+| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | `ByteChannel`, and `emulateMux` for the transport built on top. |
+| `livekit-client` | **peer, optional** (`^2.18.3`) | Only for `RoomManager`. Injected via `RoomManagerOptions.roomFactory`; the module itself keeps a structural `RoomLike` view, so the dependency is avoidable. |
+
+Native WebRTC is likewise injected (the optional `rtc` factory, defaulting to
+`new RTCPeerConnection`), which is why the test suite needs no vendor install.
+`peerjs` is deliberately **not** a dependency — that transport lives in
+[`@statewalker/webrun-streams-peerjs`](../webrun-streams-peerjs).
+
+ESM only (`"type": "module"`).
+
 ## License
 
-MIT
+MIT © statewalker — see [LICENSE](../../LICENSE).

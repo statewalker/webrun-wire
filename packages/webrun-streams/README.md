@@ -17,6 +17,16 @@ Every higher-level package in the `webrun-*` family (and its consumers — scann
 
 The MessagePack codec that previously rode along here is split out to [`@statewalker/webrun-msgpack`](../webrun-msgpack) so consumers that don't need framing don't pull in `@ygoe/msgpack`.
 
+## Install
+
+```sh
+npm install @statewalker/webrun-streams
+```
+
+Zero runtime dependencies, zero peer dependencies. ESM only
+(`"type": "module"`); runs in browsers, Node, Deno, Bun and Workers. This is the
+foundation package — everything else in the workspace depends on it.
+
 ## How to use
 
 ```sh
@@ -263,6 +273,51 @@ rather than failing the connection — otherwise one malformed frame would tear
 down every stream sharing the mux. A stream that exceeds `maxStreamBuffer` is
 torn down on its own, with an error frame sent to the peer.
 
+## Exports
+
+Everything is exported from the package root.
+
+### Seam types
+
+| Export | Kind | Purpose |
+| --- | --- | --- |
+| `Duplex` | type | `(input) => AsyncGenerator<Uint8Array>` — one logical call. |
+| `Connect<P>` | type | `(params) => Promise<{ call: Duplex; close() }>`. |
+| `Serve<P>` | type | `(params, handler) => Promise<() => Promise<void>>`. |
+| `ByteChannel` | type | `{ send, recv, closed, close }` — the minimum a transport must expose. |
+| `ByteLike` | type | Accepted byte inputs before normalisation. |
+| `emulateMux(channel, opts?)` | function | Multi-stream over a single `ByteChannel`. |
+| `EmulateMuxOptions` | type | `maxStreams` (256), `mtu` (64 KiB), `maxStreamBuffer` (8 MiB), `side`. |
+| `TransportClosedError` | class | Thrown when the transport closes with calls in flight. Catch via `instanceof` or `error.name`. |
+
+### Collectors and codecs
+
+| Export | Purpose |
+| --- | --- |
+| `collect` / `collectBytes` / `collectString` | Drain an async iterable to an array / `Uint8Array` / `string`. |
+| `encodeText` / `decodeText` | UTF-8 `string` ↔ `Uint8Array` streams. |
+| `splitLines` / `joinLines` | Cross-chunk-safe line splitting and rejoining. |
+| `encodeJsonl` / `decodeJsonl` | JSON values ↔ `\n`-delimited string stream. |
+| `map` | Stream-map over an `AsyncIterable<T>`. |
+| `toChunks` / `normalizeToUint8Array` | Coerce assorted byte-ish inputs into `Uint8Array` chunks. |
+
+### Iterator plumbing
+
+| Export | Purpose |
+| --- | --- |
+| `newAsyncGenerator` | Backpressure-aware queue turning `next`/`done` callbacks into an async generator. |
+| `sendIterator` / `recieveIterator` | Ship an async iterator across any transport. |
+| `IteratorChunk` | type — the `{ done, value, error }` chunk envelope they exchange. |
+| `ChunkSender` / `ChunkReceiver` / `ReceiverInstaller` | types — the transport-side callbacks those two are wired to. |
+| `toReadableStream` / `fromReadableStream` | `AsyncIterator<Uint8Array>` ↔ WHATWG `ReadableStream<Uint8Array>`. |
+
+### Errors
+
+| Export | Purpose |
+| --- | --- |
+| `serializeError` / `deserializeError` | Preserve `message`, `stack` and custom fields across JSON / structured-clone boundaries. |
+| `SerializedError` | type — the wire shape those two produce and consume. |
+
 ## Internals
 
 ### `newAsyncGenerator` — backpressure queue
@@ -345,4 +400,4 @@ pnpm lint        # biome check
 
 ## License
 
-MIT © statewalker
+MIT © statewalker — see [LICENSE](../../LICENSE).

@@ -10,11 +10,18 @@ A raw MessagePack stream has no frame boundaries: a decoder can only succeed if 
 
 Previously the codec lived inside `@repo/streams` (private, unpublished). It's been extracted here so (a) consumers that only need framing don't pull in the broader `webrun-streams` surface, and (b) the `@ygoe/msgpack` dependency lives in exactly one place.
 
-## How to use
+## Install
 
 ```sh
 npm install @statewalker/webrun-msgpack
 ```
+
+One runtime dependency ([`@ygoe/msgpack`](https://www.npmjs.com/package/@ygoe/msgpack)),
+no peer dependencies. ESM only (`"type": "module"`).
+
+## How to use
+
+### Exports
 
 Four exports — one encode/decode pair for generic values, one for `Float32Array`:
 
@@ -134,4 +141,4 @@ pnpm lint        # biome check
 
 ## License
 
-MIT © statewalker
+MIT © statewalker — see [LICENSE](../../LICENSE).

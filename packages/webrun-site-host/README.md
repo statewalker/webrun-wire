@@ -9,6 +9,8 @@ the site does — endpoints, files, auth, and routing live in
 [`@statewalker/webrun-site-builder`](../webrun-site-builder) (or anywhere
 else that produces a `SiteHandler = (Request) => Promise<Response>`).
 
+## Getting started
+
 ```ts
 import { SiteBuilder } from "@statewalker/webrun-site-builder";
 import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
@@ -31,6 +33,16 @@ browser + SW via `HostedSiteBuilder`, any `webrun-streams-*` transport via
 [`DuplexSiteBuilder`](../webrun-http-streams), and Node / Deno / Bun /
 Cloudflare Workers directly, since a `SiteHandler` already *is* their handler
 shape. Configuration lives in one place.
+
+## Install
+
+```sh
+npm install @statewalker/webrun-site-host @statewalker/webrun-files
+```
+
+[`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) is a
+**peer dependency** (`^0.7.0`). Browser-only — it registers a ServiceWorker, so
+a secure context (`https://` or `localhost`) is required.
 
 ## Cross-application HTTP (no domains, no certificates)
 
@@ -140,6 +152,18 @@ getBaseUrl = () => site.baseUrl;
   [`apps/site-builder-tsx-spike`](../../apps/site-builder-tsx-spike) —
   runnable examples.
 
+## Dependencies
+
+| Dependency | Kind | Why |
+| --- | --- | --- |
+| [`@statewalker/webrun-site-builder`](../webrun-site-builder) | runtime | The `SiteHandler` shape and file/endpoint composition. |
+| [`@statewalker/webrun-http-browser`](../webrun-http-browser) | runtime | `SwHttpAdapter` — the ServiceWorker registration and dispatch. |
+| `@statewalker/webrun-files-mem` | runtime | In-memory `FilesApi` used when resolving inline file maps. |
+| [`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) | **peer** (`^0.7.0`) | The `FilesApi` interface itself. |
+
+Browser-only: requires `navigator.serviceWorker` and therefore a secure
+context. ESM only (`"type": "module"`).
+
 ## Development
 
 ```bash
@@ -150,4 +174,4 @@ pnpm lint        # biome check src tests
 
 ## License
 
-MIT
+MIT © statewalker — see [LICENSE](../../LICENSE).

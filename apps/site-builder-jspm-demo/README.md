@@ -330,4 +330,4 @@ Dev:
 
 ## License
 
-MIT © statewalker
+Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).

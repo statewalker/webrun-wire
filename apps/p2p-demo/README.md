@@ -605,4 +605,4 @@ topics — no longer exists.
 
 ## License
 
-MIT © statewalker
+Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).

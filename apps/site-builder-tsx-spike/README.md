@@ -86,3 +86,15 @@ If the spike behaves as if old code is running, you have a stale SW
 from a previous session. **DevTools → Application → Service Workers
 → Unregister**, then **Storage → Clear site data**, then hard reload.
 Or just open the spike in a fresh Incognito/Private window.
+
+## Dependencies
+
+Workspace: [`webrun-site-builder`](../../packages/webrun-site-builder), [`webrun-site-host`](../../packages/webrun-site-host), [`webrun-http-browser`](../../packages/webrun-http-browser).
+
+Runtime: `sucrase` (the on-the-fly `.ts` / `.tsx` transpiler this spike exists to demonstrate), `@statewalker/webrun-files-mem`.
+
+Dev: `vite`, `typescript`, `@statewalker/webrun-files`.
+
+## License
+
+Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).

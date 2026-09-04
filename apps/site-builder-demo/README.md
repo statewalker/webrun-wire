@@ -151,3 +151,15 @@ under SW control — required for `SwHttpAdapter.start()` to resolve.
 This is the highest-level wrapping (`SiteBuilder` + `HostedSiteBuilder`) plus
 the dynamic-import server-module pattern. The other demos use manual handler
 functions.
+
+## Dependencies
+
+Workspace: [`webrun-site-builder`](../../packages/webrun-site-builder), [`webrun-site-host`](../../packages/webrun-site-host), [`webrun-http-browser`](../../packages/webrun-http-browser).
+
+Runtime: `@statewalker/webrun-files-mem`.
+
+Dev: `vite`, `typescript`, `@statewalker/webrun-files`.
+
+## License
+
+Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).
