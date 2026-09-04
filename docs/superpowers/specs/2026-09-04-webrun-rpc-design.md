@@ -26,6 +26,13 @@ comparison surfaced instead.
 3. **Carries `FilesApi`.** Including `read`/`list` returning `AsyncIterable`,
    and `write` *taking* one — a streaming argument.
 4. **No functional duplication** with the existing packages.
+5. **Built red/green TDD.** Every behavioural change lands as a failing test
+   first, then the code that makes it pass. This is existing house practice —
+   `webrun-streams-signaling`'s README records "Built red/green TDD" — and it
+   matters more than usual here: Plan 1 rewrites flow control that six adapters
+   depend on, and the interesting cases (a stalled consumer, a peer that ignores
+   credit, asymmetrically configured peers) are exactly the ones that are easy
+   to believe are handled without ever having watched them fail.
 
 ## Finding 1 — the port already happened
 
@@ -177,6 +184,20 @@ One mitigation exists: the window is 1 *per stream*, and `DEFAULT_MAX_STREAMS`
 is 256, so concurrent ranged reads already scale. A single sequential read does
 not.
 
+**Nothing is negotiated between peers.** `sendFrame(id, TYPE_OPEN)` carries no
+payload; `mtu`, `maxStreamBuffer` and `maxStreams` are purely local
+configuration and are never communicated. Each peer therefore has no idea what
+the other's limits are. This is what rules out a sender-side window (Decision 8)
+and it is why `OPEN` has to start carrying something under any design that
+allows more than one frame in flight.
+
+The reason the cap is needed at all is documented in the same code: the inbound
+loop **cannot** block on consumer drainage, because it would then be unable to
+process incoming `ACK` frames — and since our own sender is parked awaiting
+exactly those ACKs, both directions deadlock. Pushes are therefore
+fire-and-forget, which removes the natural brake and makes the cap the only
+bound on a peer that ignores the ACK convention.
+
 ## Decisions
 
 ### 1. Descriptors by pure reflection, corrected at call time
@@ -282,40 +303,67 @@ Finding 3 makes this free: there is nothing to migrate.
 need no adapter. To be confirmed when typing it; if the DOM overloads do not
 line up, a thin `messageTargetFromMessagePort` is added.
 
-### 8. One shared windowed flow-control core; default window 8
+### 8. Receiver-advertised credit, in one shared core
 
 Rather than adding a send window to the RPC tier alone — which would create the
 second flow-control implementation this investigation set out to avoid — the
-windowing logic is extracted into `webrun-streams` and used by both
+flow-control logic is extracted into `webrun-streams` and used by both
 `emulateMux` and the RPC tier.
 
-The change generalises a window of 1 to a window of N with in-order reassembly.
-It **preserves** end-to-end backpressure: ACK-after-drain still means a producer
-cannot outrun its consumer; the window grants N units of slack instead of 1.
+**The mechanism is receiver-advertised credit, not a sender-side window.**
 
-**The window is configurable and defaults to 8.** At 30 ms RTT that is roughly
-an 8× single-stream improvement (about 2 MB/s at N=1 versus 17 MB/s at N=8),
-costing `N × mtu` = 512 KiB in flight per stream at default MTU.
+A sender-side window was considered and rejected. It requires the sender to
+stay under the *receiver's* `maxStreamBuffer`, but that value is private
+(Finding 7): `OPEN` carries no payload, so nothing is negotiated. A local
+`window × mtu ≤ maxStreamBuffer` check compares a peer's own window against its
+own buffer, while the frames land in the *other* peer's buffer — so two peers
+on different configuration, or different defaults across versions, both pass
+their local checks and still get streams torn down. It encodes a same-defaults
+convention as if it were a guarantee.
 
-**Hard constraint:** the receiver tears down any stream buffering past
-`maxStreamBuffer` without being drained. With a window of N a sender
-legitimately has `N × mtu` outstanding, so `window × mtu ≤ maxStreamBuffer`
-must hold or lawful sender behaviour trips the abuse guard. At the defaults
-(64 KiB MTU, 8 MiB buffer) the ceiling is 128 frames. **This must be enforced
-at construction, not documented.**
+Credit-based flow control removes the constraint instead of encoding it:
 
-Ordering is carried differently per tier, each extending an identifier it
-already has:
+- The receiver advertises initial credit — naturally its `maxStreamBuffer`.
+- The sender decrements credit by bytes sent and stops at zero.
+- The receiver grants further credit as its consumer drains.
 
-- `emulateMux` gains a monotonic per-stream sequence number on DATA and ACK
-  frames, so an ACK can be matched once more than one frame is outstanding.
-- The RPC tier correlates by `callId`, already unique per chunk. With a window
-  greater than 1 those calls may resolve out of order, so `receiveValues`
-  buffers by an added per-channel sequence number and delivers in order.
+A sender then **cannot** overrun the receiver's buffer, because it was never
+given permission to. `maxStreamBuffer` stops being a kill threshold for honest
+peers and becomes the advertised window; the teardown path survives only as a
+backstop against peers that ignore the protocol, which is what it was written
+for.
 
-The shared core owns window accounting — how many units may be outstanding,
-when one is released, how a drained consumer returns credit. Each tier supplies
-its own framing and transmit/acknowledge callbacks.
+**No new frame type is needed.** The two existing frames gain a 4-byte payload:
+
+| frame | today | becomes |
+| --- | --- | --- |
+| `OPEN` (`0x01`) | empty | initial credit, uint32 big-endian |
+| `ACK` (`0x03`) | bare signal | bytes granted, uint32 big-endian |
+
+Two properties fall out rather than being designed in:
+
+1. **Throughput is fixed by the same change.** Credit is cumulative bytes, not
+   one-frame-at-a-time, so the per-frame round trip disappears — which was the
+   whole objective.
+2. **Auto-tuning becomes the receiver's business.** A receiver whose consumer is
+   slow simply grants less. No negotiation protocol, no tuning knob to expose.
+
+**Backpressure is preserved, at coarser granularity.** The end-to-end signal is
+unchanged — `newAsyncGenerator`'s `next()` resolves only when the consumer pulls
+again, and credit is granted from that signal. The difference is that a producer
+may now run up to one credit window ahead of its consumer instead of exactly
+zero. Bounded, still end-to-end, still no unbounded buffering.
+
+**Grant policy:** credit is replenished in batches — when roughly half the
+advertised window has been drained — never per chunk, or per-frame ACKs have
+merely been reinvented under another name.
+
+The shared core owns credit accounting: how much is outstanding, when it is
+consumed, when a grant is emitted. Each tier supplies its own framing and its
+own transmit/grant callbacks. The RPC tier correlates by `callId` (already
+unique per chunk); with more than one chunk in flight those calls may resolve
+out of order, so `receiveValues` buffers by an added per-channel sequence
+number and delivers in order.
 
 ### 9. Names corrected during the move
 
@@ -357,7 +405,7 @@ core exists.
 ```
 webrun-streams        newAsyncGenerator, sendIterator/receiveIterator,
                       IteratorChunk, serializeError/deserializeError,
-                      emulateMux, windowed flow-control core   [new]
+                      emulateMux, credit-based flow-control core   [new]
                       MessageTarget/MessageSource/MessageSink  [moved in]
       ▲                                    ▲
       │                                    │
@@ -446,9 +494,10 @@ remaining six methods are unary. A remote `FilesApi` package reduces to wiring.
 
 Each step leaves the repository green and is independently revertable.
 
-1. **Windowed flow-control core** in `webrun-streams`; `emulateMux` migrated
-   onto it, with the `window × mtu ≤ maxStreamBuffer` check enforced at
-   construction. Land with the default at 8, conformance passing at 1 and 8.
+1. **Credit-based flow-control core** in `webrun-streams`; `emulateMux`
+   migrated onto it; `OPEN` and `ACK` gain their uint32 payloads. Conformance
+   passing at a one-frame credit and at the default, and across asymmetrically
+   configured peers.
 2. **`MessageTarget` moves** into `webrun-streams`; `webrun-http-browser`
    imports it rather than declaring it.
 3. **RPC tier moves** to `webrun-rpc`, retyped from `MessagePort` to
@@ -471,20 +520,32 @@ are not drop-in equivalents.
 
 ## Verification
 
+**Test-first, throughout.** Each behaviour below is written as a failing test
+before the implementation that satisfies it, and the failure is observed — a
+test that has never been red proves nothing about the code that follows it. For
+the migration of `emulateMux` this also means the existing L0–L5 suite stays
+green at every commit, since it is the regression net for six adapters.
+
 The flow-control change touches `emulateMux`, on which every adapter depends.
 `webrun-streams-conformance` already defines L0–L5 as the shared contract, run
 by six adapters — `-ws`, `-port`, `-webrtc`, `-peerjs`, `-libp2p`, `-livekit` —
 plus the reference `makeLoopbackPair` self-test. Window coverage is added there,
 so the change is proven against every transport at once.
 
-- Conformance runs at window 1 and window 8, keeping the existing L0–L5
+- Conformance runs at a small advertised credit (one frame's worth, reproducing
+  today's lock-step behaviour) and at the default, keeping the existing L0–L5
   assertions intact (body sizes to 10 MiB, concurrency, half-close, mid-stream
   cancellation, error propagation, idempotent teardown).
-- Backpressure stays asserted: a producer must not outrun a non-draining
-  consumer, and `maxStreamBuffer` must still tear down the offending stream
-  rather than the whole mux.
-- A test asserts that constructing with `window × mtu > maxStreamBuffer` is
-  rejected.
+- Backpressure stays asserted, at its new granularity: a producer must stall
+  once it has exhausted its credit against a non-draining consumer, and must
+  resume when credit is granted. A producer must never exceed advertised
+  credit.
+- `maxStreamBuffer` must still tear down a stream from a peer that **ignores**
+  credit and floods anyway — the guard's original purpose — while never firing
+  for a peer that honours it, at any configuration.
+- Peers configured asymmetrically (differing `maxStreamBuffer`) must interoperate
+  without spurious teardown. This is the case the rejected sender-side window
+  got wrong, so it is asserted explicitly.
 - **`webrun-rpc` conformance runs over two transports** — a `MessageChannel`
   (structured clone) and a msgpack-over-`Duplex` pair — so Decision 3's
   divergence risk is covered in CI. A value-contract test asserts that
@@ -503,6 +564,12 @@ the loopback. **The gated suites must be run deliberately before this lands.**
 
 - One flow-control implementation instead of two, and single-stream throughput
   stops being round-trip-bound for every adapter.
+- A sender can no longer overrun a receiver's buffer by construction, so
+  `maxStreamBuffer` reverts to being purely a defence against peers that ignore
+  the protocol. Peers on differing configuration interoperate.
+- **Breaking wire format:** `OPEN` and `ACK` gain uint32 payloads. Old and new
+  peers cannot interoperate. Finding 3 makes this the cheapest it will ever
+  be.
 - RPC works over every transport in the family, meeting Requirement 2.
 - Two of the four request/response implementations are removed or made
   removable: copy 4 by deletion, copy 2 as a follow-up parity check.
@@ -519,5 +586,4 @@ the loopback. **The gated suites must be run deliberately before this lands.**
   Different repository; dead code, so a deletion rather than a migration.
 - Consolidating `webrun-rpc-http` (Decision 10).
 - Collapsing `callChannel`/`handleChannelCalls` onto `call`/`listen`.
-- Auto-tuning the window instead of a fixed default (Decision 8).
 - Moving `webrun-site-*` out of webrun-wire — tracked separately.
