@@ -51,3 +51,6 @@ apps/p2p-demo/deploy/
 # gitlink. A lockfile here could not be regenerated, could not be used, and would
 # only drift into saying false things about the dependency set.
 pnpm-lock.yaml
+
+# adversary-loop audit trails
+.adversary-loop/
