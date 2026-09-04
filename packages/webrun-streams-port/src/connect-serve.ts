@@ -1,4 +1,10 @@
-import { type Connect, type Duplex, emulateMux, type Serve } from "@statewalker/webrun-streams";
+import {
+  type Connect,
+  type Duplex,
+  type EmulateMuxOptions,
+  emulateMux,
+  type Serve,
+} from "@statewalker/webrun-streams";
 import { byteChannelFromMessagePort } from "./byte-channel.js";
 
 export interface PortParams {
@@ -8,11 +14,19 @@ export interface PortParams {
    * uses odd. Defaults to "initiator" on `connect` and "responder" on `serve`.
    */
   side?: "initiator" | "responder";
+  /**
+   * Flow-control tuning forwarded to `emulateMux` — `mtu` and
+   * `maxStreamBuffer`, which is the credit this side advertises. `side` here
+   * wins over `mux.side`. Defaults are `emulateMux`'s own; the conformance
+   * suite's L6 uses this to run at a window small enough that a sender
+   * genuinely stalls.
+   */
+  mux?: EmulateMuxOptions;
 }
 
-export const connect: Connect<PortParams> = async ({ port, side }) => {
+export const connect: Connect<PortParams> = async ({ port, side, mux: muxOpts }) => {
   const channel = byteChannelFromMessagePort(port);
-  const mux = emulateMux(channel, { side: side ?? "initiator" });
+  const mux = emulateMux(channel, { ...muxOpts, side: side ?? muxOpts?.side ?? "initiator" });
   return {
     call: mux.call,
     async close() {
@@ -21,9 +35,9 @@ export const connect: Connect<PortParams> = async ({ port, side }) => {
   };
 };
 
-export const serve: Serve<PortParams> = async ({ port, side }, handler: Duplex) => {
+export const serve: Serve<PortParams> = async ({ port, side, mux: muxOpts }, handler: Duplex) => {
   const channel = byteChannelFromMessagePort(port);
-  const mux = emulateMux(channel, { side: side ?? "responder" });
+  const mux = emulateMux(channel, { ...muxOpts, side: side ?? muxOpts?.side ?? "responder" });
   const off = mux.serve(handler);
   let torn = false;
   return async () => {

@@ -114,7 +114,7 @@ const response = await fetchOverDuplex(call, new Request("http://local/api/todo"
 | `connect(params)` | `Connect<PortParams>` | Resolves `{ call, close }` over the port. |
 | `serve(params, handler)` | `Serve<PortParams>` | Registers a `Duplex` handler. Returns an idempotent teardown. |
 | `byteChannelFromMessagePort(port)` | function | Wraps a port as a `ByteChannel` for driving `emulateMux` yourself. |
-| `PortParams` | type | `{ port: MessagePort; side?: "initiator" \| "responder" }`. |
+| `PortParams` | type | `{ port: MessagePort; side?: "initiator" \| "responder"; mux?: EmulateMuxOptions }`. `mux` forwards flow-control tuning (`mtu`, `maxStreamBuffer`) to `emulateMux`; `side` always wins over `mux.side`. |
 
 ### Typed-JSON RPC tier — exports
 
@@ -139,7 +139,7 @@ const response = await fetchOverDuplex(call, new Request("http://local/api/todo"
 
 ## Conformance
 
-Passes every level (L0–L5) of
+Passes every level (L0–L6) of
 [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
 against a `MessageChannel` pair.
 

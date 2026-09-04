@@ -10,7 +10,17 @@ export interface ConnectServePair {
   close(): Promise<void>;
 }
 
-export type MakePair = () => Promise<ConnectServePair>;
+/**
+ * Flow-control tuning L6 asks a pair for. An adapter that can pass these
+ * through to its `emulateMux` should; one that multiplexes natively, or has
+ * no configurable window, ignores them and L6 degrades to an integrity check.
+ */
+export interface PairTuning {
+  mtu?: number;
+  maxStreamBuffer?: number;
+}
+
+export type MakePair = (tuning?: PairTuning) => Promise<ConnectServePair>;
 
 /**
  * Loopback pair: `call` invokes the registered `handler` directly, no

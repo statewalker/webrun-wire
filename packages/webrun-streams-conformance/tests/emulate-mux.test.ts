@@ -76,10 +76,10 @@ function makePipePair(): { a: ByteChannel; b: ByteChannel } {
   };
 }
 
-const makePair: MakePair = async () => {
+const makePair: MakePair = async (tuning) => {
   const { a, b } = makePipePair();
-  const client = emulateMux(a, { side: "initiator" });
-  const server = emulateMux(b, { side: "responder" });
+  const client = emulateMux(a, { side: "initiator", ...tuning });
+  const server = emulateMux(b, { side: "responder", ...tuning });
   return {
     async connect() {
       return {

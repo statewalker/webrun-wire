@@ -1,4 +1,4 @@
-import { type Duplex, emulateMux } from "@statewalker/webrun-streams";
+import { type Duplex, type EmulateMuxOptions, emulateMux } from "@statewalker/webrun-streams";
 import { byteChannelFromWebSocket } from "./byte-channel.js";
 import type { WebSocketLike } from "./websocket-like.js";
 
@@ -9,6 +9,14 @@ export interface ServeWsParams {
    * server.
    */
   onConnection: (cb: (ws: WebSocketLike) => void) => () => void;
+  /**
+   * Flow-control tuning forwarded to `emulateMux` — `mtu` and
+   * `maxStreamBuffer`, which is the credit this side advertises. `side` here
+   * wins over `mux.side`. Defaults are `emulateMux`'s own; the conformance
+   * suite's L6 uses this to run at a window small enough that a sender
+   * genuinely stalls.
+   */
+  mux?: EmulateMuxOptions;
 }
 
 /**
@@ -23,7 +31,7 @@ export interface ServeWsParams {
 export async function serve(params: ServeWsParams, handler: Duplex): Promise<() => Promise<void>> {
   const off = params.onConnection((ws) => {
     const channel = byteChannelFromWebSocket(ws);
-    const mux = emulateMux(channel, { side: "responder" });
+    const mux = emulateMux(channel, { ...params.mux, side: "responder" });
     mux.serve(handler);
     void channel.closed.then(() => mux.close());
   });

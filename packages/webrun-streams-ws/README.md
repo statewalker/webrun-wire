@@ -118,6 +118,7 @@ Opens a `WebSocket` and resolves once it is open. Type: `Connect<ConnectWsParams
 | `url` | `string` | — | WebSocket URL (`ws://` or `wss://`). |
 | `protocols` | `string \| string[]` | — | Subprotocol(s) passed to the constructor. |
 | `WebSocketCtor` | constructor | global `WebSocket` | Constructor to use. Required where there is no global `WebSocket` (Node). |
+| `mux` | `EmulateMuxOptions` | `emulateMux`'s own | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"initiator"` regardless of `mux.side`. |
 
 Resolves to `{ call: Duplex, close: () => Promise<void> }`. Each `call(input)`
 opens a fresh logical stream; `close()` tears down the socket and every stream
@@ -130,6 +131,7 @@ Registers `handler` against a source of inbound sockets. Type: `Serve<ServeWsPar
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `onConnection` | `(cb: (ws: WebSocketLike) => void) => () => void` | Subscribes to inbound connections; returns an unsubscribe function. |
+| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"responder"` regardless of `mux.side`. |
 
 The indirection means this package never depends on a particular server
 library — wire it to `ws`, to a Deno/Bun handler, or to your own accept loop.
@@ -149,11 +151,12 @@ rather than the DOM `WebSocket` is what lets the same code accept Node's `ws`.
 
 ## Conformance
 
-Passes every level (L0–L5) of
+Passes every level (L0–L6) of
 [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
 against an in-process `WebSocketServer`: body sizes up to 10 MiB, concurrent
 calls, half-close, mid-stream cancellation, error propagation with stack and
-custom fields preserved, and idempotent teardown.
+custom fields preserved, idempotent teardown, and flow control against a slow
+consumer at a small advertised window.
 
 ```sh
 pnpm --filter @statewalker/webrun-streams-ws test

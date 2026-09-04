@@ -12,7 +12,7 @@ import type { WebSocketLike } from "../src/websocket-like.js";
  * a handler on the server-side WebSocket; `connect` returns the caller-side
  * Duplex over the client-side WebSocket.
  */
-export const makeWsPair: MakePair = async () => {
+export const makeWsPair: MakePair = async (mux) => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
   const address = wss.address();
@@ -31,6 +31,7 @@ export const makeWsPair: MakePair = async () => {
           u: string,
           p?: string | string[],
         ) => WebSocketLike,
+        mux,
       });
     },
     serve: async (handler) => {
@@ -44,6 +45,7 @@ export const makeWsPair: MakePair = async () => {
             wss.on("connection", onConn);
             return () => wss.off("connection", onConn);
           },
+          mux,
         },
         handler,
       );

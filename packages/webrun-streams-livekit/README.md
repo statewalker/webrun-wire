@@ -101,6 +101,7 @@ Type: `Serve<LiveKitParams>`. Runs `handler` for inbound streams from
 | --- | --- | --- |
 | `room` | `Room` | An already-connected LiveKit room. |
 | `peerIdentity` | `string` | Identity of the remote participant this side talks to. |
+| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is set by which function you call (`"initiator"` for `connect`, `"responder"` for `serve`) regardless of `mux.side`. |
 
 ### `byteChannelFromLiveKit(room, peerIdentity): ByteChannel`
 

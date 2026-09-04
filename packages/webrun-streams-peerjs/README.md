@@ -95,6 +95,7 @@ Type: `Connect<ConnectPeerJsParams>`.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `conn` | `DataConnection` | An already-open connection with `serialization: "raw"`. |
+| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"initiator"` regardless of `mux.side`. |
 
 Each `call(input)` opens a new logical stream over that connection. `close()`
 tears down the streams and the channel.
@@ -106,6 +107,7 @@ Type: `Serve<ServePeerJsParams>`.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `peer` | `Peer` | A connected peer; the adapter listens for inbound `DataConnection`s. |
+| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"responder"` regardless of `mux.side`. |
 
 Returns an idempotent teardown.
 

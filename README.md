@@ -280,10 +280,11 @@ neither needs it.
 
 The shared, executable definition of "a correct adapter". Every adapter above
 ships a one-line test file calling `describeDuplexAdapter(name, makePair)`, and
-the suite asserts six levels: envelope round-trip up to 10 MiB (L0), concurrent
+the suite asserts seven levels: envelope round-trip up to 10 MiB (L0), concurrent
 calls (L1), half-close (L2), mid-stream cancellation running the handler's
-`finally` (L3), error propagation with stack and custom fields intact (L4), and
-idempotent teardown (L5). `makeLoopbackPair()` is the reference in-process pair
+`finally` (L3), error propagation with stack and custom fields intact (L4),
+idempotent teardown (L5), and flow control against a slow consumer at a small
+advertised window (L6). `makeLoopbackPair()` is the reference in-process pair
 the suite self-tests against.
 
 ## Putting it together
@@ -298,7 +299,7 @@ the suite self-tests against.
 | Browser ↔ browser HTTP + SSE, no server in the data path | `webrun-streams-signaling` to connect, `webrun-streams-webrtc` to carry, `webrun-http-streams` on top |
 | The same, but through an SFU when P2P won't connect | `webrun-streams-livekit` in place of `-webrtc` |
 | Unit tests for an RPC service | `webrun-rpc-http` with `fetch: (req) => handler(req)` — no network |
-| A new transport | `webrun-streams-conformance` — make L0–L5 pass |
+| A new transport | `webrun-streams-conformance` — make L0–L6 pass |
 | Deploying the same handler to a real edge runtime | `webrun-rpc-http` handler drops straight into Deno / Workers / Bun |
 
 ## Runnable demos

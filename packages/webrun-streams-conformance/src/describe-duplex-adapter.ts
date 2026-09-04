@@ -10,7 +10,7 @@ export interface DescribeDuplexAdapterOptions {
 }
 
 /**
- * Runs every conformance level (L0–L5) against the supplied `ConnectServePair`
+ * Runs every conformance level (L0–L6) against the supplied `ConnectServePair`
  * factory. Each adapter package in the `webrun-streams-*` family invokes this
  * from its own one-line Vitest file.
  */
@@ -210,6 +210,44 @@ export function describeDuplexAdapter(
         await collectBytes(out);
         await close();
         await expect(pair.close()).resolves.toBeUndefined();
+      });
+    });
+
+    describe("L6: flow control", () => {
+      it("delivers a body many times the advertised window to a slow consumer", async () => {
+        // A 16 KiB window against a 256 KiB body: the sender must exhaust its
+        // credit and wait for grants sixteen times over. An adapter that
+        // ignores the tuning runs this at its own defaults, where it degrades
+        // to an integrity check — that is stated in the README, not hidden.
+        const pair = await makePair({ mtu: 4096, maxStreamBuffer: 16 * 1024 });
+        try {
+          await pair.serve(echoHandler);
+          const size = 256 * 1024;
+          const body = new Uint8Array(size);
+          for (let i = 0; i < size; i++) body[i] = i & 0xff;
+
+          const { call, close } = await pair.connect();
+          const out = call([body]);
+          let received = 0;
+          let first = -1;
+          let last = -1;
+          for await (const chunk of out) {
+            if (chunk.byteLength === 0) continue;
+            if (first < 0) first = chunk[0] as number;
+            last = chunk[chunk.byteLength - 1] as number;
+            received += chunk.byteLength;
+            // Drain deliberately slowly, so the sender is stalled on credit
+            // for most of the transfer rather than streaming through.
+            await delay(1);
+          }
+
+          expect(received).toBe(size);
+          expect(first).toBe(0);
+          expect(last).toBe((size - 1) & 0xff);
+          await close();
+        } finally {
+          await pair.close();
+        }
       });
     });
   });
