@@ -2905,7 +2905,7 @@ was meant to remove, one layer down. Do not record `b6d4683` as having achieved
 runnable browser conformance; it did not.
 
 ```bash
-pnpm install                       # from the UMBRELLA root; see the note below
+pnpm install    # from the ASSEMBLY root: worktrees/dev/ — NOT the umbrella root
 ```
 
 - [ ] **Step 6a: Verify the config now loads.** The check is the lockfile
@@ -2914,13 +2914,15 @@ pnpm install                       # from the UMBRELLA root; see the note below
 
 ```bash
 node -e 'const {readFileSync}=require("node:fs");
-const s=readFileSync(process.env.UMBRELLA_LOCK,"utf8");
+const s=readFileSync(process.env.ASSEMBLY_LOCK,"utf8");
 const m=s.match(/^  workspaces\/webrun-wire\/packages\/webrun-streams-webrtc:[\s\S]*?(?=\n  \S)/m);
-console.log(/^\s+.@vitest\/browser-playwright.:/m.test(y) ? "OK: importer has the dep" : "MISSING: rerun pnpm install at the umbrella root")'
+console.log(m && /^\s+.@vitest\/browser-playwright.:/m.test(m[0]) ? "OK: importer has the dep" : "MISSING: rerun pnpm install at the assembly root")'
 ```
 
-Expected: `OK: importer has the dep` (set `UMBRELLA_LOCK` to the umbrella's
-`pnpm-lock.yaml`). Then:
+Expected: `OK: importer has the dep` (set `ASSEMBLY_LOCK` to
+`worktrees/dev/pnpm-lock.yaml`). As first written this snippet bound `m` and
+then tested `y`, an undefined identifier — it threw `ReferenceError` rather than
+reporting either outcome, so it had never been run. Then:
 
 ```bash
 pnpm --filter @statewalker/webrun-streams-webrtc exec playwright install chromium
@@ -2930,10 +2932,30 @@ pnpm --filter @statewalker/webrun-streams-webrtc test:browser
 Expected: the config **loads** — both `[UNRESOLVED_ENTRY] Cannot resolve entry
 module vitest.browser.config.ts` and `ERR_MODULE_NOT_FOUND` are gone — and the
 run then fails somewhere later, on the missing pair helper. **This outcome is
-unmeasured**: `pnpm install` at the umbrella root is a mutating, repo-wide
-operation that the work producing this plan did not perform, and no browser was
-available. Do not predict the message; record the one you get, and if the
-failure is still at config load, say so rather than moving on.
+**MEASURED during execution, and this step's premise was wrong twice over.**
+
+First, the install root: the umbrella root's `pnpm-workspace.yaml` globs
+`workspaces/*`, and **no `workspaces/` directory exists there** — the assembly
+lives at `worktrees/dev/`, which has its own `pnpm-workspace.yaml` listing
+`workspaces/webrun-wire/packages/*`. `pnpm install` at the umbrella root is a
+no-op ("Already up to date", lockfile md5 unchanged). The authoritative lockfile
+is `worktrees/dev/pnpm-lock.yaml`.
+
+Second, that lockfile **already carries the importer entry**: `pnpm install` at
+the assembly root also reports "Already up to date", and
+`packages/webrun-streams-webrtc/node_modules/@vitest/browser-playwright` is
+linked. So the claim that the lockfile "was never regenerated" is stale.
+
+Because `.gitignore:12` excludes `worktrees/`, that lockfile is **not tracked**,
+so this step has no tracked side effect anywhere — there is nothing to leave
+pending for a human to review.
+
+The real remaining blocker was one this step did not name: the Playwright
+**browser binary** was absent (`browserType.launch: Executable doesn't exist at
+~/.cache/ms-playwright/chromium_headless_shell-1234/...`). After
+`playwright install chromium` (114.7 MiB), all three packages reach the same
+point — config loads, chromium launches, and the run fails on the missing pair
+helper.
 
 What is verified, and is why this step cannot end green:
 `tests/conformance.test.ts` in each of the three packages does
@@ -2948,9 +2970,9 @@ that and do not claim the suites run.
 
 Note on `pnpm install`: this repository's `pnpm-lock.yaml` is gitignored and the
 authoritative lockfile is the umbrella's, because the cross-repo `workspace:*`
-dependencies cannot resolve from here. Install from the umbrella root. That also
-means the only file this task changes is a file **outside this repository**,
-which is why Step 7 has nothing to commit here.
+dependencies cannot resolve from here. Install from the **assembly root**
+(`worktrees/dev/`), whose lockfile is gitignored. That is why Step 7 has nothing
+to commit here — and, as measured, nothing to leave pending elsewhere either.
 
 - [ ] **Step 7: Confirm there is nothing to commit here**
 
