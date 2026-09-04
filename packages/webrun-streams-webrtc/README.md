@@ -137,12 +137,17 @@ The parameter type shared by `connect` and `serve`.
 
 ## Conformance
 
-Passes [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
-against a Node `@roamhq/wrtc` peer pair — concurrency, half-close, mid-stream
+Runs [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
+against a real `RTCPeerConnection` pair — concurrency, half-close, mid-stream
 cancellation, error propagation and idempotent teardown.
 
+The suite is **browser-gated**: `tests/conformance.test.ts` checks for a
+`window` global and registers the suite only there, so the plain Node run
+reports it as skipped.
+
 ```sh
-pnpm --filter @statewalker/webrun-streams-webrtc test
+pnpm --filter @statewalker/webrun-streams-webrtc test:browser   # runs the suite
+pnpm --filter @statewalker/webrun-streams-webrtc test           # reports it skipped
 ```
 
 ## Dependencies

@@ -120,12 +120,17 @@ The two parameter types above.
 
 ## Conformance
 
-Passes [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
-against a local broker (the [`peer`](https://www.npmjs.com/package/peer) server)
-with `@roamhq/wrtc` supplying WebRTC in Node.
+Runs [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
+against a local broker (the [`peer`](https://www.npmjs.com/package/peer) server).
+
+The suite is **browser-gated**. `@roamhq/wrtc` covers the WebRTC primitives in
+Node, but the full PeerJS handshake hangs there, so
+`tests/conformance.test.ts` registers the suite only when a `window` global is
+present; the plain Node run reports it as skipped.
 
 ```sh
-pnpm --filter @statewalker/webrun-streams-peerjs test
+pnpm --filter @statewalker/webrun-streams-peerjs test:browser   # runs the suite
+pnpm --filter @statewalker/webrun-streams-peerjs test           # reports it skipped
 ```
 
 ## Dependencies
