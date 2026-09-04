@@ -325,34 +325,51 @@ pnpm lint              # biome check .
 pnpm format:fix        # biome check --write --unsafe .
 ```
 
-Tooling: **pnpm workspace**, **turborepo**, **biome**, **vitest**, **rolldown**
-(**tsdown** in `webrun-streams` and `webrun-msgpack`), **TypeScript**. No eslint
-/ prettier / rollup / mocha.
+Tooling: **pnpm workspace**, **turborepo**, **biome**, **vitest**, **rolldown**,
+**TypeScript**. Every package builds the same way — `rolldown -c` for the bundle,
+`tsc --emitDeclarationOnly` for the types. No eslint / prettier / rollup / mocha.
 
 ## Packaging
 
-All packages are ESM-only and publish both `src` and `dist`. What the `exports`
-map actually resolves to differs by package, and it is worth knowing which you
-are consuming:
+All fifteen packages are ESM-only and resolve identically:
 
-| Consumed as | Packages |
-| --- | --- |
-| **`./src/index.ts`** — TypeScript source; your bundler compiles it | `webrun-streams`, `webrun-msgpack`, `webrun-http-streams`, and all seven `webrun-streams-*` adapters plus `-conformance` |
-| **`./dist/index.js`** — pre-built ESM bundle + `.d.ts` | `webrun-http-browser`, `webrun-rpc-http`, `webrun-site-builder`, `webrun-site-host` |
+```json
+"exports": {
+  ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+}
+```
 
-Consuming TypeScript source means the consumer needs a TS-aware build step; it
-also means no stale build artifacts and full type fidelity inside the workspace.
+Consumers get a built ESM bundle plus generated `.d.ts` — no TypeScript-aware
+build step required on their side, and `node16` / `nodenext` resolution works.
+Both `src` and `dist` ship in `files`, so sources remain available for
+debugging and source maps.
 
-Bundles are still produced for every package — rolldown emits `dist/index.js`,
-tsdown emits `dist/index.mjs` — and are included in `files`. Note that most
-rolldown configs mark `@statewalker/webrun-streams` (and vendor peers such as
-`ws`, `libp2p`, `livekit-client`, `peerjs`) **external**, so those bundles are
-not self-contained: bare specifiers survive into the output and need resolving.
-The four fully-inlined bundles are `webrun-rpc-http`, `webrun-site-builder`,
-`webrun-site-host` and `webrun-streams-signaling`.
+**Bundle externals** are derived from each package's own manifest by
+[`rolldown.preset.js`](./rolldown.preset.js): everything declared as a
+`dependency` or `peerDependency` stays external, and nothing else does. npm
+installs those for the consumer, so inlining them would only ship a second
+copy — and a second copy of `@statewalker/webrun-streams` means a second
+`TransportClosedError` class, quietly breaking `instanceof` across package
+boundaries. Deriving the list from the manifest also stops it drifting, which
+is what had happened: a deleted `@statewalker/webrun-ports`, a `peerjs` that
+was never imported, a missing `@multiformats/multiaddr`, and four packages
+inlining their workspace dependencies by omission.
 
-`webrun-http-browser` additionally ships IIFE bundles for its SW runtimes
-(`/relay-sw`, `/sw-worker`), loadable via classic `importScripts(...)`.
+**One documented exception:** `webrun-http-browser` inlines everything. Its own
+shipped HTML loads the bundle straight from a static host with no import map
+(`public-relay/relay.html` and both `demo/*.html` do
+`import … from "../dist/index.js"`), and its two IIFE service-worker runtimes
+are loaded through classic `importScripts(...)`, which cannot resolve a bare
+specifier at all. The trade-off is a duplicated copy of `webrun-streams` inside
+that bundle. It also ships IIFE bundles for those two SW runtimes
+(`/relay-sw`, `/sw-worker`).
+
+**Inside the workspace**, tooling short-circuits to source rather than `dist`:
+`tsconfig.base.json` maps every `@statewalker/webrun-*` to `packages/*/src` via
+`paths`, and [`vitest.config.ts`](./vitest.config.ts) builds the matching
+`resolve.alias` list. Without that, tests would resolve through the `exports`
+map into `dist` and silently run against the last build instead of the working
+tree. Published consumers are unaffected — they only ever see `dist`.
 
 ## Publishing
 

@@ -387,14 +387,14 @@ strict one-way converters: no queuing strategy tricks, no transform.
 
 **Zero runtime dependencies.**
 
-Dev: TypeScript, vitest, tsdown, rimraf, `@types/node`
+Dev: TypeScript, vitest, rolldown, rimraf, `@types/node`
 (catalog versions from the monorepo root).
 
 ## Scripts
 
 ```sh
 pnpm test        # vitest run
-pnpm run build   # tsdown (publishes src + compiled dist)
+pnpm run build   # rolldown + tsc --emitDeclarationOnly (ships src + dist)
 pnpm lint        # biome check
 ```
 

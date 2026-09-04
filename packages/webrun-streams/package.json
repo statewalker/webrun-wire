@@ -16,14 +16,17 @@
     "directory": "packages/webrun-streams"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
     "src"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -35,12 +38,13 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "rimraf": "catalog:",
-    "tsdown": "catalog:",
+    "rolldown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "sideEffects": false,
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "types": "./dist/index.d.ts"
 }

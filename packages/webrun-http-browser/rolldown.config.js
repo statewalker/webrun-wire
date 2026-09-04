@@ -1,5 +1,18 @@
 import { defineConfig } from "rolldown";
 
+// EXCEPTION to the workspace-wide externals policy in ../../rolldown.preset.js.
+//
+// Every other package externalises its declared dependencies. This one must
+// not: its own shipped HTML loads the bundle straight from a static host with
+// no import map — `public-relay/relay.html`, `demo/demo-1.html` and
+// `demo/demo-2.html` all do `import ... from "../dist/index.js"` — and the two
+// IIFE service-worker runtimes are loaded through classic `importScripts(...)`,
+// which cannot resolve a bare specifier at all. Bare specifiers surviving into
+// these outputs would break the relay.
+//
+// The cost is a duplicated copy of `@statewalker/webrun-streams` in this
+// bundle, so do not rely on `instanceof` across this package's boundary.
+//
 // Every output is a single, fully self-contained file:
 // - ESM bundles (index.js, sw.js) can be loaded from `<script type="module">`
 //   with no import map, no bundler, and no sibling chunk files.

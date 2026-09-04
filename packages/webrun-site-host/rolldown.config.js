@@ -1,13 +1,14 @@
 import { defineConfig } from "rolldown";
+import { externalsFrom } from "../../rolldown.preset.js";
 
-// Single self-contained ESM bundle at dist/index.js.
-// `@statewalker/webrun-files` is a peer dep (type only) and must not be inlined.
+// Single ESM bundle at dist/index.js. Everything this package declares as a
+// dependency or peer dependency stays external — see ../../rolldown.preset.js.
 export default defineConfig({
   input: "src/index.ts",
   output: {
     file: "dist/index.js",
     format: "esm",
   },
-  external: ["@statewalker/webrun-files"],
   treeshake: true,
+  external: externalsFrom(import.meta.url),
 });

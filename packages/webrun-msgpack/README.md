@@ -123,7 +123,7 @@ Zero-length chunks are tolerated and simply no-op through the loop. Truncated tr
 
 - [`@ygoe/msgpack`](https://github.com/ygoe/msgpack.js) — single-file msgpack implementation (≈7 kB gzipped), no transitive deps.
 
-Dev: TypeScript, vitest, tsdown, rimraf (catalog versions from the monorepo root).
+Dev: TypeScript, vitest, rolldown, rimraf (catalog versions from the monorepo root).
 
 ### Constraints
 
@@ -135,7 +135,7 @@ Dev: TypeScript, vitest, tsdown, rimraf (catalog versions from the monorepo root
 
 ```sh
 pnpm test        # vitest run (25 tests)
-pnpm run build   # tsdown
+pnpm run build   # rolldown + tsc --emitDeclarationOnly
 pnpm lint        # biome check
 ```
 

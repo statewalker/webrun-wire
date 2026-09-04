@@ -1,6 +1,8 @@
 import { defineConfig } from "rolldown";
+import { externalsFrom } from "../../rolldown.preset.js";
 
-// Single self-contained ESM bundle at dist/index.js.
+// Single ESM bundle at dist/index.js. Everything this package declares as a
+// dependency or peer dependency stays external — see ../../rolldown.preset.js.
 export default defineConfig({
   input: "src/index.ts",
   output: {
@@ -8,4 +10,5 @@ export default defineConfig({
     format: "esm",
   },
   treeshake: true,
+  external: externalsFrom(import.meta.url),
 });
