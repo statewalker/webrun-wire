@@ -54,3 +54,7 @@ pnpm-lock.yaml
 
 # adversary-loop audit trails
 .adversary-loop/
+
+# vitest browser-mode failure debris
+.vitest-attachments/
+**/tests/__screenshots__/

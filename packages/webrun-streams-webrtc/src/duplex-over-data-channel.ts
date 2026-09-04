@@ -130,15 +130,46 @@ async function* runStream(
     }
   })();
 
+  let inboundDrained = false;
   try {
     for await (const chunk of incoming.iterate()) {
       yield chunk;
     }
+    inboundDrained = true;
   } finally {
     dc.removeEventListener("message", onMessage);
     dc.removeEventListener("close", onClose);
-    // Wait for outbound to settle so close() doesn't truncate in-flight sends.
-    await outbound.catch(() => {});
+    // Wait for outbound to settle so an early exit doesn't truncate in-flight
+    // sends — but ONLY on an early exit.
+    //
+    // Awaiting it unconditionally deadlocks a responder. `serve` feeds the
+    // handler from the values this generator yields and closes the handler's
+    // input only once this generator completes. So on a normal finish the
+    // cycle is: inbound ends -> we await outbound -> outbound is draining the
+    // handler's output -> the handler is blocked on its input -> its input is
+    // closed only after we return. Nothing moves, and every test that runs a
+    // request to completion hangs.
+    //
+    // When inbound drained on its own the peer has already said it is done, so
+    // there is nothing of theirs left to truncate; outbound keeps running on
+    // its own and `maybeClose` still closes the channel once both halves end.
+    if (!inboundDrained) {
+      await outbound.catch(() => {});
+      // The consumer walked away mid-response (`.return()` on the generator),
+      // or the peer errored. Either way this call is over while the peer may
+      // still be producing, and a DataChannel has no half-close to say so —
+      // `TYPE_END` means "I am done sending", which the outbound pump has
+      // already said and which the peer answers by carrying on. Closing the
+      // channel is the only cancellation signal available: the responder's
+      // `onClose` then ends its inbound queue, which closes the handler's
+      // input and runs the handler's `finally`. Without this, cancellation is
+      // silently local and the handler leaks until the connection drops.
+      try {
+        dc.close();
+      } catch {
+        /* already closing */
+      }
+    }
   }
 }
 

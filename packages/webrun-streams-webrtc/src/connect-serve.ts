@@ -62,15 +62,23 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
 export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
   const onChannel = (ev: RTCDataChannelEvent): void => {
     const dc = ev.channel;
+    let inputFromPeer: PeekInput | null = null;
     void (async () => {
       await waitForOpen(dc);
-      const inputFromPeer = peekInput(dc);
+      inputFromPeer = peekInput(dc);
       const out = handler(inputFromPeer.input);
       for await (const chunk of duplexOverDataChannel(dc, out)) {
         inputFromPeer.deliver(chunk);
       }
       inputFromPeer.done();
-    })();
+    })().catch(() => {
+      // A caller that cancels mid-response closes the DataChannel, which
+      // surfaces here as TransportClosedError. That is the cancellation
+      // working, not a fault: this task is fire-and-forget, so without a
+      // catch it becomes an unhandled rejection that fails the page. Closing
+      // the handler's input is what runs the handler's own `finally`.
+      inputFromPeer?.done();
+    });
   };
   pc.addEventListener("datachannel", onChannel);
   let torn = false;
