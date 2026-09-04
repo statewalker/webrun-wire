@@ -1,7 +1,10 @@
-# `webrun-rpc` — automatic client/server stubs over the port primitives
+# `webrun-rpc` — automatic client/server stubs over any transport
 
 Date: 2026-09-04
 Status: Draft — awaiting review
+Supersedes: the 2026-09-04 first draft of this file, which scoped RPC to
+`MessagePort` and placed `MessageTarget` in `webrun-streams-port`. Both are
+reversed here; see Decisions 3 and 7.
 
 ## Origin
 
@@ -10,8 +13,19 @@ webrun-wire as a `webrun-rpc` package, convert it to TypeScript, check for
 functional duplication with the other packages, and use the result to build
 generic client/server adapters with `FilesApi` on top.
 
-Investigation showed the port is already complete. What follows is what the
-work turns out to be instead.
+Investigation showed the port is already complete. What follows is the work the
+comparison surfaced instead.
+
+## Requirements
+
+1. **Automatic client/server stub generation.** Given an object, expose it; given
+   a connection, get a typed client. No hand-written protocol per service.
+2. **Works over binary transports, not only `MessagePort`.** WebSocket, WebRTC,
+   libp2p and LiveKit are in scope, not deferred. This is a first-class
+   requirement, not a later extension.
+3. **Carries `FilesApi`.** Including `read`/`list` returning `AsyncIterable`,
+   and `write` *taking* one — a streaming argument.
+4. **No functional duplication** with the existing packages.
 
 ## Finding 1 — the port already happened
 
@@ -28,59 +42,93 @@ TypeScript:
 | `serializeError`, `deserializeError` | `webrun-streams/src/errors.ts` |
 
 The two iterator helpers and the error codec were promoted into
-`webrun-streams`, the transport-agnostic foundation, rather than staying in the
-port package — correctly, since none of them mention a port. Upstream's
+`webrun-streams` — correctly, since none of them mention a port. Upstream's
 `@statewalker/utils` dependency was dropped; `recieveIterator` is built on the
 local `newAsyncGenerator`. Upstream's four test files became six (34 tests).
 
 The local code is a superset, not a transcription:
 
 - `callPort` gained `AbortSignal` support and a port-close signal. Upstream
-  hangs until its per-call timeout on a transport-level disconnect, and higher
-  layers raise that timeout to roughly 24 days.
+  hangs until its per-call timeout on a transport-level disconnect, and
+  `call-port.ts:49` notes that higher layers raise that timeout to ~24 days
+  (`2147483647` ms).
 - `callPort` fixed an unhandled-rejection leak in its cleanup chain.
-- `callBidi` cancels the inner iterator when the outer call rejects, so a
-  failed call no longer hangs the consumer.
-- `serializeError` fixed a real upstream bug: upstream writes
-  `message: error`, assigning the `Error` object where `error.message` was
-  intended.
+- `callBidi` cancels the inner iterator when the outer call rejects.
+- `serializeError` fixed a real upstream bug: upstream writes `message: error`,
+  assigning the `Error` object where `error.message` was intended.
 
-**No porting work remains.** The rest of this document describes the work the
-comparison actually surfaced.
+**No porting work remains.**
 
-## Finding 2 — three request/response RPC implementations
+## Finding 2 — four request/response implementations
 
-| # | implementation | package | mechanism |
+| # | implementation | location | mechanism |
 | --- | --- | --- | --- |
-| 1 | `callPort` / `listenPort` | `webrun-streams-port` | `callId` + `channelName` correlation on a shared port; timeout, `AbortSignal`, close-signal |
-| 2 | `callChannel` / `handleChannelCalls` | `webrun-http-browser` (`src/core/data-calls.ts`) | a fresh `MessageChannel` per call, reply on `port1`; no timeout, no cancellation |
+| 1 | `callPort` / `listenPort` | `webrun-streams-port` | `callId` + `channelName` correlation; timeout, `AbortSignal`, close-signal |
+| 2 | `callChannel` / `handleChannelCalls` | `webrun-http-browser/src/core/data-calls.ts` | fresh `MessageChannel` per call, reply on `port1`; no timeout, no cancellation |
 | 3 | `newRpcClient` / `newRpcServer` | `webrun-rpc-http` | service descriptors over `Request`/`Response` |
+| 4 | vendored `call-port.ts` etc. | `webrun-vcs/packages/utils/src/ports/` | a second copy of 1, unhardened |
 
-1 and 2 solve the same problem by different means, in the same repository, and
-share the same `serializeError`/`deserializeError`. 3 is HTTP-shaped and stands
-somewhat apart.
+Copy 4 is 632 LOC across twelve files. It lacks the hardening of 1 — no
+`AbortSignal` in `call-port.ts`, no `close-signal.ts` — and it spells the
+function `receive` where webrun-wire spells it `recieve`. It is **not exported**
+from `webrun-vcs/packages/utils/src/index.ts` (the `@statewalker/vcs-utils`
+package), and nothing outside `src/ports/` imports it; only its own test file
+does. It is dead code, removable by deletion.
 
-There are also two streaming tiers over a single `MessagePort`: the
-`emulateMux` byte tier and the typed-value tier (`ioSend`/`ioHandle`,
-`callBidi`/`listenBidi`). The `webrun-streams-port` README currently instructs
+There are also two streaming tiers over one `MessagePort`: the `emulateMux`
+byte tier and the typed-value tier. The `webrun-streams-port` README instructs
 readers to "pick one per port", which documents the overlap rather than
 resolving it.
 
-## Finding 3 — the primitives are not generic
+## Finding 3 — no consumers, so no back-compat burden
 
-All fourteen signature sites in `webrun-streams-port` hardcode
-`port: MessagePort`. The structural abstraction that would free them —
-`MessageTarget` / `MessageSource` / `MessageSink` — already exists, but in
-`webrun-http-browser/src/core/message-target.ts`, a layer *above*. That is why
-implementation 2 above was born generic and implementation 1 was not: the
-generic one was written in the layer that happened to hold the abstraction.
+No `package.json` in the assembly depends on `@statewalker/webrun-streams-port`
+other than the package itself. Combined with copy 4 being dead code, the typed
+RPC tier has **zero production consumers anywhere**.
 
-## Finding 4 — reflection over a class instance
+This materially lowers the risk of every decision below: the tier can be moved,
+renamed and restructured without a migration.
 
-The reference implementation in `statewalker-sandbox/packages/service-rpc`
-builds its descriptor with `for (const fieldName in obj)`. Class prototype
-methods are non-enumerable, so `for...in` over a class instance yields `[]`.
-Verified:
+## Finding 4 — the RPC tier never transfers ports
+
+Every `postMessage` in the RPC tier sends a plain object with **no transfer
+list**:
+
+```js
+port.postMessage({ type: "request", channelName, callId, params });   // call-port.ts
+port.postMessage({ callId, channelName, type, result, error });        // listen-port.ts
+port.postMessage({ type: CANCEL_CHANNEL_TYPE, channelName });          // cancel-channel.ts
+```
+
+This is what makes Requirement 2 achievable. A protocol that transferred
+`MessagePort`s could not cross a byte transport at all; this one can, given a
+codec.
+
+The only `MessagePort`-specific machinery in the tier is `close-signal.ts`, a
+`WeakMap<MessagePort, AbortSignal>` that needs rekeying to `MessageTarget`.
+`byte-channel.ts` and `connect-serve.ts` do need a real `MessagePort`, but they
+belong to the Duplex tier, not the RPC tier.
+
+Note that `port: MessagePort` appears at 14 signature sites, while `MessagePort`
+appears 25 times in total — the retyping is larger than the signature count
+alone suggests.
+
+## Finding 5 — `Duplex`, not `ByteChannel`, is the universal seam
+
+| adapter | exposes `byteChannelFrom*` | exposes `connect()` → `Duplex` |
+| --- | --- | --- |
+| `-ws`, `-port`, `-livekit`, `-peerjs` | yes | yes |
+| `-webrtc`, `-libp2p` | **no** | yes |
+
+The two natively-multiplexed transports expose no `ByteChannel`. A bridge built
+on `ByteChannel` would reach four of six adapters and miss exactly the two
+peer-to-peer ones. The bridge must therefore take a `Duplex`.
+
+## Finding 6 — reflection over a class instance
+
+`statewalker-sandbox/packages/service-rpc` builds its descriptor with
+`for (const fieldName in obj)`. Class prototype methods are non-enumerable, so
+`for...in` over a class instance yields `[]`. Verified:
 
 ```js
 class MemFiles { async stats(p){} async *read(p){} async write(p,c){} }
@@ -88,186 +136,301 @@ const inst = new MemFiles();
 [...(function*(){ for (const k in inst) yield k; })()]  // []
 ```
 
-`FilesApi` implementations are classes (`MemFilesApi`), so that descriptor
-generator cannot see them at all. The prototype walk in
-`webrun-rpc-http/src/get-instance-methods.ts` — `Object.getOwnPropertyNames`
-up the prototype chain, skipping `constructor` — returns
-`["stats", "read", "write"]` and is the correct basis.
+`FilesApi` implementations are classes (`MemFilesApi`), so that generator cannot
+see them at all. The prototype walk in
+`webrun-rpc-http/src/get-instance-methods.ts` — `Object.getOwnPropertyNames` up
+the chain, skipping `constructor` — returns `["stats", "read", "write"]` and is
+the correct basis.
 
-Separately, `service-rpc` classifies a method as streaming via
-`fn instanceof AsyncGeneratorFunction`. `MemFilesApi` declares `async *read`
-and `async *list`, so this happens to work today. But `FilesApi` promises
-`AsyncIterable`, not `AsyncGenerator`: a backend returning an iterable from a
-plain `async` method would be misclassified as unary, and only at runtime, only
-on that backend. See Decision 1 for how this is handled.
+`service-rpc` classifies streams via `fn instanceof AsyncGeneratorFunction`.
+`MemFilesApi` declares `async *read` and `async *list`, so this works today. But
+`FilesApi` promises `AsyncIterable`, not `AsyncGenerator`: a backend returning
+an iterable from a plain `async` method would be misclassified. See Decision 1.
 
 `service-rpc` does already cover all four call shapes, including
-client-streaming detected at runtime with `isAsyncIterable(arg)`. That shape
-matters here, because `FilesApi.write(path, content: AsyncIterable)` is a
-streaming *argument* — the shape most RPC layers omit.
+client-streaming detected at runtime with `isAsyncIterable(arg)` — the shape
+`FilesApi.write` needs.
 
-## Finding 5 — both streaming tiers are stop-and-wait
+## Finding 7 — both streaming tiers are stop-and-wait
 
-This is the most consequential finding, and it corrects an assumption made
-earlier in the design discussion.
-
-`emulateMux`'s outbound pump sends one ≤MTU frame and then awaits its ACK
-before sending the next (`webrun-streams/src/emulate-mux.ts`, `pumpOutbound`).
-The code states the design in its own comment:
+`emulateMux`'s outbound pump sends one ≤MTU frame and awaits its ACK before
+sending the next (`webrun-streams/src/emulate-mux.ts`, `pumpOutbound`). Its own
+comment states the design:
 
 > Flow control is the peer holding one in-flight DATA per stream and waiting
 > for its ACK — voluntary, and a hostile peer simply does not.
 
 `maxStreamBuffer` is a receiver-side guard against a flooding peer, not a send
-window. The ACK is emitted only after the consumer drains the chunk, so the
-round-trip includes consumer processing time.
+window. The ACK is emitted only after the consumer drains, so the round trip
+includes consumer processing.
 
-The typed-value tier has the same shape at a different granularity.
-`webrun-streams-port/src/send.ts` documents it directly: "one `callPort`
-round-trip per chunk", with the loop strictly sequential.
+The typed tier has the same shape at a different granularity;
+`webrun-streams-port/src/send.ts` documents "one `callPort` round-trip per
+chunk", with a strictly sequential loop.
 
-So both tiers have an effective send window of **1** — `emulateMux` per ≤64 KiB
-frame, the RPC tier per value. Within a single logical stream, throughput is
-round-trip-bound. A 100 MB transfer at 64 KiB per round trip is roughly 1600
-sequential round-trips; at 30 ms RTT that is about 48 seconds of latency alone.
+Both tiers therefore have an effective send window of **1** — `emulateMux` per
+≤64 KiB frame, the RPC tier per value. Within one logical stream, throughput is
+round-trip-bound: 100 MB at 64 KiB per round trip is ~1600 sequential round
+trips, about 48 seconds of pure latency at 30 ms RTT.
 
-One mitigation already exists: the window is 1 *per stream*, and `emulateMux`
-permits up to 256 concurrent streams. Concurrent ranged reads therefore scale
-today; a single sequential read does not.
+One mitigation exists: the window is 1 *per stream*, and `DEFAULT_MAX_STREAMS`
+is 256, so concurrent ranged reads already scale. A single sequential read does
+not.
 
 ## Decisions
 
-Recorded with the reasoning that produced them.
-
 ### 1. Descriptors by pure reflection, corrected at call time
 
-Method discovery is fully automatic — no declarations. The descriptor is built
-by prototype walk (Finding 4), and shape is guessed with
-`instanceof AsyncGeneratorFunction`.
+Method discovery is fully automatic. The descriptor is built by prototype walk
+(Finding 6); shape is guessed with `instanceof AsyncGeneratorFunction`.
 
-The guess is then corrected at runtime by two checks, which close the
+The guess is corrected at runtime by two checks, closing the
 `AsyncIterable`-vs-`AsyncGenerator` gap without reintroducing declarations:
 
-- **Client:** if any argument exposes `Symbol.asyncIterator`, use the
-  streaming path. This is what carries `FilesApi.write`.
-- **Server:** if a method classified `method` actually returns a value
-  exposing `Symbol.asyncIterator`, switch that call to the streaming path.
+- **Client:** if any argument exposes `Symbol.asyncIterator`, use the streaming
+  path. This carries `FilesApi.write`.
+- **Server:** if a method classified `method` actually returns a value exposing
+  `Symbol.asyncIterator`, switch that call to the streaming path.
 
-Reflection becomes a fast path rather than a contract, so a misclassification
-degrades to a slower path rather than to a failure.
+Reflection is a fast path, not a contract, so a misclassification degrades to a
+slower path rather than a failure.
 
-*Known limit:* a method added to the service after descriptor exchange is
-invisible to the client. Acceptable for a fixed interface such as `FilesApi`.
+*Known limit:* a method added after descriptor exchange is invisible to the
+client. Acceptable for a fixed interface such as `FilesApi`.
 
-### 2. No comlink
+### 2. Value contract: msgpack-serialisable, on every transport
+
+Arguments and results must be msgpack-serialisable: plain values plus
+`Uint8Array`. **Not** supported, on any transport, including `MessagePort`
+where the platform would allow them:
+
+- `Map`, `Set`, `Date`, `RegExp`, cyclic references;
+- transferables (`ArrayBuffer` transfer, port passing);
+- object aliasing — `{a: x, b: x}` may arrive with `a !== b`.
+
+The contract is deliberately the *narrower* of the two transports' capabilities
+so that a service behaves identically over a port and over a socket. The
+alternative — letting each transport carry what it natively can — permits a
+service to work locally and corrupt data remotely, with the failure appearing
+only when someone changes transport.
+
+### 3. Encoding is per-transport; conformance runs both
+
+Structured clone over a `MessageTarget` that is a real `MessagePort` — no
+encode, no copy, `Uint8Array` passes natively. Msgpack only where bytes are
+required.
+
+The testing gap this creates (a `MessageChannel` test never exercises the
+codec) is closed by Decision 9: RPC conformance runs over both a
+`MessageChannel` **and** a msgpack-over-`Duplex` pair, so the codec is
+exercised on every CI run.
+
+### 4. No comlink
 
 `service-rpc` uses comlink; `webrun-rpc` will not. The webrun-wire packages
-carry essentially no runtime dependencies, `callPort`/`listenPort` already
-perform comlink's request/response role with timeout, `AbortSignal` and
-close-signal handling that comlink lacks, and `service-rpc` had already
-disabled comlink's `AsyncGenerator` transfer handler for WebSocket
-compatibility — routing all streaming through its own protocol instead, which
-left comlink earning little.
+carry essentially no runtime dependencies; `call`/`listen` already perform
+comlink's request/response role with timeout, `AbortSignal` and close-signal
+handling that comlink lacks; and `service-rpc` had already disabled comlink's
+`AsyncGenerator` transfer handler for WebSocket compatibility, routing all
+streaming through its own protocol — leaving comlink earning little.
 
-### 3. `MessageTarget` lives in `webrun-streams-port`
+### 5. Codec fixed to msgpack
 
-Not promoted into `webrun-streams`. ADR-0004 establishes `Duplex` as the seam
-of the byte-oriented foundation; adding a structured-clone message seam beside
-it would put two different seams in one package. `MessageTarget` is a port
-abstraction and belongs in the port package.
+`messageTargetFromDuplex(call)` takes no codec parameter. A plug point would
+undermine Decision 2: JSON cannot carry `Uint8Array` without base64 inflation,
+and `FilesApi` depends on that type more than any other. `webrun-msgpack`
+already exists, has one dependency, and its 4-byte big-endian length prefix
+makes the bridge transport-independent — `decodeMsgpack` reassembles across
+chunk boundaries, so the same bridge works over a message-preserving WebSocket
+and a boundary-free libp2p stream alike.
 
-`webrun-http-browser` imports it from there instead of declaring its own copy.
-This adds a `webrun-http-browser -> webrun-streams-port` dependency, which is
-acyclic.
+Pluggability can be added later if a real need appears; removing it cannot.
 
-### 4. Flow control is fixed once, and shared
+### 6. One `Duplex` stream per RPC session
+
+`messageTargetFromDuplex(call)` opens a single bidirectional byte stream and
+carries the whole session over it. RPC correlates concurrent calls itself, via
+`callId` and `channelName`, exactly as it already does over a `MessagePort`.
+
+Rejected alternative: one transport stream per call. It would use the
+transport's native multiplexing, but it requires a `Connect` rather than a
+`Duplex`, does not map onto `MessageTarget` at all — so the port and binary
+paths would diverge into two designs — and it inherits the 256-stream cap.
+
+Since the session rides one stream, single-stream throughput is what matters,
+which is why Decision 8 is load-bearing rather than an optimisation.
+
+### 7. The RPC tier moves to `webrun-rpc`; `MessageTarget` to `webrun-streams`
+
+The typed RPC tier leaves `webrun-streams-port`, which becomes a pure transport
+adapter (`byteChannelFromMessagePort`, `connect`/`serve`) consistent with its
+siblings. This resolves the "two tiers in one package, pick one" overlap, and
+stops binary-transport users depending on the `MessagePort` adapter.
+
+`MessageTarget` / `MessageSource` / `MessageSink` move from
+`webrun-http-browser/src/core/message-target.ts` **down into `webrun-streams`**,
+where `webrun-rpc`, `webrun-http-browser` and `webrun-streams-port` can all use
+them without depending on one another. It is a four-interface, zero-runtime-code
+type module; it does not compete with `Duplex` as a transport seam, and
+`webrun-streams` already holds non-`Duplex` utilities (jsonl, text, collectors,
+`newAsyncGenerator`).
+
+Finding 3 makes this free: there is nothing to migrate.
+
+`MessagePort` is expected to satisfy `MessageTarget` structurally
+(`postMessage`, `addEventListener`, `start`, `close`), so the port path should
+need no adapter. To be confirmed when typing it; if the DOM overloads do not
+line up, a thin `messageTargetFromMessagePort` is added.
+
+### 8. One shared windowed flow-control core; default window 8
 
 Rather than adding a send window to the RPC tier alone — which would create the
 second flow-control implementation this investigation set out to avoid — the
 windowing logic is extracted into `webrun-streams` and used by both
-`emulateMux` and the RPC tier's `send`/`recieve`.
+`emulateMux` and the RPC tier.
 
-The change is a generalisation from a window of 1 to a window of N, with
-in-order reassembly, bounded by the existing `maxStreamBuffer`. It
-**preserves** end-to-end backpressure: ACK-after-drain still means a producer
+The change generalises a window of 1 to a window of N with in-order reassembly.
+It **preserves** end-to-end backpressure: ACK-after-drain still means a producer
 cannot outrun its consumer; the window grants N units of slack instead of 1.
-Defaulting N to 1 makes the first landing a strictly behaviour-preserving
-refactor.
 
-Ordering is carried differently in each tier, because each already has an
-identifier to extend:
+**The window is configurable and defaults to 8.** At 30 ms RTT that is roughly
+an 8× single-stream improvement (about 2 MB/s at N=1 versus 17 MB/s at N=8),
+costing `N × mtu` = 512 KiB in flight per stream at default MTU.
 
-- `emulateMux` frames are already per-stream and arrive in transport order on a
-  single channel, so a monotonic per-stream sequence number added to the DATA
-  and ACK frames is sufficient to match an ACK to its frame once more than one
-  is outstanding.
-- The RPC tier correlates by `callId`, which is already unique per chunk
-  because each chunk is its own `callPort` call. With a window greater than 1
-  those calls may resolve out of order, so `recieve` buffers by an added
-  per-channel sequence number and delivers in order.
+**Hard constraint:** the receiver tears down any stream buffering past
+`maxStreamBuffer` without being drained. With a window of N a sender
+legitimately has `N × mtu` outstanding, so `window × mtu ≤ maxStreamBuffer`
+must hold or lawful sender behaviour trips the abuse guard. At the defaults
+(64 KiB MTU, 8 MiB buffer) the ceiling is 128 frames. **This must be enforced
+at construction, not documented.**
 
-The shared core owns the window accounting — how many units may be outstanding,
-when a unit is released, and how a drained consumer returns credit. Each tier
-supplies its own framing and its own transmit/acknowledge callbacks.
+Ordering is carried differently per tier, each extending an identifier it
+already has:
 
-### 5. `webrun-rpc-http` is untouched
+- `emulateMux` gains a monotonic per-stream sequence number on DATA and ACK
+  frames, so an ACK can be matched once more than one frame is outstanding.
+- The RPC tier correlates by `callId`, already unique per chunk. With a window
+  greater than 1 those calls may resolve out of order, so `receiveValues`
+  buffers by an added per-channel sequence number and delivers in order.
+
+The shared core owns window accounting — how many units may be outstanding,
+when one is released, how a drained consumer returns credit. Each tier supplies
+its own framing and transmit/acknowledge callbacks.
+
+### 9. Names corrected during the move
+
+Finding 3 makes this the cheapest it will ever be, and carrying a misspelling
+into a new package would cement it.
+
+| today | becomes |
+| --- | --- |
+| `callPort` | `call` |
+| `listenPort` | `listen` |
+| `callBidi` | `callStream` |
+| `listenBidi` | `listenStream` |
+| `ioSend` | `exchange` |
+| `ioHandle` | `handleExchange` |
+| `send` / `recieve` | `sendValues` / `receiveValues` |
+| `recieveIterator` (in `webrun-streams`) | `receiveIterator` |
+
+No deprecated aliases: 0.x semver permits the break, and every consumer is in
+this repository and updated in the same change. `@statewalker/webrun-streams` is
+published (0.1.0, 0.1.1), so `receiveIterator` is a breaking rename of a
+published symbol; its only importers are
+`webrun-http-browser/src/core/data-channels.ts` and tests.
+
+**Public surface of `webrun-rpc`** is limited to six exports: `call`, `listen`,
+`callStream`, `listenStream`, `exposeService`, `newServiceClient`. `exchange`,
+`handleExchange`, `sendValues` and `receiveValues` stay internal — `callStream`
+already composes them. Every exported name is a compatibility commitment, and
+internals must stay free to change while the windowed flow control settles.
+
+### 10. `webrun-rpc-http` untouched
 
 Whether it can become a transport binding of `webrun-rpc` is deferred until the
-core exists and the shared abstraction has proven itself.
+core exists.
 
 ## Design
 
 ### Layering
 
 ```
-webrun-streams        newAsyncGenerator, sendIterator/recieveIterator,
+webrun-streams        newAsyncGenerator, sendIterator/receiveIterator,
                       IteratorChunk, serializeError/deserializeError,
                       emulateMux, windowed flow-control core   [new]
-      ▲
-webrun-streams-port   MessageTarget/MessageSource/MessageSink  [moved in]
-                      callPort/listenPort, callBidi/listenBidi,
-                      ioSend/ioHandle, send/recieve
-                      retyped MessagePort -> MessageTarget
-      ▲
-webrun-rpc            descriptor + automatic stub generation   [new]
+                      MessageTarget/MessageSource/MessageSink  [moved in]
+      ▲                                    ▲
+      │                                    │
+webrun-streams-port   webrun-msgpack   webrun-http-browser
+(pure adapter)              ▲          (imports MessageTarget)
+                            │
+                        webrun-rpc
+                        call/listen, callStream/listenStream,
+                        exposeService/newServiceClient,
+                        messageTargetFromDuplex
 ```
+
+`webrun-rpc` depends on `webrun-streams` and `webrun-msgpack`. It does **not**
+depend on `webrun-streams-port`.
 
 ### Public API
 
 ```ts
 exposeService<T extends object>(target: MessageTarget, service: T): () => void;
 newServiceClient<T extends object>(target: MessageTarget): Promise<Remote<T>>;
+
+messageTargetFromDuplex(call: Duplex): MessageTarget;
 ```
 
-`Remote<T>` maps each method of `T`: a method returning `R` becomes one
-returning `Promise<Awaited<R>>`, and a method returning `AsyncIterable<R>`
-keeps that return type. Argument types are preserved.
+`Remote<T>` maps each method of `T`: one returning `R` becomes one returning
+`Promise<Awaited<R>>`; one returning `AsyncIterable<R>` keeps that return type.
+Argument types are preserved.
 
-The descriptor is pushed by the server as its first message on `exposeService`,
-and `newServiceClient` resolves once it arrives. Pushing rather than requesting
-avoids a round-trip and a race where the client asks before the server is
-listening. `newServiceClient` therefore does not resolve until a server is
-present; callers that need a bounded wait pass an `AbortSignal` through to the
-underlying `callPort`. Nested plain objects recurse, producing a nested
-`Remote`.
+The descriptor is pushed by the server as its first message on `exposeService`;
+`newServiceClient` resolves once it arrives. Pushing rather than requesting
+avoids a round trip and a race where the client asks before the server listens.
+`newServiceClient` therefore does not resolve until a server is present;
+callers needing a bounded wait pass an `AbortSignal` through to `call`. Nested
+plain objects recurse, producing a nested `Remote`.
 
 Call routing:
 
 | shape | primitive |
 | --- | --- |
-| unary, no streaming arguments | `callPort` / `listenPort` |
-| any streaming — in, out, or both | `callBidi` / `listenBidi` |
+| unary, no streaming arguments | `call` / `listen` |
+| any streaming — in, out, or both | `callStream` / `listenStream` |
 
-No new wire protocol is introduced; both primitives already exist, are
-hardened, and are covered by tests.
+No new wire protocol is introduced.
+
+### Reaching a binary transport
+
+Every adapter's `connect()` yields `{ call: Duplex }` (Finding 5), so one
+bridge covers all of them:
+
+```ts
+import { connect } from "@statewalker/webrun-streams-ws";
+import { messageTargetFromDuplex, newServiceClient } from "@statewalker/webrun-rpc";
+
+const { call } = await connect({ url: "wss://example.com/rpc" });
+const files = await newServiceClient<FilesApi>(messageTargetFromDuplex(call));
+```
+
+Substituting `-webrtc`, `-libp2p`, `-livekit`, `-peerjs` or `-port` changes only
+the import. Over a `MessagePort` the bridge is unnecessary — the port is passed
+directly, and structured clone applies (Decision 3).
+
+Internally the bridge pushes outbound values into a `newAsyncGenerator` queue
+feeding `encodeMsgpack`, whose frames go to the `Duplex` input; inbound bytes
+run through `decodeMsgpack` and dispatch to `"message"` listeners. `postMessage`
+is already fire-and-forget, so the queue matches its semantics.
 
 ### `FilesApi` over the generic stub
 
 `FilesApi` needs no bespoke remote protocol:
 
 ```ts
-const stop  = exposeService(port, memFiles);
-const files = await newServiceClient<FilesApi>(port);
+const stop  = exposeService(target, memFiles);
+const files = await newServiceClient<FilesApi>(target);
 
 await files.write("/a.txt", chunks);
 for await (const chunk of files.read("/a.txt", { start: 0, length: 100 })) {
@@ -276,82 +439,85 @@ for await (const chunk of files.read("/a.txt", { start: 0, length: 100 })) {
 ```
 
 `read` and `list` are `async *` and classify as streams. `write` takes an
-`AsyncIterable` and is caught by the client-side runtime check. The remaining
-six methods are unary. A remote `FilesApi` package therefore reduces to wiring
-over the generic stub rather than a hand-written protocol.
+`AsyncIterable` and is caught by the client-side runtime check (Decision 1). The
+remaining six methods are unary. A remote `FilesApi` package reduces to wiring.
 
 ## Sequencing
 
 Each step leaves the repository green and is independently revertable.
 
 1. **Windowed flow-control core** in `webrun-streams`; `emulateMux` migrated
-   onto it with the window defaulting to 1 (no behaviour change).
-2. **`MessageTarget` consolidated** into `webrun-streams-port`;
-   `webrun-http-browser` imports it rather than declaring it; the fourteen
-   `MessagePort` signature sites retype to `MessageTarget`.
-3. **RPC tier onto the shared window**, so `send`/`recieve` gain the same
-   slack.
-4. **`webrun-rpc`** — descriptor, `Proxy` client, server dispatcher.
-5. **Remote `FilesApi`** as wiring over the stub.
+   onto it, with the `window × mtu ≤ maxStreamBuffer` check enforced at
+   construction. Land with the default at 8, conformance passing at 1 and 8.
+2. **`MessageTarget` moves** into `webrun-streams`; `webrun-http-browser`
+   imports it rather than declaring it.
+3. **RPC tier moves** to `webrun-rpc`, retyped from `MessagePort` to
+   `MessageTarget` (14 signature sites, 25 mentions), renamed per Decision 9,
+   and put on the shared window. `webrun-streams-port` is left as a pure
+   adapter.
+4. **`messageTargetFromDuplex`** with the msgpack bridge.
+5. **`webrun-rpc` stub layer** — descriptor, `Proxy` client, server dispatcher.
+6. **Remote `FilesApi`** as wiring over the stub.
+
+Steps 1–2 and 3–6 form two natural implementation plans. The first is a
+refactor of existing tested behaviour and is **worth landing on its own even if
+`webrun-rpc` never proceeds** — single-stream throughput is a standing
+limitation of every adapter today, not something this design introduces.
 
 `callChannel`/`handleChannelCalls` becomes a candidate to collapse onto
-`callPort`/`listenPort` after step 2, subject to a behaviour-parity check:
-it uses channel-per-call rather than `callId` correlation and has no timeout,
-so the two are not drop-in equivalents.
-
-Steps 1–3 (flow control and the `MessageTarget` consolidation) and steps 4–5
-(`webrun-rpc` and remote `FilesApi`) form two natural implementation plans.
-The first is a refactor of existing, tested behaviour; the second is new
-surface built on top. They can be planned and reviewed separately, and the
-first is worth landing on its own regardless of whether `webrun-rpc` proceeds —
-single-stream throughput is a standing limitation of every adapter today.
+`call`/`listen` after step 3, subject to a behaviour-parity check: it uses
+channel-per-call rather than `callId` correlation and has no timeout, so they
+are not drop-in equivalents.
 
 ## Verification
 
-The flow-control change touches `emulateMux`, on which every transport adapter
-depends. `webrun-streams-conformance` already defines L0–L5 as the shared
-contract, run by six adapters — `-ws`, `-port`, `-webrtc`, `-peerjs`,
-`-libp2p`, `-livekit` — plus the reference `makeLoopbackPair` self-test. Window
-coverage is added there: the change is then proven against every transport at
-once, and a regression surfaces in the adapter that broke rather than in a
-single unit test.
+The flow-control change touches `emulateMux`, on which every adapter depends.
+`webrun-streams-conformance` already defines L0–L5 as the shared contract, run
+by six adapters — `-ws`, `-port`, `-webrtc`, `-peerjs`, `-libp2p`, `-livekit` —
+plus the reference `makeLoopbackPair` self-test. Window coverage is added there,
+so the change is proven against every transport at once.
 
-Note that three of those runs are gated and will not exercise the change in a
-plain `pnpm test`: `-webrtc` and `-peerjs` are browser-only, `-livekit`
-additionally needs a running server, and `-libp2p`'s conformance run is opt-in
-behind `WEBRUN_STREAMS_LIBP2P=1`. The ungated Node coverage is `-ws`, `-port`
-and the loopback. The gated suites must be run deliberately before this change
-lands.
-
-Specifically:
-
-- Conformance gains coverage for a window greater than 1, keeping the existing
-  L0–L5 assertions intact (body sizes to 10 MiB, concurrency, half-close,
-  mid-stream cancellation, error propagation, idempotent teardown).
-- Backpressure remains asserted: a producer must not outrun a non-draining
+- Conformance runs at window 1 and window 8, keeping the existing L0–L5
+  assertions intact (body sizes to 10 MiB, concurrency, half-close, mid-stream
+  cancellation, error propagation, idempotent teardown).
+- Backpressure stays asserted: a producer must not outrun a non-draining
   consumer, and `maxStreamBuffer` must still tear down the offending stream
   rather than the whole mux.
-- `webrun-rpc` gets its own tests for descriptor generation over class
-  instances, over nested objects, and for each of the four call shapes.
+- A test asserts that constructing with `window × mtu > maxStreamBuffer` is
+  rejected.
+- **`webrun-rpc` conformance runs over two transports** — a `MessageChannel`
+  (structured clone) and a msgpack-over-`Duplex` pair — so Decision 3's
+  divergence risk is covered in CI. A value-contract test asserts that
+  `Map`/`Set`/`Date`/cycles are rejected on *both*, not silently accepted on the
+  port path.
+- `webrun-rpc` unit tests cover descriptor generation over class instances and
+  nested objects, and each of the four call shapes.
+
+**Gating caveat:** three of the six adapter runs will not exercise the change in
+a plain `pnpm test`. `-webrtc` and `-peerjs` are browser-only, `-livekit`
+additionally needs a running server, and `-libp2p`'s conformance run is opt-in
+behind `WEBRUN_STREAMS_LIBP2P=1`. Ungated Node coverage is `-ws`, `-port` and
+the loopback. **The gated suites must be run deliberately before this lands.**
 
 ## Consequences
 
 - One flow-control implementation instead of two, and single-stream throughput
-  stops being round-trip-bound.
-- The port primitives become transport-agnostic, so `webrun-rpc` works over
-  `MessagePort`, `Worker`, `SharedWorker` and ServiceWorker bridges, and over
-  anything adapted to `MessageTarget`.
-- One fewer duplicated abstraction (`MessageTarget`), and a route to removing
-  one of the three RPC implementations.
-- `webrun-http-browser` gains a dependency on `webrun-streams-port`.
+  stops being round-trip-bound for every adapter.
+- RPC works over every transport in the family, meeting Requirement 2.
+- Two of the four request/response implementations are removed or made
+  removable: copy 4 by deletion, copy 2 as a follow-up parity check.
+- `MessageTarget` has one home.
+- `webrun-streams-port` becomes a pure adapter, consistent with its siblings.
 - A remote `FilesApi` costs wiring rather than a protocol.
+- **Breaking:** `recieveIterator` → `receiveIterator` in the published
+  `webrun-streams`, and the renames of Decision 9. All consumers are in-repo.
+- `webrun-rpc` takes a dependency on `webrun-msgpack`.
 
-## Out of scope
+## Follow-ups, not in this spec
 
-- Consolidating `webrun-rpc-http` (Decision 5).
-- Reaching byte transports — WebSocket, WebRTC, libp2p, LiveKit — from
-  `webrun-rpc`. That needs a `MessageTarget` synthesised over a `ByteChannel`
-  with a codec, for which `webrun-msgpack` is the natural fit. Deliberately
-  deferred: it is only worth designing once the windowed flow control makes
-  network use viable.
-- Moving `webrun-site-*` out of webrun-wire, tracked separately.
+- Deleting `webrun-vcs/packages/utils/src/ports/` and its tests (Finding 2).
+  Different repository; dead code, so a deletion rather than a migration.
+- Consolidating `webrun-rpc-http` (Decision 10).
+- Collapsing `callChannel`/`handleChannelCalls` onto `call`/`listen`.
+- Auto-tuning the window instead of a fixed default (Decision 8).
+- Moving `webrun-site-*` out of webrun-wire — tracked separately.
