@@ -3068,7 +3068,7 @@ Expected: no failures. The baseline before this plan was **643 passing** and
 | `webrun-streams-ws` | 10 | 11 | Task 5, L6 |
 | `webrun-streams-port` | 34 | 35 | Task 5, L6 |
 
-so **679 passing** (`643 + 32 + 2 + 1 + 1`). If your number differs, reconcile
+so **683 passing** (`643 + 36 + 2 + 1 + 1`). If your number differs, reconcile
 it against this table before continuing rather than assuming drift.
 
 The skip set must not grow. It is **five**, not four: one browser gate each in
