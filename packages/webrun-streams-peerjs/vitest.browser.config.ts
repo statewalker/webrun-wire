@@ -33,6 +33,10 @@ export default {
   resolve: { alias },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Runs in Node and starts a loopback PeerJS broker, handing its port to
+    // the browser through `provide`/`inject`. Without a broker the two peers
+    // never find each other.
+    globalSetup: ["./tests/peer-server-setup.ts"],
     browser: {
       enabled: true,
       headless: true,
