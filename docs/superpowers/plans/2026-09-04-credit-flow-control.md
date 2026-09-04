@@ -151,14 +151,28 @@ own tests only (`a large-buffer sender and a small-buffer receiver…`).
 Conformance-level asymmetry needs `PairTuning` reshaped to
 `{ initiator?, responder? }` and is deferred to Plan 2.
 
-**Three browser-gated adapters still have no executable conformance run.** Task
-7 verifies the `vitest.browser.config.ts` files their `test:browser` scripts name
-— those files did not exist, so the scripts failed to load at all — but
-`-webrtc`, `-peerjs` and `-livekit` also reference `tests/make-webrtc-pair.ts`,
-`tests/make-peerjs-pair.ts` and `tests/make-livekit-pair.ts`, and **none of those
-files exists in the repository**. Writing them is a separate piece of work and is
-not in this plan. Task 7 says so in the commit message rather than implying the
-suites now run.
+**Three browser-gated adapters had no executable conformance run — RESOLVED
+after Task 7, outside this plan's original scope.** As written, this section said
+the missing `tests/make-{webrtc,peerjs,livekit}-pair.ts` helpers were separate
+work. They were written after Task 7, and all three suites now run in chromium at
+**11/11**. Finishing them uncovered four defects that had been invisible because
+the suites had never executed once:
+
+- every `conformance.test.ts` registered its suite from `void import().then()`,
+  which resolves after vitest has finished collecting the file, so no suite was
+  ever registered — the gate could not have worked;
+- `-webrtc` deadlocked on every request run to completion, because `runStream`
+  awaited its outbound pump inside a `finally` that the responder's handler could
+  not reach past;
+- `-webrtc` never told a responder that a caller had cancelled, leaking the
+  handler until the connection dropped;
+- `-livekit` inherited `emulateMux`'s 64 KiB MTU against a transport that caps
+  reliable data packets near 15 KiB and drops rather than fragments — a 1 MiB body
+  arrived as zero bytes with no error on either side.
+
+`-webrtc` has no `emulateMux`, so its L6 degrades to an integrity check.
+`-peerjs` and `-livekit` do use it, so their L6 exercises the credit path over a
+real transport.
 
 ## File Structure
 
@@ -2957,16 +2971,13 @@ The real remaining blocker was one this step did not name: the Playwright
 point — config loads, chromium launches, and the run fails on the missing pair
 helper.
 
-What is verified, and is why this step cannot end green:
-`tests/conformance.test.ts` in each of the three packages does
-`void import("./make-webrtc-pair.js")` (respectively `./make-peerjs-pair.js`,
-`./make-livekit-pair.js`) once it detects a browser, and **none of those three
-files exists in the repository**. Compare `-ws`, which has
-`tests/make-ws-pair.ts`, and `-libp2p`, which has `tests/make-libp2p-pair.ts`.
-Writing them is a separate piece of work, out of scope here.
+At the time this step was written the third blocker was the missing
+`make-*-pair` helpers, and the instruction was to record "three blockers, two
+removed" and not claim the suites run.
 
-So after this task the state is: **three** blockers, two removed. Record exactly
-that and do not claim the suites run.
+**That is no longer the state.** The helpers were written immediately after this
+task and all three suites now pass 11/11 in chromium — see the resolved note in
+"What this plan does not do". The third blocker is removed; this step ends green.
 
 Note on `pnpm install`: this repository's `pnpm-lock.yaml` is gitignored and the
 authoritative lockfile is the umbrella's, because the cross-repo `workspace:*`
@@ -3011,13 +3022,10 @@ vitest.browser.config.ts existed in none of -webrtc, -peerjs or -livekit,
 so their test:browser scripts failed to load a config rather than running a
 gated suite. The configs are here now.
 
-They still cannot run: the devDependencies these configs import are not in
-the umbrella lockfile's importer for these packages, so test:browser fails
-at config load with ERR_MODULE_NOT_FOUND until pnpm install is run at the
-umbrella root. And even then all three conformance files import a
-make-*-pair helper (make-webrtc-pair.ts, make-peerjs-pair.ts,
-make-livekit-pair.ts) that does not exist in this repository. Both are
-separate work.
+As committed they still could not run, for two further reasons, both since
+removed: the browser devDependencies were not linked, and all three
+conformance files imported a make-*-pair helper that did not exist. The
+helpers were written after Task 7 and all three suites now pass 11/11.
 ```
 
 ---
