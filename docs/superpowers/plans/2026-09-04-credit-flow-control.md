@@ -1541,7 +1541,7 @@ lower bound. If your totals differ, stop — the same rule Step 6 states.
 | in `uint32.ts`, restore `setUint32(0, n >>> 0, false)` (wrap instead of clamp) | `transfers through a window larger than the uint32 credit field` | `1 failed \| 9 passed (10)` |
 | in `flow-control.ts`, make the ledger `spend(exact)` — release a waiter only when `available >= upTo` and take `upTo` — **and** drop the grantor's flush (`if (pending < trigger) return 0;`) | `completes when the sender's mtu is larger…`, `completes a response whose chunks straddle the batching threshold` | `2 failed \| 8 passed (10)` |
 | delete **both** grant sites — the OPEN-payload grant in 3g and the ACK grant in 3i — so no credit ever exists | all ten | `9 failed \| 1 passed (10)`, the survivor being `refuses a maxStreamBuffer of zero`, which never opens a stream |
-| delete `s.outboundCredit.fail(...)` from `teardownStream` in 3c | `a sender parked in reserve unwinds when its stream is torn down` (added in Step 1) | **unmeasured — measure before relying on it.** Without this row the line is uncovered: deleting it left 163 + 22 + 35 green, while leaking a generator per torn-down stalled stream |
+| delete `s.outboundCredit.fail(...)` from `teardownStream` in 3c | `a sender parked in reserve unwinds when its stream is torn down` (added in Step 1) | `1 failed \| 11 passed (12)`. **Measured twice during execution**, superseding this row's earlier "unmeasured" note and its claim that the deletion left everything green — that was true only while the mandated teardown case was missing. The test fails on `expect(producerFinally).toBe(true)`, so it witnesses the producer's `finally` running rather than merely the absence of a throw |
 | in 3h, pass a constant `true` for `queueEmpty` | `splits a chunk larger than mtu and gets credit back for every byte` (its frame-economy bound, Step 8f) | **unmeasured — measure before relying on it.** Reported as restoring one grant per DATA frame with the rest of the suite green |
 
 Every one of the four tests that were already green at Step 2 appears in at
@@ -1590,7 +1590,7 @@ package — coverage that read as coverage and was not.
 pnpm --filter @statewalker/webrun-streams test
 ```
 
-Expected: **5 failed | 156 passed** (161 total), in exactly two files:
+Expected: **5 failed | 158 passed** (163 total), in exactly two files:
 
 - `emulate-mux-backpressure.test.ts` — `a slow consumer throttles the producer,
   in the request direction` and `…in the response direction too` both assert
@@ -1826,8 +1826,13 @@ pnpm --filter @statewalker/webrun-streams exec vitest run tests/emulate-mux-back
 pnpm --filter @statewalker/webrun-streams test
 ```
 
-Expected: 5 tests in the backpressure file; **161** in the package (131 before
-this plan, +13 Task 1, +7 Task 2, +10 Task 3). `emulate-mux-hostile.test.ts`'s
+Expected: 5 tests in the backpressure file; **163** in the package (131 before
+this plan, +13 Task 1, +7 Task 2, +12 Task 3). The Task 3 figure is 12, not 10,
+because Step 5 mandates a `credit teardown` case that Step 1's code block omits,
+and a ledger-level `grant()`-after-`fail()` assertion closes a gap Task 1's
+review parked. Both are load-bearing: deleting `outboundCredit.fail(...)` kills
+the first and nothing else, and removing the ledger's post-`fail` guard kills the
+second and nothing else. Later tasks quoting a pre-Task-3 total are +2. `emulate-mux-hostile.test.ts`'s
 19 tests are among them and must all still pass — in particular `caps what one
 undrained stream may buffer, and spares the rest of the mux`, which is Task 4's
 subject. If it fails here, stop and fix this task: the `queuedBytes` accounting
@@ -2573,7 +2578,7 @@ pnpm --filter @statewalker/webrun-streams test
 ```
 
 Expected: typecheck back to exactly the two `readme-examples.test.ts` errors
-from Step 2 and nothing else; **163** tests passing.
+from Step 2 and nothing else; **165** tests passing (163 after Task 3, +2 here).
 
 The absence of a diagnostic on `const target: MessageTarget = port1;` settles
 the open question in spec Decision 7 — "`MessagePort` is expected to satisfy
@@ -3027,7 +3032,7 @@ Expected: no failures. The baseline before this plan was **643 passing** and
 
 | package | before | after | added by |
 | --- | --- | --- | --- |
-| `webrun-streams` | 131 | 163 | Task 1 (+13), Task 2 (+7), Task 3 (+10), Task 6 (+2) |
+| `webrun-streams` | 131 | 165 | Task 1 (+13), Task 2 (+7), Task 3 (+12), Task 6 (+2) |
 | `webrun-streams-conformance` | 20 | 22 | Task 5, L6 on two pairs |
 | `webrun-streams-ws` | 10 | 11 | Task 5, L6 |
 | `webrun-streams-port` | 34 | 35 | Task 5, L6 |
