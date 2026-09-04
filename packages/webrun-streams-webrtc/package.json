@@ -38,6 +38,8 @@
     "@roamhq/wrtc": "^0.8.0",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "@types/node": "catalog:",
+    "@vitest/browser-playwright": "^4.1.10",
+    "playwright": "^1.62.1",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
