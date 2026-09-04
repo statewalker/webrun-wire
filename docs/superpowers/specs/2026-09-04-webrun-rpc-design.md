@@ -307,8 +307,23 @@ line up, a thin `messageTargetFromMessagePort` is added.
 
 Rather than adding a send window to the RPC tier alone — which would create the
 second flow-control implementation this investigation set out to avoid — the
-flow-control logic is extracted into `webrun-streams` and used by both
-`emulateMux` and the RPC tier.
+flow-control logic is extracted into `webrun-streams` as a unit-agnostic core
+that serves both `emulateMux` and the RPC tier.
+
+**When each consumer is credited (amended 2026-09-04).** Plan 1 builds the core,
+proves it against `emulateMux`, and exports it. The RPC tier is credited in
+Plan 2, when it moves to `webrun-rpc` (Sequencing step 3) — not before. Two
+independent measurements against a draft that migrated the tier in place found
+that it removes **no** round trip (41 requests / 41 responses on both the old
+and the new implementation, because `listenPort` replies unconditionally) and
+that pipelining converts `callPort`'s 1000 ms *per-value* timeout into a
+deadline for the whole window (40 values: 34/40 delivered at 60 ms per value,
+26/40 at 80 ms, against 40/40 for the code as it stands). Since the tier is
+moving to a new package regardless, it is credited once, against its final
+shape, with that timeout question resolved there. The consequence to accept is
+that the core's exported surface is frozen in Plan 1 having been proven against
+one consumer; it is designed for both, and Plan 2 is where the second one tests
+the shape.
 
 **The mechanism is receiver-advertised credit, not a sender-side window.**
 
@@ -355,8 +370,16 @@ may now run up to one credit window ahead of its consumer instead of exactly
 zero. Bounded, still end-to-end, still no unbounded buffering.
 
 **Grant policy:** credit is replenished in batches — when roughly half the
-advertised window has been drained — never per chunk, or per-frame ACKs have
-merely been reinvented under another name.
+advertised window has been drained, **or when the receive queue empties below
+that threshold, so the receiver never sits on credit it owes**.
+
+Batching is what stops a grant per chunk *while the sender is stalled*, which is
+the case that would otherwise reinvent the per-frame ACK. The empty-queue flush
+costs an extra frame only when the consumer is keeping pace and the sender is
+therefore not blocked — and without it a stream whose remaining traffic never
+reaches the threshold can sit on credit indefinitely. This clause was added
+after the first draft: the plan-level review found the batching rule alone
+admitted that stall.
 
 The shared core owns credit accounting: how much is outstanding, when it is
 consumed, when a grant is emitted. Each tier supplies its own framing and its
@@ -494,15 +517,18 @@ remaining six methods are unary. A remote `FilesApi` package reduces to wiring.
 
 Each step leaves the repository green and is independently revertable.
 
-1. **Credit-based flow-control core** in `webrun-streams`; `emulateMux`
-   migrated onto it; `OPEN` and `ACK` gain their uint32 payloads. Conformance
-   passing at a one-frame credit and at the default, and across asymmetrically
-   configured peers.
+1. **Credit-based flow-control core** in `webrun-streams`, with `emulateMux`
+   migrated onto it and the core exported for later consumers; `OPEN` and `ACK`
+   gain their uint32 payloads. Conformance passing at a small advertised credit
+   and at the default, and across asymmetrically configured peers. The RPC tier
+   is **not** touched here — neither its flow control nor its move; see
+   Decision 8's amendment for the measurements behind that.
 2. **`MessageTarget` moves** into `webrun-streams`; `webrun-http-browser`
    imports it rather than declaring it.
 3. **RPC tier moves** to `webrun-rpc`, retyped from `MessagePort` to
    `MessageTarget` (14 signature sites, 25 mentions), renamed per Decision 9,
-   and put on the shared window. `webrun-streams-port` is left as a pure
+   and put on the shared credit core — including the `callPort` timeout
+   question that pipelining raises. `webrun-streams-port` is left as a pure
    adapter.
 4. **`messageTargetFromDuplex`** with the msgpack bridge.
 5. **`webrun-rpc` stub layer** — descriptor, `Proxy` client, server dispatcher.
@@ -526,16 +552,24 @@ test that has never been red proves nothing about the code that follows it. For
 the migration of `emulateMux` this also means the existing L0–L5 suite stays
 green at every commit, since it is the regression net for six adapters.
 
-The flow-control change touches `emulateMux`, on which every adapter depends.
-`webrun-streams-conformance` already defines L0–L5 as the shared contract, run
-by six adapters — `-ws`, `-port`, `-webrtc`, `-peerjs`, `-libp2p`, `-livekit` —
-plus the reference `makeLoopbackPair` self-test. Window coverage is added there,
-so the change is proven against every transport at once.
+The flow-control change touches `emulateMux`, on which **four** of the six
+adapters depend: `-ws`, `-port`, `-peerjs` and `-livekit`. `-webrtc` carries
+`duplexOverDataChannel` and `-libp2p` uses native yamux multiplexing (Finding
+5); neither imports `emulateMux`, and neither has an `mtu` or a
+`maxStreamBuffer` to vary. `webrun-streams-conformance` defines the shared
+contract, run by all six adapters plus the reference `makeLoopbackPair`
+self-test. Window coverage is added there, so for the four it proves the credit
+path and for the other two — and for the loopback — it proves the `Duplex` seam
+still holds. Varying the window from conformance therefore means widening four
+public parameter types, not six.
 
-- Conformance runs at a small advertised credit (one frame's worth, reproducing
-  today's lock-step behaviour) and at the default, keeping the existing L0–L5
-  assertions intact (body sizes to 10 MiB, concurrency, half-close, mid-stream
-  cancellation, error propagation, idempotent teardown).
+- Conformance runs at a small advertised credit (several frames' worth, so the
+  sender stalls and resumes repeatedly) and at the default, keeping the existing
+  L0–L5 assertions intact (body sizes to 10 MiB, concurrency, half-close,
+  mid-stream cancellation, error propagation, idempotent teardown). The exact
+  one-frame lock-step case is pinned by `webrun-streams`' own unit tests rather
+  than by conformance, which would otherwise run the whole L0–L5 set twice for a
+  property the unit tests pin more precisely.
 - Backpressure stays asserted, at its new granularity: a producer must stall
   once it has exhausted its credit against a non-draining consumer, and must
   resume when credit is granted. A producer must never exceed advertised
@@ -545,7 +579,10 @@ so the change is proven against every transport at once.
   for a peer that honours it, at any configuration.
 - Peers configured asymmetrically (differing `maxStreamBuffer`) must interoperate
   without spurious teardown. This is the case the rejected sender-side window
-  got wrong, so it is asserted explicitly.
+  got wrong, so it is asserted explicitly — in `webrun-streams`' own tests. It
+  is **not** asserted in conformance: `PairTuning` is one object spread into both
+  ends of a pair, so the suite cannot give the two peers different windows.
+  Reshaping it to `{ initiator?, responder? }` is deferred to Plan 2.
 - **`webrun-rpc` conformance runs over two transports** — a `MessageChannel`
   (structured clone) and a msgpack-over-`Duplex` pair — so Decision 3's
   divergence risk is covered in CI. A value-contract test asserts that
@@ -554,11 +591,23 @@ so the change is proven against every transport at once.
 - `webrun-rpc` unit tests cover descriptor generation over class instances and
   nested objects, and each of the four call shapes.
 
-**Gating caveat:** three of the six adapter runs will not exercise the change in
-a plain `pnpm test`. `-webrtc` and `-peerjs` are browser-only, `-livekit`
+**Gating caveat:** four of the six adapter runs do not exercise the change in a
+plain `pnpm test`. `-webrtc` and `-peerjs` are browser-only, `-livekit`
 additionally needs a running server, and `-libp2p`'s conformance run is opt-in
 behind `WEBRUN_STREAMS_LIBP2P=1`. Ungated Node coverage is `-ws`, `-port` and
-the loopback. **The gated suites must be run deliberately before this lands.**
+the loopback — which, since `-webrtc` and `-libp2p` do not use `emulateMux` at
+all, means ungated coverage of the **credit path** is `-ws` and `-port`, and the
+gated suites that would add to it are `-peerjs` and `-livekit`.
+
+Of those, `-libp2p`'s gate works: `WEBRUN_STREAMS_LIBP2P=1 pnpm --filter
+@statewalker/webrun-streams-libp2p test` runs and passes. The three browser
+suites do **not** run today, and not because of their gate: their `test:browser`
+scripts name a `vitest.browser.config.ts` that does not exist, and each of their
+conformance files imports a `tests/make-<transport>-pair.ts` helper that does not
+exist either. Plan 1 creates the configs; writing the pair helpers is separate
+work. **Until it is done, `-webrtc`, `-peerjs` and `-livekit` have no executable
+conformance run at all** — a statement earlier drafts of this section got wrong
+in the other direction.
 
 ## Consequences
 
