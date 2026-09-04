@@ -2578,7 +2578,8 @@ pnpm --filter @statewalker/webrun-streams test
 ```
 
 Expected: typecheck back to exactly the two `readme-examples.test.ts` errors
-from Step 2 and nothing else; **165** tests passing (163 after Task 3, +2 here).
+from Step 2 and nothing else; **167** tests passing (163 after Task 3, 165 after
+Task 4's two guard-regression tests, +2 here).
 
 The absence of a diagnostic on `const target: MessageTarget = port1;` settles
 the open question in spec Decision 7 — "`MessagePort` is expected to satisfy
@@ -3032,7 +3033,7 @@ Expected: no failures. The baseline before this plan was **643 passing** and
 
 | package | before | after | added by |
 | --- | --- | --- | --- |
-| `webrun-streams` | 131 | 165 | Task 1 (+13), Task 2 (+7), Task 3 (+12), Task 6 (+2) |
+| `webrun-streams` | 131 | 167 | Task 1 (+13), Task 2 (+7), Task 3 (+12), Task 4 (+2), Task 6 (+2) |
 | `webrun-streams-conformance` | 20 | 22 | Task 5, L6 on two pairs |
 | `webrun-streams-ws` | 10 | 11 | Task 5, L6 |
 | `webrun-streams-port` | 34 | 35 | Task 5, L6 |
