@@ -219,6 +219,18 @@ export function describeDuplexAdapter(
         // credit and wait for grants sixteen times over. An adapter that
         // ignores the tuning runs this at its own defaults, where it degrades
         // to an integrity check — that is stated in the README, not hidden.
+        //
+        // What the assertions below check is completion and integrity. That
+        // this level also proves *stalling and replenishment* is an
+        // elimination argument that lives in the mutations, not in this body:
+        // delete the grant `ACK` and replenishment dies, so the transfer hangs
+        // and this times out; bypass `reserve()` and stalling dies, so the
+        // sender floods the window and the receiver's cap tears the stream
+        // down. Both are measured in the plan's Task 5 Step 4 table. Keep the
+        // small window and the slow drain — at the adapters' defaults nothing
+        // stalls, no grant is emitted, and this level passes with credit
+        // deleted entirely. An earlier draft shipped exactly that while
+        // claiming otherwise.
         const pair = await makePair({ mtu: 4096, maxStreamBuffer: 16 * 1024 });
         try {
           await pair.serve(echoHandler);
