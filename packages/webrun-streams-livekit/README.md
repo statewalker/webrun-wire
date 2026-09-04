@@ -101,12 +101,25 @@ Type: `Serve<LiveKitParams>`. Runs `handler` for inbound streams from
 | --- | --- | --- |
 | `room` | `Room` | An already-connected LiveKit room. |
 | `peerIdentity` | `string` | Identity of the remote participant this side talks to. |
-| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is set by which function you call (`"initiator"` for `connect`, `"responder"` for `serve`) regardless of `mux.side`. |
+| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is set by which function you call (`"initiator"` for `connect`, `"responder"` for `serve`) regardless of `mux.side`. **`mtu` defaults to 12 KiB here**, not `emulateMux`'s 64 KiB — see below. |
 
 ### `byteChannelFromLiveKit(room, peerIdentity): ByteChannel`
 
 Wraps a room + peer identity as a `ByteChannel` (`send` / `recv` / `closed` /
 `close`) for driving `emulateMux` yourself.
+
+
+### Why the MTU default is lower here
+
+A LiveKit reliable data packet is capped at roughly 15 KiB, and a payload over
+that is dropped rather than fragmented. `emulateMux`'s own 64 KiB default
+therefore does not survive this transport, and it fails silently: a 1 MiB body
+arrives as zero bytes and a 10 MiB body never completes, with no error on
+either side. So `connect` and `serve` default `mtu` to 12 KiB — under the cap
+with room for the frame header (`[varint streamId][1-byte type]`).
+
+An explicit `mux.mtu` still wins, so a deployment that permits larger packets
+can raise it.
 
 ## Conformance
 

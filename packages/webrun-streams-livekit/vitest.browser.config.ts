@@ -33,6 +33,12 @@ export default {
   resolve: { alias },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Runs in Node: starts `livekit-server --dev` on a loopback port, mints the
+    // two join tokens, and hands the URL and tokens to the browser through
+    // `provide`/`inject`. The signing secret never enters the browser bundle.
+    globalSetup: ["./tests/livekit-server-setup.ts"],
+    // A real SFU handshake is slower than an in-page RTCPeerConnection pair.
+    testTimeout: 30_000,
     browser: {
       enabled: true,
       headless: true,
