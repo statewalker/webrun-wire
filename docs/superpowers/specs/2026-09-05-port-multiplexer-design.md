@@ -8,6 +8,19 @@ Decision 8, and most of `docs/superpowers/plans/2026-09-04-credit-flow-control.m
 
 ---
 
+## The goal
+
+**An isomorphic, protocol-independent communication layer.** The same stream and call semantics
+over a worker `MessagePort`, a WebSocket, a WebRTC DataChannel, a libp2p stream or a LiveKit room,
+with code above the seam that cannot tell which it is running on.
+
+Every decision below is downstream of that. Where a transport offers a capability others lack, this
+design takes it as a *performance* opportunity and never as a semantic one — otherwise code written
+against the fast transport silently fails on the others, which is the failure isomorphism exists to
+prevent.
+
+---
+
 ## The problem
 
 `packages/webrun-streams/src/emulate-mux.ts` is 572 lines in a single closure. It owns, at once:
@@ -188,6 +201,42 @@ flood" gets a deterministic answer: the port closes on the second unconfirmed ch
 non-windowed receiver. Windowing must therefore advertise its window in `OPEN`'s `meta` so both
 ends agree before the first chunk. That is a requirement on D13, recorded now while the reason is
 visible.
+
+**D16. Layer 2's payload contract is the msgpack-expressible subset.** Transferables are an
+optimisation, never a semantic. `structuredCodec` skips encoding and moves `ArrayBuffer`s zero-copy
+through the transfer list, so port transports are faster — but nothing layer 2 sends may depend on
+a capability msgpack lacks.
+
+This forbids something attractive: passing a live `MessagePort` inside a payload, which is how
+`callChannel` hands over a capability today (F2). Layer 2 opens a virtual port and sends its id
+instead, which behaves identically on every transport. Capability detection was rejected for the
+same reason — two paths, unequally exercised, with the port-transport path better tested in
+development and the byte path only in CI.
+
+**D17. L6 is redefined around the confirmation, and `PairTuning` is reshaped.** L6 currently proves
+flow control by asking for a small credit window (`PairTuning { mtu, maxStreamBuffer }`, 16 KiB
+against a 256 KiB body). Under D11 there is no window to shrink, so that level would configure
+something that no longer exists — and still pass, because a 256 KiB body completes fine one chunk
+at a time. It would read as coverage while asserting nothing.
+
+Redefined, L6 pins the property D11 actually creates: **the producer cannot run ahead of the
+consumer.** A slow consumer, a body many times one chunk, and an assertion that chunks on the wire
+never exceed chunks drained by more than one. It has a floor (the transfer completes) and a ceiling
+(never more than one ahead), and it dies under the obvious mutation — delete the confirmation wait
+and the sender races ahead immediately.
+
+`PairTuning` becomes `{ maxMessageSize? }` or empty, since the transport now decides. This is a
+breaking change to `webrun-streams-conformance`'s public API and touches every adapter's pair
+factory.
+
+**D18. Non-goal: reconnection.** A transport that drops takes every virtual port with it, and
+nothing is resumed. Ports are not durable and carry no sequence numbers for replay. Stated so it is
+a boundary rather than an oversight.
+
+**D19. Exceeding `maxPorts` rejects the port, never the mux.** An `OPEN` beyond the limit is
+answered with `CLOSE` carrying an error; existing ports are untouched. Ids are never reused within
+a mux's lifetime; `maxPorts` bounds concurrency, not total opens, and a varint id space is large
+enough that exhaustion is not a practical concern.
 
 **D13. Per-stream windowing is deferred, deliberately.** Allowing several chunks in flight per
 stream is a stated future step, not an omission. The cost of deferring is that single-stream
@@ -453,10 +502,16 @@ root `README.md` tables, and a changeset.
 
 ## Verification
 
-**The conformance suite is the net.** L0–L6 must pass against every adapter at every stage of the
-migration. Because `duplexOverPort` produces `Duplex` (D9), the suite needs no change to cover the
-new stack — this is the single most valuable property of the design and the reason `Duplex` is
-retained.
+**The conformance suite is the net.** L0–L5 must pass against every adapter at every stage of the
+migration, and because `duplexOverPort` produces `Duplex` (D9) they need no change to cover the new
+stack. That is the most valuable property of the design and the reason `Duplex` is retained.
+
+**L6 is the exception and must be rewritten before it is trusted (D17).** As written it configures a
+credit window that this design removes, and it would keep passing — a body completes fine one chunk
+at a time — so it would report coverage it no longer provides. Its replacement asserts the
+one-chunk-ahead property, with a floor (the transfer completes) and a mutation that kills it
+(delete the confirmation wait). Until that rewrite lands, L6's green is meaningless and must not be
+cited as evidence the new flow control works.
 
 **Layer 1 gets its own tests**, against a pair of in-memory ports, covering each invariant with a
 mutation that turns it red:
@@ -527,17 +582,35 @@ Whether that lands before this begins is a separate decision.
 
 Three plans, each producing working software.
 
-**Plan A — layer 1.** `webrun-ports` with `multiplexPort`, the codec interface, both codecs, and the
-invariant tests. Consumes nothing, changes no adapter, deletes nothing. Independently valuable and
-independently reviewable.
+**Plan A — layer 1.** `webrun-ports`: the `PortMux` and `PortCodec` interfaces, the default emulated
+`multiplexPort`, `structuredCodec`, and the invariant tests including a mux-over-a-virtual-port case
+for composability (D2). `msgpackCodec` lands in `webrun-msgpack` with a type-only dependency, so
+`webrun-ports` keeps zero runtime dependencies. Consumes nothing, changes no adapter, deletes
+nothing.
 
 **Plan B — layer 2 on layer 1.** Move and re-type the primitives into `webrun-rpc`; build
-`duplexOverPort`; fix F5 per D8; re-home the hostile suite. Ends with `-port` and `-ws` served by
-the new stack and passing L0–L6, with `emulateMux` still present. Settles R2 by measurement before
-Plan C commits.
+`duplexOverPort` on `callPort`-per-chunk (D12) with receiver-side window enforcement (D15); open one
+control port for calls and one port per stream (D14); replace `callPort`'s 1000 ms default with the
+per-stream timeout defaulting to none (D8, fixing F5); rewrite L6 and reshape `PairTuning` (D17);
+re-home the hostile suite. Ends with `-port` and `-ws` on the new stack passing L0–L6, with
+`emulateMux` still present.
 
-**Plan C — layer 3 and the deletion.** Realign the remaining adapters, resolve R1 and R3, delete
-`emulateMux`, `ByteChannel` and the credit modules that lose their consumer. Update every README,
-`docs/adr/0004-duplex-as-seam.md`, and the root package tables; add changesets.
+The F5 regression test — a consumer deliberately slower than 1000 ms per value completing a
+transfer — is this plan's headline assertion, because it fails on today's code.
 
-R1 must be resolved before Plan C is written, and R2 before `emulateMux` is deleted.
+**Plan C — layer 3 and the deletion.** Native `PortMux` implementations for `-port`, `-webrtc` and
+`-libp2p`, each reporting its `maxMessageSize` (16 KiB for `-webrtc`; verify `-peerjs`'s before
+migrating it). Migrate `-livekit` and `-peerjs` onto the emulated mux. Then delete `emulateMux`,
+`byteChannelFromMessagePort` and `ByteChannel` as a seam; mark `flow-control.ts` and `uint32.ts`
+dormant. Update every README, `docs/adr/0004-duplex-as-seam.md`, the root package tables, and add
+changesets.
+
+**Gates between plans.** R2's question — whether any real workload pushes a large body over a
+single high-RTT stream — should be answered on the `-livekit` browser suite during Plan B, because
+it runs against a real SFU and is the only place the ÷RTT cost is visible. If the answer is yes,
+D13's windowing moves out of "future" and into Plan B, and `flow-control.ts` wakes up rather than
+going dormant.
+
+`-peerjs`'s message ceiling must be measured before Plan C migrates it. The LiveKit failure it
+would otherwise repeat was silent: a 1 MiB body arriving as zero bytes with no error on either
+side.
