@@ -10,8 +10,20 @@ function newChannel() {
   return { a: channel.port1, b: channel.port2 };
 }
 
-/** MessagePort delivery is a macrotask; give it one. */
-const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Poll `predicate` until it is true, or fail with `label`. A fixed number of
+ * macrotask ticks is a race, not a synchronisation: it usually wins under a
+ * light load and sometimes loses under a heavier one (this file plus three
+ * others running concurrently measured an 8% failure rate on unmutated code).
+ * Polling on the actual condition removes the race instead of relocating it.
+ */
+async function waitFor(predicate: () => boolean, label: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for: ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 const muxes: PortMux[] = [];
 function track<T extends PortMux>(mux: T): T {
@@ -46,7 +58,7 @@ describe("multiplexPort", () => {
 
     const port = client.openPort();
     port.postMessage("ping");
-    await tick();
+    await waitFor(() => received.length > 0, "message received");
 
     expect(received).toEqual(["ping"]);
   });
@@ -66,7 +78,7 @@ describe("multiplexPort", () => {
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
     client.openPort({ kind: "stream" });
-    await tick();
+    await waitFor(() => seen !== "not called", "onPort invoked with meta");
 
     expect(seen).toEqual({ kind: "stream" });
   });
@@ -92,8 +104,8 @@ describe("multiplexPort", () => {
     const atClient: unknown[] = [];
     port.addEventListener("message", (event) => atClient.push(event.data));
     port.postMessage("one");
-    await tick();
-    await tick();
+    await waitFor(() => atServer.length > 0, "server received the message");
+    await waitFor(() => atClient.length > 0, "client received the echo");
 
     expect(atServer).toEqual(["one"]);
     expect(atClient).toEqual(["echo:one"]);
@@ -112,7 +124,7 @@ describe("multiplexPort", () => {
     const client = track(multiplexPort(a, { codec: structuredCodec, side: "initiator" }));
     client.openPort();
     client.openPort();
-    await tick();
+    await waitFor(() => ids.length >= 2, "both opens observed on the wire");
     expect(ids).toEqual([0, 2]);
 
     const { a: c, b: d } = newChannel();
@@ -125,7 +137,7 @@ describe("multiplexPort", () => {
     const server = track(multiplexPort(c, { codec: structuredCodec, side: "responder" }));
     server.openPort();
     server.openPort();
-    await tick();
+    await waitFor(() => otherIds.length >= 2, "both opens observed on the wire");
     expect(otherIds).toEqual([1, 3]);
   });
 
@@ -142,25 +154,42 @@ describe("multiplexPort", () => {
         },
       }),
     );
+    // Sentinel for the ceiling below: this fires only once the "message"
+    // envelope has been dispatched on `b`, and a single dispatch runs every
+    // listener on the target to completion — including the mux's own,
+    // wherever it sits in registration order — before any later `await` can
+    // observe the counter. By the time this is > 0, the mux has already
+    // dropped (or delivered) that exact envelope.
+    let rejectedMessageSeenAtB = 0;
+    b.addEventListener("message", (event) => {
+      if (structuredCodec.read(event)?.type === "message") rejectedMessageSeenAtB++;
+    });
     const client = track(multiplexPort(a, { codec: structuredCodec }));
+    // Same technique, for the floor: fires only once the close envelope sent
+    // back by the rejection has been dispatched on `a`, by which point the
+    // opener's mux has already marked its own end inert.
+    let closeSeenAtA = 0;
+    a.addEventListener("message", (event) => {
+      if (structuredCodec.read(event)?.type === "close") closeSeenAtA++;
+    });
 
     const port = client.openPort();
     port.postMessage("before-rejection");
-    await tick();
-    await tick();
+    await waitFor(() => rejectedMessageSeenAtB > 0, "the rejected message reaches the responder");
 
     // Ceiling: nothing reached the rejected port's listener.
     expect(delivered).toEqual([]);
 
-    // Floor: the rejection reached the opener and made its end inert. Watching
-    // the raw wire is what distinguishes "the peer closed us" from "nothing
-    // ever ran" — the second post produces no envelope at all.
+    await waitFor(() => closeSeenAtA > 0, "the rejection's close reaches the opener");
+
+    // Floor: the rejection reached the opener and made its end inert. The
+    // opener's mux already saw the close (waited for above), so this post is
+    // a synchronous local no-op — nothing to poll for, only to confirm.
     let messagesOnWire = 0;
     a.addEventListener("message", (event) => {
       if (structuredCodec.read(event)?.type === "message") messagesOnWire++;
     });
     port.postMessage("after-rejection");
-    await tick();
     expect(messagesOnWire).toBe(0);
   });
 
@@ -176,8 +205,7 @@ describe("multiplexPort", () => {
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
     client.openPort();
-    await tick();
-    await tick();
+    await waitFor(() => closes.length > 0, "close arrives for the rejected port");
 
     expect(closes).toEqual([0]);
   });

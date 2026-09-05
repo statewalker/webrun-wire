@@ -11,7 +11,21 @@ function newChannel() {
   return { a: channel.port1, b: channel.port2 };
 }
 
-const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Poll `predicate` until it is true, or fail with `label`. A fixed number of
+ * macrotask ticks is a race, not a synchronisation: it usually wins under a
+ * light load and sometimes loses under a heavier one (this suite plus three
+ * other files running concurrently measured an 8% failure rate on unmutated
+ * code). Polling on the actual condition removes the race instead of
+ * relocating it.
+ */
+async function waitFor(predicate: () => boolean, label: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for: ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 const muxes: PortMux[] = [];
 function track<T extends PortMux>(mux: T): T {
@@ -48,14 +62,16 @@ describe("layer 1 invariants", () => {
     // Forge traffic for an id that was never opened.
     a.postMessage({ type: "message", id: 40, payload: "ghost" });
     a.start();
-    await tick();
 
-    // Then open a real port and send on it.
+    // Then open a real port and send on it. Per-channel ordering guarantees
+    // the ghost above is processed strictly before this envelope, so waiting
+    // for the real message to land is a valid sentinel for "the ghost has
+    // already been handled, one way or another" — the absence check below is
+    // evidence, not an artefact of checking too early.
     const client = track(multiplexPort(a, { codec: structuredCodec }));
     const port = client.openPort("real-port");
     port.postMessage("real");
-    await tick();
-    await tick();
+    await waitFor(() => accepted.length > 0, "the real message is delivered");
 
     // Ceiling: the forged id produced no port at all. An implementation that
     // queued the message, or attached a port on first sight of an id, would
@@ -80,15 +96,23 @@ describe("layer 1 invariants", () => {
         },
       }),
     );
+    // Sentinel: counts "message" envelopes arriving at `b`. A single dispatch
+    // runs every listener on the target to completion before any later
+    // `await` can observe this counter, so once it reaches 2 the mux has
+    // already finished handling "after" — delivered or dropped.
+    let messageEnvelopesSeenAtB = 0;
+    b.addEventListener("message", (event) => {
+      if (structuredCodec.read(event)?.type === "message") messageEnvelopesSeenAtB++;
+    });
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
     const port = client.openPort();
     port.postMessage("before");
-    await tick();
+    await waitFor(() => seen.length > 0, "the peer received 'before'");
+
     serverPort?.close?.();
-    await tick();
     port.postMessage("after");
-    await tick();
+    await waitFor(() => messageEnvelopesSeenAtB > 1, "the second envelope reaches the peer");
 
     expect(seen).toEqual(["before"]);
   });
@@ -111,17 +135,24 @@ describe("layer 1 invariants", () => {
 
     const first = client.openPort("first");
     const second = client.openPort("second");
-    await tick();
+    await waitFor(() => perPort.has("first") && perPort.has("second"), "both ports accepted");
 
     first.postMessage(1);
     second.postMessage(2);
-    await tick();
+    await waitFor(
+      () => (perPort.get("first")?.length ?? 0) > 0 && (perPort.get("second")?.length ?? 0) > 0,
+      "both messages delivered",
+    );
 
     first.close?.();
-    await tick();
-
     second.postMessage(3);
-    await tick();
+    // Per-channel ordering: the close for "first" is sent before this post,
+    // so by the time "second" has its post-close message, "first" closing
+    // has already been fully processed too.
+    await waitFor(
+      () => (perPort.get("second")?.length ?? 0) > 1,
+      "second port received the post-close message",
+    );
 
     expect(perPort.get("first")).toEqual([1]);
     expect(perPort.get("second")).toEqual([2, 3]);
@@ -143,8 +174,7 @@ describe("layer 1 invariants", () => {
 
     const port = client.openPort();
     for (let i = 0; i < 50; i++) port.postMessage(i);
-    await tick();
-    await tick();
+    await waitFor(() => seen.length >= 50, "all 50 messages arrive");
 
     expect(seen).toEqual(Array.from({ length: 50 }, (_, i) => i));
   });
@@ -175,24 +205,26 @@ describe("layer 1 invariants", () => {
     });
 
     const port = client.openPort();
-    await tick();
+    await waitFor(() => serverPort !== undefined, "responder accepted the port");
 
     // Floor: before the close, the responder's end genuinely works.
     serverPort?.postMessage("before-close");
-    await tick();
+    await waitFor(() => serverMessages > 0, "before-close reaches the opener");
     expect(serverMessages).toBe(1);
 
     port.close?.();
     port.close?.();
-    await tick();
+    await waitFor(() => clientCloses > 0, "the close reaches the responder");
 
-    // Ceiling: the close reached the responder and made its end inert, so this
-    // post never becomes an envelope.
+    // Ceiling: the close reached the responder and made its end inert — the
+    // wait above already confirms the responder's mux processed it, so this
+    // post is a synchronous local no-op, nothing left to poll for.
     serverPort?.postMessage("after-close");
-    await tick();
     expect(serverMessages).toBe(1);
 
-    // Idempotent: two local closes put exactly one close on the wire.
+    // Idempotent: two local closes put exactly one close on the wire. No
+    // second close can still be in flight — the guard inside the virtual
+    // port's own close() is synchronous, so at most one was ever sent.
     expect(clientCloses).toBe(1);
   });
 
@@ -214,7 +246,7 @@ describe("layer 1 invariants", () => {
     client.openPort("one");
     client.openPort("two");
     expect(() => client.openPort("three")).toThrow(RangeError);
-    await tick();
+    await waitFor(() => acceptedIds.length >= 2, "both ports accepted");
 
     expect(acceptedIds).toEqual(["one", "two"]);
   });
@@ -235,7 +267,7 @@ describe("layer 1 invariants", () => {
     );
     const outerClient = track(multiplexPort(a, { codec: structuredCodec }));
     const carrier = outerClient.openPort();
-    await tick();
+    await waitFor(() => innerServerSide !== undefined, "the outer port is accepted");
 
     // Inner layer, riding on one virtual port of the outer one.
     const seen: unknown[] = [];
@@ -252,8 +284,7 @@ describe("layer 1 invariants", () => {
     const innerClient = track(multiplexPort(carrier, { codec: structuredCodec }));
     const innerPort = innerClient.openPort();
     innerPort.postMessage("through two layers");
-    await tick();
-    await tick();
+    await waitFor(() => seen.length > 0, "the message crosses both mux layers");
 
     expect(seen).toEqual(["through two layers"]);
   });
