@@ -1,4 +1,5 @@
 export * from "./collect.js";
+export * from "./duplex.js";
 export * from "./emulate-mux.js";
 export * from "./errors.js";
 export * from "./flow-control.js";
