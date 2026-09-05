@@ -128,7 +128,7 @@ Create `packages/webrun-ports/package.json`:
 }
 ```
 
-`@statewalker/webrun-streams` appears under `dependencies` because the published `.d.ts` refers to its types. It is **never imported at runtime** — Task 1 Step 8 verifies that mechanically.
+`@statewalker/webrun-streams` appears under `dependencies` because the published `.d.ts` refers to its types. It is **never imported at runtime** — Task 1 Step 9 verifies that mechanically.
 
 - [ ] **Step 2: Create the TypeScript and bundler configs**
 
@@ -174,7 +174,33 @@ Add to `tsconfig.base.json`'s `compilerOptions.paths`, keeping the map alphabeti
     "@statewalker/webrun-ports": ["./packages/webrun-ports/src"],
 ```
 
-- [ ] **Step 3: Write the failing codec test**
+- [ ] **Step 3: Link the new package into the workspace**
+
+A package that pnpm has never installed has no `node_modules`, so `vitest`,
+`typescript`, `rimraf` and `rolldown` are not resolvable inside it and every
+later step fails at the shell rather than at an assertion.
+
+```bash
+cd /home/kotelnikov/workspace-statewalker/umbrella-next/worktrees/dev && pnpm install
+```
+
+Run it from the **assembly root** (`worktrees/dev/`), not from the umbrella root
+and not from this package. The umbrella root's `pnpm-workspace.yaml` globs
+`workspaces/*`, a directory that does not exist there, so an install run from it
+is a silent no-op. The assembly's `pnpm-lock.yaml` is gitignored, so this
+changes no tracked file.
+
+Verify the link before continuing:
+
+```bash
+ls /home/kotelnikov/workspace-statewalker/umbrella-next/worktrees/dev/workspaces/webrun-wire/packages/webrun-ports/node_modules/.bin/vitest
+```
+
+Expected: the path exists. If it does not, the package was not picked up — check
+that `package.json` is valid JSON and that the directory sits directly under
+`packages/`.
+
+- [ ] **Step 4: Write the failing codec test**
 
 Create `packages/webrun-ports/tests/structured-codec.test.ts`:
 
@@ -253,7 +279,7 @@ describe("structuredCodec", () => {
 });
 ```
 
-- [ ] **Step 4: Run and watch it fail**
+- [ ] **Step 5: Run and watch it fail**
 
 ```bash
 pnpm --filter @statewalker/webrun-ports exec vitest run tests/structured-codec.test.ts
@@ -266,7 +292,7 @@ Expected: **exit 1, a startup error, and `Tests  no tests`** — not a failed as
 Error: Cannot find module '../src/structured-codec.js' imported from <repo>/packages/webrun-ports/tests/structured-codec.test.ts
 ```
 
-- [ ] **Step 5: Write the types**
+- [ ] **Step 6: Write the types**
 
 Create `packages/webrun-ports/src/types.ts`:
 
@@ -341,7 +367,7 @@ export interface PortMux {
 }
 ```
 
-- [ ] **Step 6: Write the codec**
+- [ ] **Step 7: Write the codec**
 
 Create `packages/webrun-ports/src/structured-codec.ts`:
 
@@ -385,7 +411,7 @@ export { structuredCodec } from "./structured-codec.js";
 export type { PortCodec, PortEnvelope, PortMux, PortMuxOptions } from "./types.js";
 ```
 
-- [ ] **Step 7: Run and verify green**
+- [ ] **Step 8: Run and verify green**
 
 ```bash
 pnpm --filter @statewalker/webrun-ports exec vitest run tests/structured-codec.test.ts
@@ -393,7 +419,7 @@ pnpm --filter @statewalker/webrun-ports exec vitest run tests/structured-codec.t
 
 Expected: 5 tests passing.
 
-- [ ] **Step 8: Verify the type-only dependency mechanically**
+- [ ] **Step 9: Verify the type-only dependency mechanically**
 
 The zero-runtime-dependency claim must be checked, not asserted:
 
@@ -404,7 +430,7 @@ grep -c "webrun-streams" packages/webrun-ports/dist/index.js
 
 Expected: `0`. The bundle must contain no reference to `@statewalker/webrun-streams`, because every import of it is a `import type` that TypeScript erases. If this prints anything other than `0`, a value import crept in — find it before continuing.
 
-- [ ] **Step 9: Lint, typecheck and commit**
+- [ ] **Step 10: Lint, typecheck and commit**
 
 ```bash
 pnpm --filter @statewalker/webrun-ports lint
