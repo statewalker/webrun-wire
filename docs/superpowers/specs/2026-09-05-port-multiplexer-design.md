@@ -125,6 +125,14 @@ synchronous — `createDataChannel` needs a wait-for-open and `dialProtocol` is 
 are only interchangeable if they share a shape. The emulated implementation returns an
 already-resolved promise, so it still costs no round trip (D5's send-before-accept still holds).
 
+**Consequence for callers, found during Plan B1's execution:** guard violations now surface as
+**rejected promises, not synchronous throws**. `openPort` past `maxPorts`, or on a closed mux,
+rejects with the same error it used to throw — so a caller doing `try { mux.openPort() } catch`
+around a bare call will no longer catch it. This is deliberate: a function returning a promise
+should never also throw synchronously, because that forces every caller to handle two error paths.
+Three tests asserted the old synchronous behaviour and were updated to `.rejects.toThrow`; the error
+types and triggering conditions are unchanged.
+
 **D3. A port sends and receives messages. Nothing else.** No confirmation, no backpressure, no
 credit, no flow control, and no buffering ceiling at layer 1. This matches `MessagePort` semantics
 exactly. Backpressure and waiting strategies belong above.
