@@ -301,6 +301,19 @@ acceptance are sent; if the peer rejects, they are dropped at the far end and th
 receives a `CLOSE`. This keeps layer 1 free of round trips — a caller that needs confirmation
 builds it at layer 2, where confirmation already exists.
 
+**Rejection is not observable at layer 1, and layer 2 must handle that.** Found during Plan A's
+implementation: `MessageTarget` has no close event and no `onclose`, and the port `openPort` returns
+exposes no queryable state, so after a rejection `postMessage` simply becomes a no-op — no error, no
+event, no callback. A consumer at this layer cannot distinguish a rejected port from a working one.
+
+That is consistent with D3 (a port sends and receives messages, nothing else) and it is not a defect
+to fix here. But it is a **requirement on layer 2**: a stream opened on a port the peer rejects must
+fail rather than hang forever waiting for a confirmation that will never come. `duplexOverPort`'s
+per-stream timeout (D8) is the backstop, and the explicit close notification is the fast path — but
+a rejected port never sends one, so the timeout is the *only* signal. Plan B must test that case
+explicitly: open a stream against a responder that rejects, and assert the stream fails rather than
+hanging.
+
 ### Envelopes
 
 Layer 1 exchanges three envelope types. Their wire representation is the codec's business.
