@@ -15,6 +15,7 @@
       "@statewalker/webrun-http-browser/sw": ["./packages/webrun-http-browser/src/sw"],
       "@statewalker/webrun-http-streams": ["./packages/webrun-http-streams/src"],
       "@statewalker/webrun-msgpack": ["./packages/webrun-msgpack/src"],
+      "@statewalker/webrun-rpc": ["./packages/webrun-rpc/src"],
         "@statewalker/webrun-rpc-http": ["./packages/webrun-rpc-http/src"],
       "@statewalker/webrun-site-builder": ["./packages/webrun-site-builder/src"],
       "@statewalker/webrun-site-host": ["./packages/webrun-site-host/src"],
@@ -23,7 +24,6 @@
       "@statewalker/webrun-streams-libp2p": ["./packages/webrun-streams-libp2p/src"],
       "@statewalker/webrun-streams-livekit": ["./packages/webrun-streams-livekit/src"],
       "@statewalker/webrun-streams-peerjs": ["./packages/webrun-streams-peerjs/src"],
-      "@statewalker/webrun-streams-port": ["./packages/webrun-streams-port/src"],
       "@statewalker/webrun-streams-signaling": ["./packages/webrun-streams-signaling/src"],
       "@statewalker/webrun-streams-webrtc": ["./packages/webrun-streams-webrtc/src"],
       "@statewalker/webrun-streams-ws": ["./packages/webrun-streams-ws/src"]

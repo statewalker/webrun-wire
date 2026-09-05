@@ -97,7 +97,7 @@ webrun-streams        (foundation — the Duplex seam, emulateMux, iterator/stre
 webrun-msgpack        (foundation — length-prefixed MessagePack frame codec)
     ▲
     ├── transport adapters — each supplies a Duplex over a concrete transport
-    │     webrun-streams-port        (MessagePort — workers, iframes, in-process)
+    │     webrun-rpc                 (ports + RPC: MessagePort, workers, iframes)
     │     webrun-streams-ws          (WebSocket)
     │     webrun-streams-livekit     (LiveKit data channel)
     │     webrun-streams-peerjs      (PeerJS DataConnection)
@@ -266,7 +266,7 @@ neither needs it.
 
 | Package | Version | Transport | Peer deps |
 | --- | --- | --- | --- |
-| [`@statewalker/webrun-streams-port`](./packages/webrun-streams-port) | 0.1.1 | `MessagePort` — workers, iframes, in-process pipes. Also carries a typed-JSON RPC tier (`callPort` / `listenPort` / `callBidi` / `ioSend`). | — |
+| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.1.1 | Ports and RPC over them: `multiplexPort`, and typed request/response and streaming primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
 | [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | 0.1.1 | WebSocket. Browser-native, or Node via an injected constructor. | — |
 | [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | 0.1.1 | WebRTC data channels — one per call, with a 1-byte DATA/END/ERROR frame for half-close and error propagation. | — |
 | [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | 0.1.1 | libp2p streams, with an authenticated `remotePeer` available to handlers via `serveConnections`. | `libp2p`, `@libp2p/interface`, `@multiformats/multiaddr` |

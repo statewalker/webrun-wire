@@ -1,9 +1,9 @@
 {
-  "name": "@statewalker/webrun-streams-port",
+  "name": "@statewalker/webrun-rpc",
   "version": "0.1.1",
   "private": false,
   "type": "module",
-  "description": "MessagePort-backed Connect/Serve adapter + typed-JSON RPC primitives in the webrun-streams-* family",
+  "description": "Ports and RPC over them: a port multiplexer, and typed request/response and streaming primitives over any MessageTarget.",
   "homepage": "https://github.com/statewalker/webrun-wire",
   "author": {
     "name": "Mikhail Kotelnikov",
@@ -12,7 +12,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:statewalker/webrun-wire.git"
+    "url": "git@github.com:statewalker/webrun-wire.git",
+    "directory": "packages/webrun-rpc"
   },
   "exports": {
     ".": {
