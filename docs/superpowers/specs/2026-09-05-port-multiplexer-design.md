@@ -157,6 +157,38 @@ multiplexing. The request is the chunk, the reply is the confirmation, and `call
 exists and is tested. On a dedicated port with one call outstanding there is no `callId`
 contention and no shared timeout, which is what made this unworkable on a shared port.
 
+**D14. Calls share one control port; streams get a port each.** `callPort` already demultiplexes
+concurrent calls on one port by `callId` — that is what the `callId` machinery is for — so a
+one-shot call costs a request and a reply rather than `OPEN`/request/reply/`CLOSE`. Streams need
+their own port because backpressure is per port (D11): two streams sharing one would throttle each
+other. The initiator opens the single control port; `callPort`/`listenPort` on both ends make it
+bidirectional. Layer 2 distinguishes the two kinds with a discriminator in `OPEN`'s `meta`
+(`{ kind: "control" }` / `{ kind: "stream" }`), which layer 1 passes through without inspecting.
+
+**D15. The receiver enforces the window; violation closes that virtual port.** A stream handler
+checks that it has sent the confirmation for the previous chunk before accepting the next. A second
+unconfirmed chunk is a protocol violation, not a resource question, so no byte ceiling and no
+tunable threshold is needed. The penalty is scoped to the offending virtual port; the mux and every
+other port are untouched.
+
+This gives memory a *provable* bound rather than a configured one:
+
+```
+worst case  =  maxPorts  ×  one chunk  ≤  maxPorts × maxMessageSize
+```
+
+Layer 1 holds nothing (D3), drops for ports with no consumer (D5), and bounds port count
+(`maxPorts`); layer 2 holds at most one chunk per open stream. There is nowhere left to accumulate.
+`emulateMux` could not make this claim — its `maxStreamBuffer` was a guessed ceiling.
+
+The 19-test hostile suite re-points at layer 2 with its questions intact, and "what happens under a
+flood" gets a deterministic answer: the port closes on the second unconfirmed chunk.
+
+**Consequence for D13.** A future windowed sender is, by this rule, a protocol violator against a
+non-windowed receiver. Windowing must therefore advertise its window in `OPEN`'s `meta` so both
+ends agree before the first chunk. That is a requirement on D13, recorded now while the reason is
+visible.
+
 **D13. Per-stream windowing is deferred, deliberately.** Allowing several chunks in flight per
 stream is a stated future step, not an omission. The cost of deferring is that single-stream
 throughput is `chunk ÷ RTT`: negligible in-process, ~0.9 s for 10 MiB on a LAN WebSocket, and
@@ -350,11 +382,18 @@ native implementation (D2).
 | adapter | `PortMux` | mechanism | `maxMessageSize` |
 | --- | --- | --- | --- |
 | `-port` | native | `MessageChannel` + port transfer, the F2 pattern | none |
-| `-webrtc` | native | `createDataChannel` / `ondatachannel` | none |
+| `-webrtc` | native | `createDataChannel` / `ondatachannel` | **16 KiB** |
 | `-libp2p` | native | `dialProtocol` / `node.handle`, yamux streams | none |
 | `-ws` | emulated | one socket as a port carrying `Uint8Array`, `msgpackCodec` | none |
 | `-livekit` | emulated | room + peer identity as a byte port, `msgpackCodec` | **12 KiB** |
 | `-peerjs` | emulated | `DataConnection` as a byte port, `serialization: "raw"`, `msgpackCodec` | none |
+
+`-webrtc`'s limit is not incidental: `duplex-over-data-channel.ts` already chunks to
+`DC_MTU = 16 * 1024`, commented *"conservative across browsers"*, because a DataChannel message
+above the negotiated maximum fails rather than fragmenting. A native `PortMux` must report it, or
+the limit silently disappears when the chunking currently doing that job is deleted. `-peerjs`
+rides on WebRTC too and its ceiling is **unverified** — it must be measured before that adapter is
+migrated, not assumed absent.
 
 The three native rows keep the flow control and scheduling their transports already provide —
 yamux's credit window, the browser's DataChannel scheduling, the structured-clone queue — instead
