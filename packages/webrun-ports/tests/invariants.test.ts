@@ -228,7 +228,11 @@ describe("layer 1 invariants", () => {
     expect(clientCloses).toBe(1);
   });
 
-  it("refuses to open beyond maxPorts, and rejects an inbound OPEN beyond it", async () => {
+  // The inbound half — a forged OPEN past the ceiling — is covered
+  // separately in lifecycle.test.ts's "rejects an inbound OPEN once the
+  // responder's own maxPorts is reached": a conforming client throws locally
+  // before ever emitting a third OPEN, so this test cannot reach that path.
+  it("refuses to open beyond maxPorts locally", async () => {
     const { a, b } = newChannel();
     const acceptedIds: unknown[] = [];
     track(

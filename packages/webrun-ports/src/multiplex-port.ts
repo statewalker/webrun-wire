@@ -108,6 +108,10 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       if (open.size >= maxPorts) {
         throw new RangeError(`webrun-ports: maxPorts (${maxPorts}) reached`);
       }
+      // A hostile or misconfigured peer may have opened using our own
+      // parity. Skipping a claimed id costs one line and keeps a local open
+      // from silently taking over a handle the peer is already using.
+      while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
       const handle = attach(id);
