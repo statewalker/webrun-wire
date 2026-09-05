@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@statewalker/webrun-http-streams": "workspace:*",
+    "@statewalker/webrun-rpc": "workspace:*",
     "@statewalker/webrun-streams": "workspace:*",
     "idb-keyval": "catalog:"
   },
