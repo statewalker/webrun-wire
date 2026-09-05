@@ -1378,9 +1378,15 @@ and is not.
 
 **Row 6 is the isolation test's real killer.** Deleting `open.delete(id)` from `requestClose` — the
 obvious-looking mutation — does *not* turn the isolation test red, because that map entry is only
-consulted for inbound traffic and the peer has already closed its own end. Do not add a test purely
-to make that deletion detectable; note it as uncovered instead. It is bookkeeping hygiene, not a
-behaviour anything can observe.
+consulted for inbound traffic and the peer has already closed its own end.
+
+**This paragraph originally called that deletion "bookkeeping hygiene, not a behaviour anything can
+observe", and told you not to test it. That was wrong, and the final review measured it.** Ids are
+never retired without it, so `maxPorts` starts bounding *total opens* rather than concurrency: a mux
+with `maxPorts: 1024` dies at cycle 1024 of a 5000-cycle open-then-close churn with a `RangeError`.
+That directly violates the spec's D19. The line is load-bearing, and the test that proves it is a
+churn loop of several thousand sequential open/close cycles asserting the mux never throws — not a
+contrived probe of the map. Write it.
 
 **The inbound `maxPorts` path is not covered by any row**, because the current `maxPorts` test only
 exercises the outbound throw. If you want it covered, forge a third inbound OPEN directly onto the
@@ -1483,9 +1489,17 @@ const server = multiplexPort(channel.port2, {
 // The initiator opens them.
 const client = multiplexPort(channel.port1, { codec: structuredCodec });
 const chat = client.openPort("chat");
-chat.addEventListener("message", (event) => console.log(event.data));
+
+// Await the reply before closing. MessageChannel delivery is an async
+// macrotask, so closing straight after `postMessage` tears both muxes down
+// before a single envelope is processed — the example then prints nothing.
+// An earlier draft of this plan did exactly that, and its own Step 4 check
+// passed anyway because the check script had a sleep the example did not.
+const reply = new Promise<unknown>((resolve) => {
+  chat.addEventListener("message", (event) => resolve(event.data));
+});
 chat.postMessage("hello");
-// -> "echo: hello"
+console.log(await reply); // -> "echo: hello"
 
 await client.close();
 await server.close();
