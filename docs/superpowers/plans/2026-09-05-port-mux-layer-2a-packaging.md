@@ -252,7 +252,7 @@ pnpm --filter @statewalker/webrun-rpc test
 pnpm -r test
 ```
 
-Expected: `webrun-streams` **loses 40 tests** (5 codec + 8 virtual-port + 6 multiplex-port + 7 invariants + 8 lifecycle + 6 message-target), and `webrun-rpc` gains exactly those 40. The repo-wide total is unchanged, because nothing was added or removed — only moved. **If the repo-wide total changes, stop**: a test was lost in the move.
+Expected: `webrun-streams` **loses 36 tests** (5 codec + 8 virtual-port + 6 multiplex-port + 7 invariants + 8 lifecycle + 2 message-target), and `webrun-rpc` gains exactly those 36. Measured during execution: `webrun-streams` 201 -> 165, `webrun-rpc` 35 -> 71. An earlier draft of this line guessed 40 by assuming `message-target.test.ts` held 6 tests; it holds 2. The repo-wide total is unchanged, because nothing was added or removed — only moved. **If the repo-wide total changes, stop**: a test was lost in the move.
 
 - [ ] **Step 7: Lint and commit**
 
@@ -656,7 +656,7 @@ example that did not work while its check reported success."
 | `webrun-rpc` exports `virtual-port` | **no** — never |
 | 15-run loop on `webrun-rpc` | 0 failures |
 
-Per-task deltas: Task 2 moves 40 tests between packages (net zero). Task 3 adds 1. Tasks 1, 4 and 5 add none.
+Per-task deltas: Task 2 moves 36 tests between packages (net zero). Task 3 adds 1. Tasks 1, 4 and 5 add none.
 
 ## What Plan B2 will need from this
 
