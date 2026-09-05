@@ -54,7 +54,9 @@ describe("layer 1 invariants", () => {
         side: "responder",
         onPort: (port, meta) => {
           opened.push(meta);
-          port.addEventListener("message", (event) => accepted.push(event.data));
+          port.addEventListener("message", (event) => {
+            accepted.push(event.data);
+          });
         },
       }),
     );
@@ -92,7 +94,9 @@ describe("layer 1 invariants", () => {
         side: "responder",
         onPort: (port) => {
           serverPort = port;
-          port.addEventListener("message", (event) => seen.push(event.data));
+          port.addEventListener("message", (event) => {
+            seen.push(event.data);
+          });
         },
       }),
     );
@@ -127,7 +131,9 @@ describe("layer 1 invariants", () => {
         onPort: (port, meta) => {
           const log: unknown[] = [];
           perPort.set(meta, log);
-          port.addEventListener("message", (event) => log.push(event.data));
+          port.addEventListener("message", (event) => {
+            log.push(event.data);
+          });
         },
       }),
     );
@@ -166,7 +172,9 @@ describe("layer 1 invariants", () => {
         codec: structuredCodec,
         side: "responder",
         onPort: (port) => {
-          port.addEventListener("message", (event) => seen.push(event.data as number));
+          port.addEventListener("message", (event) => {
+            seen.push(event.data as number);
+          });
         },
       }),
     );
@@ -281,7 +289,9 @@ describe("layer 1 invariants", () => {
         codec: structuredCodec,
         side: "responder",
         onPort: (port) => {
-          port.addEventListener("message", (event) => seen.push(event.data));
+          port.addEventListener("message", (event) => {
+            seen.push(event.data);
+          });
         },
       }),
     );

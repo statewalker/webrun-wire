@@ -50,7 +50,9 @@ describe("multiplexPort", () => {
         codec: structuredCodec,
         side: "responder",
         onPort: (port) => {
-          port.addEventListener("message", (event) => received.push(event.data));
+          port.addEventListener("message", (event) => {
+            received.push(event.data);
+          });
         },
       }),
     );
@@ -102,7 +104,9 @@ describe("multiplexPort", () => {
 
     const port = client.openPort();
     const atClient: unknown[] = [];
-    port.addEventListener("message", (event) => atClient.push(event.data));
+    port.addEventListener("message", (event) => {
+      atClient.push(event.data);
+    });
     port.postMessage("one");
     await waitFor(() => atServer.length > 0, "server received the message");
     await waitFor(() => atClient.length > 0, "client received the echo");
@@ -149,7 +153,9 @@ describe("multiplexPort", () => {
         codec: structuredCodec,
         side: "responder",
         onPort: (port) => {
-          port.addEventListener("message", (event) => delivered.push(event.data));
+          port.addEventListener("message", (event) => {
+            delivered.push(event.data);
+          });
           return false;
         },
       }),

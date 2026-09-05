@@ -16,8 +16,12 @@ describe("virtual port", () => {
       () => {},
     );
     const seen: unknown[] = [];
-    port.addEventListener("message", (event) => seen.push(event.data));
-    port.addEventListener("message", (event) => seen.push(event.data));
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
     deliver("hello");
     expect(seen).toEqual(["hello", "hello"]);
   });
@@ -29,8 +33,12 @@ describe("virtual port", () => {
     );
     const kept: unknown[] = [];
     const dropped: unknown[] = [];
-    const keptListener = (event: MessageEvent) => kept.push(event.data);
-    const droppedListener = (event: MessageEvent) => dropped.push(event.data);
+    const keptListener = (event: MessageEvent) => {
+      kept.push(event.data);
+    };
+    const droppedListener = (event: MessageEvent) => {
+      dropped.push(event.data);
+    };
     port.addEventListener("message", keptListener);
     port.addEventListener("message", droppedListener);
     port.removeEventListener("message", droppedListener);
@@ -53,7 +61,9 @@ describe("virtual port", () => {
     const send = vi.fn();
     const { port, deliver, markClosed } = newVirtualPort(send, () => {});
     const seen: unknown[] = [];
-    port.addEventListener("message", (event) => seen.push(event.data));
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
 
     deliver("before");
     port.postMessage("out");
@@ -77,7 +87,9 @@ describe("virtual port", () => {
     port.addEventListener("message", () => {
       throw new Error("listener blew up");
     });
-    port.addEventListener("message", (event) => seen.push(event.data));
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
     expect(() => deliver("x")).not.toThrow();
     expect(seen).toEqual(["x"]);
   });
@@ -92,7 +104,9 @@ describe("virtual port", () => {
     );
     const seen: unknown[] = [];
     markClosed();
-    port.addEventListener("message", (event) => seen.push(event.data));
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
     deliver("x");
     expect(seen).toEqual([]);
   });
@@ -105,7 +119,9 @@ describe("virtual port", () => {
       () => {},
     );
     const seen: unknown[] = [];
-    port.addEventListener("message", (event) => seen.push(event.data));
+    port.addEventListener("message", (event) => {
+      seen.push(event.data);
+    });
     deliver("x");
     expect(seen).toEqual(["x"]);
   });

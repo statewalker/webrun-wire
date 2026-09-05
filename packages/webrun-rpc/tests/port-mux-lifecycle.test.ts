@@ -170,7 +170,9 @@ describe("layer 1 lifecycle and limits", () => {
         side: "responder",
         onPort: (port, meta) => {
           opened.push(meta);
-          port.addEventListener("message", (event) => delivered.push(event.data));
+          port.addEventListener("message", (event) => {
+            delivered.push(event.data);
+          });
         },
       }),
     );
@@ -199,7 +201,9 @@ describe("layer 1 lifecycle and limits", () => {
         // default side: "initiator" — allocates ids 0, 2, 4, ...
         onPort: (port, meta) => {
           acceptedIds.push(meta);
-          port.addEventListener("message", (event) => messagesForHostileId.push(event.data));
+          port.addEventListener("message", (event) => {
+            messagesForHostileId.push(event.data);
+          });
         },
       }),
     );
@@ -245,7 +249,9 @@ describe("layer 1 lifecycle and limits", () => {
 
     const port = mux.openPort();
     const events: unknown[] = [];
-    port.addEventListener("message", (event) => events.push(event));
+    port.addEventListener("message", (event) => {
+      events.push(event);
+    });
     // Sanity: the port is live before close() — postMessage does not throw.
     expect(() => port.postMessage("x")).not.toThrow();
 
