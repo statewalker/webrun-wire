@@ -101,6 +101,13 @@ Ratified in conversation on 2026-09-05.
 channel-to-ports. This makes it composable: a multiplexer over a virtual port yields further
 virtual ports with no special case.
 
+`PortMux` is an **interface**. `webrun-ports` ships the default implementation, which emulates
+multiplexing over a single port. A transport that already multiplexes natively supplies its own
+compatible implementation from its own package — `-libp2p` from `dialProtocol`/`node.handle`,
+`-webrtc` from `createDataChannel`/`ondatachannel`, `-port` from `MessageChannel` transfer.
+Emulation therefore happens only where the transport genuinely offers one pipe, and `webrun-ports`
+never imports a transport's types.
+
 **D3. A port sends and receives messages. Nothing else.** No confirmation, no backpressure, no
 credit, no flow control, and no buffering ceiling at layer 1. This matches `MessagePort` semantics
 exactly. Backpressure and waiting strategies belong above.
@@ -132,6 +139,29 @@ says nothing.
 
 **D9. `Duplex` remains layer 2's output.** `Connect`/`Serve` and the entire L0–L6 conformance suite
 therefore apply to the new stack unchanged, and are the regression net for the migration.
+
+**D10. Message size is data, not a constant.** `PortMux` exposes an optional
+`maxMessageSize?: number`; layer 2 chunks to it. LiveKit's mux reports 12 KiB, a `MessagePort`
+reports nothing, and no layer hardcodes another layer's limit. Fragmenting *below* the multiplexer
+was rejected: a 10 MiB message would become ~800 transport packets that block every other port
+behind them, reintroducing head-of-line blocking underneath the layer that exists to prevent it.
+
+**D11. A stream is sequential; concurrency comes from having many streams.** Within one stream,
+the next chunk is never sent until the previous one is delivered *and* confirmed — window of one.
+Between streams there is no coupling at all, because each stream owns a separate virtual port and
+layer 1 gives ports no shared state. This is what "clean backpressure" buys: the confirmation is
+the only mechanism, and it cannot be gamed by pipelining.
+
+**D12. Each stream uses `callPort` on its own virtual port** — never on the root port used for
+multiplexing. The request is the chunk, the reply is the confirmation, and `callPort` already
+exists and is tested. On a dedicated port with one call outstanding there is no `callId`
+contention and no shared timeout, which is what made this unworkable on a shared port.
+
+**D13. Per-stream windowing is deferred, deliberately.** Allowing several chunks in flight per
+stream is a stated future step, not an omission. The cost of deferring is that single-stream
+throughput is `chunk ÷ RTT`: negligible in-process, ~0.9 s for 10 MiB on a LAN WebSocket, and
+**~43 s for 10 MiB over a 50 ms WAN round trip** (854 sequential round trips). Applications that
+parallelise across streams are unaffected, because those streams genuinely run concurrently.
 
 ---
 
@@ -169,12 +199,19 @@ export interface PortMuxOptions {
 }
 
 export interface PortMux {
-  /** Allocate an id, send OPEN, return the local end immediately. */
+  /** Allocate a port, announce it, return the local end immediately. */
   openPort(meta?: unknown): MessageTarget;
-  /** Close every virtual port, then the underlying port. */
+  /** Close every virtual port, then release the underlying transport. */
   close(): Promise<void>;
+  /**
+   * Largest message this mux's ports can carry, if the transport imposes one.
+   * Undefined means unlimited. Layer 2 chunks to it (D10); layer 1 never
+   * inspects a payload's size itself.
+   */
+  readonly maxMessageSize?: number;
 }
 
+/** The default implementation: emulates multiplexing over a single port. */
 export function multiplexPort(port: MessageTarget, options: PortMuxOptions): PortMux;
 ```
 
@@ -275,9 +312,16 @@ This is the direct fix for F5, and its regression test is a consumer deliberatel
 old 1000 ms default completing successfully.
 
 **`duplexOverPort(port, options): Duplex`** is the adapter that satisfies D9. One port in, one
-`Duplex` out. It owns chunk framing, the acknowledgement handshake, half-close, error propagation
-and the per-stream timeout — everything `emulateMux` did per stream, minus multiplexing, minus
-credit.
+`Duplex` out. It owns chunk framing, half-close, error propagation and the per-stream timeout —
+everything `emulateMux` did per stream, minus multiplexing, minus credit.
+
+Its acknowledgement mechanism is `callPort` on that stream's own port (D12), one call per chunk,
+one call outstanding at a time (D11). The request carries the chunk; the reply, withheld until the
+consumer has pulled past the value, is the confirmation. No new stream protocol is introduced and
+no `callId` demultiplexing is needed, because the port carries exactly one stream.
+
+Chunks are sized to `mux.maxMessageSize` when the mux declares one (D10), using `toChunks` from
+`webrun-streams`.
 
 ### The receive buffer ceiling
 
@@ -300,17 +344,25 @@ stream, exhausted ids — remain exactly right; only the layer that answers them
 
 Each adapter's job reduces to producing a single `MessageTarget`.
 
-| adapter | port it exposes | codec | note |
-| --- | --- | --- | --- |
-| `-port` | the `MessagePort` itself | `structuredCodec` | `byteChannelFromMessagePort` is deleted. |
-| `-ws` | socket wrapped as a port carrying `Uint8Array` | `msgpackCodec` | |
-| `-livekit` | room + peer identity as a port carrying `Uint8Array` | `msgpackCodec` | 12 KiB payload ceiling still applies; see Risks. |
-| `-peerjs` | `DataConnection` as a port carrying `Uint8Array` | `msgpackCodec` | `serialization: "raw"` as today. |
-| `-webrtc` | one `RTCDataChannel` as a port carrying `Uint8Array` | `msgpackCodec` | Gains multiplexing it currently gets from channel-per-call. |
-| `-libp2p` | one yamux stream as a port carrying `Uint8Array` | `msgpackCodec` | Native muxing becomes redundant; see Risks. |
+Each adapter supplies a `PortMux`: either the default emulated one over a single port, or its own
+native implementation (D2).
 
-`-webrtc` and `-libp2p` are the two that lose native multiplexing under this design. That is a real
-trade and it is called out in Risks rather than assumed away.
+| adapter | `PortMux` | mechanism | `maxMessageSize` |
+| --- | --- | --- | --- |
+| `-port` | native | `MessageChannel` + port transfer, the F2 pattern | none |
+| `-webrtc` | native | `createDataChannel` / `ondatachannel` | none |
+| `-libp2p` | native | `dialProtocol` / `node.handle`, yamux streams | none |
+| `-ws` | emulated | one socket as a port carrying `Uint8Array`, `msgpackCodec` | none |
+| `-livekit` | emulated | room + peer identity as a byte port, `msgpackCodec` | **12 KiB** |
+| `-peerjs` | emulated | `DataConnection` as a byte port, `serialization: "raw"`, `msgpackCodec` | none |
+
+The three native rows keep the flow control and scheduling their transports already provide —
+yamux's credit window, the browser's DataChannel scheduling, the structured-clone queue — instead
+of flattening it and re-emulating. `-port` also stops flattening a `MessagePort` to bytes, so
+structured clone and zero-copy transfer survive.
+
+Only `-ws`, `-livekit` and `-peerjs` are genuinely single-pipe transports, and only they run the
+emulated multiplexer.
 
 ---
 
@@ -323,10 +375,15 @@ trade and it is called out in Risks rather than assumed away.
   implementation detail inside byte-transport adapters, if at all.
 - `callBidi`'s `channelName` multiplexing.
 - **Most of `docs/superpowers/plans/2026-09-04-credit-flow-control.md`.** Its credit design assumed
-  a byte-level multiplexer that owns a window per stream. Layer 1 has no flow control, so
-  `flow-control.ts` and `uint32.ts` lose their consumer. `flow-control.ts` may find a second life
-  inside `duplexOverPort` if per-stream windowing beats ack-per-chunk, but that is **unproven and
-  must not be assumed** — the ack mechanism (F4) is what this design specifies.
+  a byte-level multiplexer that owns a window per stream. Layer 1 has no flow control, and under
+  D11/D13 layer 2 ships a window of one, so `flow-control.ts` and `uint32.ts` have **no consumer**
+  in this design.
+
+  They are kept, not deleted, and marked dormant. Per-stream windowing (D13) is a stated future
+  step and `newCreditLedger`/`newCreditGrantor` are exactly its mechanism — the grantor is already
+  the replenishment *policy* object, so windowing arrives as configuration rather than as new code.
+  Deleting them would mean rewriting proven, mutation-tested code later. A dormant module with a
+  README line saying so is cheaper and honest; an unused export that claims to be wired up is not.
 
 What survives from that work and carries forward: the conformance suite including L6, the three
 browser harnesses and the four adapter bugs they exposed, the hostile suite's questions, and
@@ -391,24 +448,25 @@ feature still works. Layer 1's drop-don't-queue tests are especially exposed to 
 
 ## Risks and open questions
 
-**R1. `-webrtc` and `-libp2p` lose native multiplexing.** Both currently get per-call channels from
-the transport — an `RTCDataChannel` per call, a yamux stream per call — and would move to one
-channel plus layer 1. That trades a battle-tested native muxer for ours, and for libp2p it discards
-yamux's own credit-window flow control. **Open:** whether these two should instead expose their
-native per-call primitive as a `PortMux` implementation, so layer 2 sees ports either way and no
-emulation happens. This is the most likely place the design is wrong, and it should be settled
-before layer 3 is planned.
+**R1. RESOLVED — native multiplexing is preserved.** `PortMux` is an interface (D2), so `-webrtc`,
+`-libp2p` and `-port` supply native implementations and keep the flow control and scheduling their
+transports already provide. Emulation is confined to genuinely single-pipe transports. The residual
+risk is that implementations differ in their guarantees — yamux applies flow control, the emulated
+one does not — so conformance, not inspection, is what establishes they are behaviourally
+equivalent at the `Duplex` level.
 
-**R2. Ack-per-chunk throughput is unmeasured against credit.** F4's mechanism costs one round trip
-per chunk. The credit design it replaces was built precisely to avoid that. No measurement compares
-them on a real transport. **Open:** benchmark `duplexOverPort` against the current `emulateMux` on
-`-ws` before deleting the latter.
+**R2. Single-stream throughput is `chunk ÷ RTT`, by decision (D13).** This is not unmeasured; it is
+the behaviour the credit work removed, reintroduced knowingly and confined to one stream. Measured
+consequence: ~43 s for a 10 MiB body over a 50 ms round trip. Concurrency across streams is
+unaffected. **Open:** whether any real workload moves a large body over a single high-RTT stream —
+if so, D13's windowing stops being future work and becomes required. The `-livekit` browser suite
+is the place to find out, since it runs against a real SFU.
 
-**R3. LiveKit's payload ceiling still applies.** Reliable data packets cap near 15 KiB and are
-dropped rather than fragmented; the adapter currently defaults `mtu` to 12 KiB. Layer 1 has no MTU
-concept, so **chunking must live somewhere** — most likely in the LiveKit codec or its port
-wrapper. Unresolved, and it silently corrupted transfers when it was previously missed: a 1 MiB
-body arrived as zero bytes with no error.
+**R3. RESOLVED — `maxMessageSize` on `PortMux` (D10).** LiveKit reports 12 KiB; layer 2 chunks to
+it. No fragmentation exists below the multiplexer, so head-of-line blocking is not reintroduced.
+The residual risk is that a transport limit is *wrong* rather than absent: the previous failure was
+silent, so `-livekit` needs a test that a body many times `maxMessageSize` arrives intact rather
+than as zero bytes.
 
 **R4. `structuredCodec` and `msgpackCodec` are not interchangeable in what they can carry.**
 Structured clone moves `ArrayBuffer`s zero-copy and can carry real `MessagePort`s; msgpack cannot.
