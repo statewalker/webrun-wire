@@ -1,4 +1,4 @@
-import type { PortCodec, PortEnvelope } from "./types.js";
+import type { PortCodec, PortEnvelope } from "./port-types.js";
 
 function isEnvelope(value: unknown): value is PortEnvelope {
   if (typeof value !== "object" || value === null) return false;

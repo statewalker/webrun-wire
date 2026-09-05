@@ -1,4 +1,4 @@
-import type { MessageTarget } from "@statewalker/webrun-streams";
+import type { MessageTarget } from "./message-target.js";
 
 /**
  * What a multiplexer exchanges over the underlying port.

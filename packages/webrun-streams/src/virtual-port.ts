@@ -1,4 +1,4 @@
-import type { MessageListener, MessageTarget } from "@statewalker/webrun-streams";
+import type { MessageListener, MessageTarget } from "./message-target.js";
 
 export interface VirtualPortHandle {
   /** The consumer-facing end. Indistinguishable from a real `MessagePort`. */

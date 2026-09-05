@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { PortEnvelope } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
-import type { PortEnvelope } from "../src/types.js";
 
 /** A MessageTarget stub that records what was posted. */
 function recordingPort() {

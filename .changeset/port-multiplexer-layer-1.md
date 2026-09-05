@@ -1,8 +1,8 @@
 ---
-"@statewalker/webrun-ports": minor
+"@statewalker/webrun-streams": minor
 ---
 
-New package: a port multiplexer.
+A port multiplexer, in the package that already defines its central type.
 
 `multiplexPort` turns one `MessageTarget` into many virtual ones, with explicit
 `open`/`close` lifecycle and an accept callback. Virtual ports are themselves
@@ -13,5 +13,5 @@ Layer 1 has no flow control by design — no backpressure, acknowledgements,
 credit or buffering ceiling — and a message for a port with no consumer is
 dropped rather than queued, so an unaccepted port cannot accumulate memory.
 
-`structuredCodec` ships here; the byte codec lives in `@statewalker/webrun-msgpack`
-so this package keeps zero runtime dependencies.
+`structuredCodec` ships here; a byte codec belongs with `@statewalker/webrun-msgpack`,
+which keeps this package's zero runtime dependencies intact.

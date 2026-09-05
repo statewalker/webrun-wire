@@ -1,5 +1,5 @@
-import type { MessageTarget } from "@statewalker/webrun-streams";
-import type { PortEnvelope, PortMux, PortMuxOptions } from "./types.js";
+import type { MessageTarget } from "./message-target.js";
+import type { PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
 
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */

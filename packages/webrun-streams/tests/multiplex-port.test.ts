@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { multiplexPort } from "../src/multiplex-port.js";
+import type { PortMux } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
-import type { PortMux } from "../src/types.js";
 
 /** Real MessagePorts: a MessagePort satisfies MessageTarget structurally. */
 function newChannel() {
