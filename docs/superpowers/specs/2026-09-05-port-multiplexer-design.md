@@ -114,12 +114,16 @@ Ratified in conversation on 2026-09-05.
 channel-to-ports. This makes it composable: a multiplexer over a virtual port yields further
 virtual ports with no special case.
 
-`PortMux` is an **interface**. `webrun-ports` ships the default implementation, which emulates
-multiplexing over a single port. A transport that already multiplexes natively supplies its own
-compatible implementation from its own package — `-libp2p` from `dialProtocol`/`node.handle`,
-`-webrtc` from `createDataChannel`/`ondatachannel`, `-port` from `MessageChannel` transfer.
-Emulation therefore happens only where the transport genuinely offers one pipe, and `webrun-ports`
-never imports a transport's types.
+`PortMux` is an **interface**, and `openPort` **is a port factory** — the same concept a natively
+multiplexed transport already provides. `webrun-rpc` ships the default implementation, which
+emulates multiplexing over a single port; `-libp2p` and `-webrtc` are factories natively, from
+`dialProtocol` and `createDataChannel`. Emulation happens only where the transport genuinely offers
+one pipe, and no adapter imports anything from this repository to say so (see Layer 3).
+
+**`openPort` is asynchronous**: `(meta?) => Promise<MessageTarget>`. A native factory cannot be
+synchronous — `createDataChannel` needs a wait-for-open and `dialProtocol` is async — and the two
+are only interchangeable if they share a shape. The emulated implementation returns an
+already-resolved promise, so it still costs no round trip (D5's send-before-accept still holds).
 
 **D3. A port sends and receives messages. Nothing else.** No confirmation, no backpressure, no
 credit, no flow control, and no buffering ceiling at layer 1. This matches `MessagePort` semantics
@@ -154,7 +158,9 @@ says nothing.
 therefore apply to the new stack unchanged, and are the regression net for the migration.
 
 **D10. Message size is data, not a constant.** `PortMux` exposes an optional
-`maxMessageSize?: number`; layer 2 chunks to it. LiveKit's mux reports 12 KiB, a `MessagePort`
+`maxMessageSize?: number`, and a single-pipe adapter returns it beside its port
+(`{ port, maxMessageSize? }`) rather than handing back a bare `MessagePort` that cannot carry it.
+Layer 2 chunks to it. LiveKit's mux reports 12 KiB, a `MessagePort`
 reports nothing, and no layer hardcodes another layer's limit. Fragmenting *below* the multiplexer
 was rejected: a 10 MiB message would become ~800 transport packets that block every other port
 behind them, reintroducing head-of-line blocking underneath the layer that exists to prevent it.
@@ -232,6 +238,31 @@ factory.
 **D18. Non-goal: reconnection.** A transport that drops takes every virtual port with it, and
 nothing is resumed. Ports are not durable and carry no sequence numbers for replay. Stated so it is
 a boundary rather than an oversight.
+
+**D20. Adapters depend on nothing in this repository.** Their currency is `MessagePort`, a platform
+type, and a plain function type. Structural typing does the rest. This is stronger than it sounds:
+it means a transport package can be understood, versioned and published without reference to the
+port or stream layers at all.
+
+**D21. The caller decides where multiplexing comes from.** A natively multiplexed transport hands
+back a factory; a single-pipe transport hands back one port and the caller wraps it with
+`multiplexPort`. No adapter decides whether emulation is needed.
+
+**D22. `webrun-streams-port` is renamed to `webrun-rpc`, not deleted.** Its transport role
+evaporates — a `MessagePort` needs no adapter — leaving the transport-agnostic RPC tier it was
+already carrying (`callPort`, `callBidi`, `listenPort`, `listenBidi`, `ioSend`, `ioHandle`, `send`,
+`recieve`). That package becomes layer 1 + layer 2: `MessageTarget`, `PortMux`, `multiplexPort`, the
+codecs, and the RPC primitives retyped from `MessagePort` to `MessageTarget`. `webrun-streams` keeps
+only generic stream functionality — `Duplex`, `Connect`, `Serve`, error serialisation and the
+async-iterator utilities — and loses `MessageTarget` and the port layer.
+
+`Duplex`, `Connect` and `Serve` stay in `webrun-streams` and do **not** move: `webrun-http-streams`
+consumes `Duplex` and touches nothing port-related, so moving it would make an HTTP-over-streams
+package depend on an RPC package to describe a byte stream. The dependency runs one way,
+`webrun-rpc` -> `webrun-streams`, because `duplexOverPort` returns a `Duplex`.
+
+Since `@statewalker/webrun-streams-port` is published at 0.1.1, the npm rename needs a `major`
+changeset or a deprecation stub — though no workspace package currently declares it as a dependency.
 
 **D19. Exceeding `maxPorts` rejects the port, never the mux.** An `OPEN` beyond the limit is
 answered with `CLOSE` carrying an error; existing ports are untouched. Ids are never reused within
@@ -447,36 +478,61 @@ stream, exhausted ids — remain exactly right; only the layer that answers them
 
 ---
 
-## Layer 3 — transports expose one port
+## Layer 3 — transports expose port factories
 
-Each adapter's job reduces to producing a single `MessageTarget`.
+**Adapters depend on nothing in this repository.** An adapter's currency is `MessagePort` — a
+platform type — and a plain function type. Because a `MessagePort` satisfies `MessageTarget`
+structurally (F1), `multiplexPort` accepts one with no import and no dependency edge. That keeps
+every transport package's dependencies limited to its own transport library.
 
-Each adapter supplies a `PortMux`: either the default emulated one over a single port, or its own
-native implementation (D2).
+The common currency is a **port factory**, and each adapter exposes what it honestly is:
 
-| adapter | `PortMux` | mechanism | `maxMessageSize` |
+```ts
+type PortFactory = (meta?: unknown) => Promise<MessagePort>;
+
+// Natively multiplexed — each call is a real channel.
+webrtcConnect(params) -> Promise<PortFactory>   // createDataChannel per call
+libp2pConnect(params) -> Promise<PortFactory>   // dialProtocol per call
+
+// Single pipe — one port, and that is all the transport has.
+wsConnect(params)      -> Promise<{ port: MessagePort; maxMessageSize?: number }>
+livekitConnect(params) -> Promise<{ port: MessagePort; maxMessageSize?: number }>
+peerjsConnect(params)  -> Promise<{ port: MessagePort; maxMessageSize?: number }>
+```
+
+The **caller** composes. `multiplexPort(singlePort)` turns one port into a factory; a natively
+multiplexed adapter already is one. So native muxing is preserved where the transport has it —
+yamux's per-stream flow control, the browser's DataChannel scheduling — and emulation is added only
+where there is genuinely one pipe. Nothing in an adapter decides that; the caller does.
+
+This also collapses two concepts into one: `PortMux.openPort` **is** a port factory. A native
+adapter and an emulated mux are interchangeable at the same seam.
+
+| adapter | exposes | multiplexing | `maxMessageSize` |
 | --- | --- | --- | --- |
-| `-port` | native | `MessageChannel` + port transfer, the F2 pattern | none |
-| `-webrtc` | native | `createDataChannel` / `ondatachannel` | **16 KiB** |
-| `-libp2p` | native | `dialProtocol` / `node.handle`, yamux streams | none |
-| `-ws` | emulated | one socket as a port carrying `Uint8Array`, `msgpackCodec` | none |
-| `-livekit` | emulated | room + peer identity as a byte port, `msgpackCodec` | **12 KiB** |
-| `-peerjs` | emulated | `DataConnection` as a byte port, `serialization: "raw"`, `msgpackCodec` | none |
+| `-webrtc` | `PortFactory` | native — `createDataChannel` / `ondatachannel` | **16 KiB** |
+| `-libp2p` | `PortFactory` | native — `dialProtocol` / `node.handle` | none |
+| `-ws` | one port | caller adds `multiplexPort` | none |
+| `-livekit` | one port | caller adds `multiplexPort` | **12 KiB** |
+| `-peerjs` | one port | caller adds `multiplexPort` | **unverified — measure** |
 
-`-webrtc`'s limit is not incidental: `duplex-over-data-channel.ts` already chunks to
+**There is no `-port` adapter.** A `MessagePort` already satisfies `MessageTarget`, so there is
+nothing to adapt: hand it to `multiplexPort` directly. `webrun-streams-port`'s transport role
+evaporates, leaving only the RPC tier it was already carrying — which is why it is renamed to
+`webrun-rpc` rather than deleted (D22).
+
+`-webrtc`'s 16 KiB limit is not incidental: `duplex-over-data-channel.ts` already chunks to
 `DC_MTU = 16 * 1024`, commented *"conservative across browsers"*, because a DataChannel message
-above the negotiated maximum fails rather than fragmenting. A native `PortMux` must report it, or
-the limit silently disappears when the chunking currently doing that job is deleted. `-peerjs`
-rides on WebRTC too and its ceiling is **unverified** — it must be measured before that adapter is
-migrated, not assumed absent.
+above the negotiated maximum fails rather than fragmenting. It must be reported, or the limit
+silently disappears when the chunking currently doing that job is deleted. `-peerjs` rides on WebRTC
+too and its ceiling is **unverified** — measure it before migrating that adapter, because the
+identical mistake on LiveKit delivered a 1 MiB body as **zero bytes** with no error on either side.
 
-The three native rows keep the flow control and scheduling their transports already provide —
-yamux's credit window, the browser's DataChannel scheduling, the structured-clone queue — instead
-of flattening it and re-emulating. `-port` also stops flattening a `MessagePort` to bytes, so
-structured clone and zero-copy transfer survive.
-
-Only `-ws`, `-livekit` and `-peerjs` are genuinely single-pipe transports, and only they run the
-emulated multiplexer.
+**Cost of bridging to a real `MessagePort`.** A single-pipe adapter creates a `MessageChannel` and
+pumps between the transport and one end, so every message crosses a structured-clone hop and a
+macrotask that a plain `MessageTarget` object would not incur. Measure it on `-ws` during Plan B
+before committing the other two. In exchange, a transport-backed port is a genuine `MessagePort` and
+can be **transferred into a worker or iframe** — a capability the `MessageTarget` shape cannot offer.
 
 ---
 
@@ -507,17 +563,31 @@ browser harnesses and the four adapter bugs they exposed, the hostile suite's qu
 
 ## Packaging
 
-- **`@statewalker/webrun-ports`** (new, zero runtime dependencies) — layer 1: `multiplexPort`,
-  `PortMux`, `PortCodec`, `structuredCodec`. The name is free; the previous package of that name was
-  dissolved into `webrun-streams-port`.
+- **`@statewalker/webrun-rpc`** (renamed from `webrun-streams-port`, D22) — layer 1 **and** layer 2:
+  `MessageTarget`, `PortMux`, `multiplexPort`, `PortCodec`, `structuredCodec`, `duplexOverPort`, and
+  the RPC primitives retyped from `MessagePort` to `MessageTarget`. Depends on `webrun-streams` for
+  `Duplex` and the iterator utilities.
+
+  A short-lived `@statewalker/webrun-ports` package existed during Plan A and was absorbed into
+  `webrun-streams` (commit `24f2fc9`) because its central type lived there; Plan B moves that code
+  on to `webrun-rpc`. Recorded so the two moves are not mistaken for indecision: the first fixed a
+  package that could not define its own interface, the second gives the port layer a home that is
+  not the generic stream package.
 - **`@statewalker/webrun-msgpack`** — gains `msgpackCodec`. It lives here, not in `webrun-ports`,
   because `webrun-ports` must keep zero runtime dependencies. The dependency runs
   `webrun-msgpack` -> `webrun-ports`, and it is **type-only**: the codec implements `PortCodec` and
   imports nothing from it at runtime, so no cycle and no runtime edge is created.
 - **`@statewalker/webrun-rpc`** (new) — layer 2: the re-typed primitives and `duplexOverPort`.
-- **`@statewalker/webrun-streams`** — keeps `Duplex`, `Connect`, `Serve`, `MessageTarget`,
-  `newAsyncGenerator`, `sendIterator`/`recieveIterator`, error serialisation. Loses `emulateMux`.
-- **`webrun-streams-*`** — each reduces to exposing one port.
+- **`@statewalker/webrun-streams`** — **generic stream functionality only**: `Duplex`, `Connect`,
+  `Serve`, `newAsyncGenerator`, `sendIterator`/`recieveIterator`, `toChunks`, the iterator
+  utilities and error serialisation. Loses `emulateMux` (Plan C) and loses `MessageTarget` and the
+  port layer to `webrun-rpc` (Plan B). Zero dependencies.
+
+  `Duplex`, `Connect`, `Serve` and `TransportClosedError` are currently **declared inside
+  `emulate-mux.ts`** — the file Plan C deletes. Extract them into their own module before Plan C, so
+  that plan removes an implementation rather than the seam every adapter imports.
+- **`webrun-streams-*`** — each reduces to exposing a port or a port factory (Layer 3), depending on
+  nothing in this repository. There is no `-port` adapter: a `MessagePort` needs none.
 
 Creating a package requires, in the same change: the directory under `packages/`, a README in the
 house structure, a `tsconfig.json` extending `../../tsconfig.base.json`, a `rolldown.config.js`
