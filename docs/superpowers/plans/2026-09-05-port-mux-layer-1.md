@@ -657,14 +657,30 @@ Expected: 6 tests in the new file; 11 in the package.
 
 Apply each mutation to `src/virtual-port.ts`, run `pnpm --filter @statewalker/webrun-ports test`, record the measured output, then revert with `git checkout -- packages/webrun-ports/src/virtual-port.ts`. **Never `git checkout -- <directory>`.**
 
+**Predicted, not measured** — record what you observe and report discrepancies rather than
+adjusting a test to make a row come true.
+
 | mutation | expected to turn red |
 | --- | --- |
-| drop the `if (closed) return;` guard in `deliver` | `ignores posts and deliveries once closed` |
+| drop the `if (closed) return;` guard in `deliver` | the after-close listener test — see the note below the table |
 | drop the `if (closed) return;` guard in `postMessage` | `ignores posts and deliveries once closed` |
 | remove the `try`/`catch` around `listener(event)` | `survives a listener that throws` |
 | iterate `listeners` directly instead of `[...listeners]` | nothing — see below |
 
 The last row is expected to stay **green**, and that is information, not a gap: no test currently mutates the listener set during delivery. Record it as a known uncovered case rather than inventing a test for it; layer 2 does not do this, and a test written only to justify a defensive copy would be pinning the implementation rather than a behaviour.
+
+**Row 1 needs a test the six above do not provide, and the reason took two attempts to find.**
+`markClosed()` clears the listener set as well as setting the flag, so `deliver` on a closed port
+iterates an empty set and is a no-op *whether or not the guard is there* — against those six tests
+the row stays green. But `addEventListener` has **no `closed` check**, so a listener registered
+*after* close repopulates the cleared set, and at that point the guard is the only thing preventing
+delivery to a closed port. Add a test for exactly that sequence — `markClosed()`, then
+`addEventListener`, then `deliver` — asserting nothing arrives, with a floor showing the same
+sequence *without* the close does deliver. Only then does row 1 turn red.
+
+This was got wrong twice during execution: the plan predicted red for the wrong reason, and the
+first explanation of the green concluded the guard was unreachable, which is also wrong. Neither
+attempt traced `addEventListener`.
 
 - [ ] **Step 6: Lint and commit**
 
