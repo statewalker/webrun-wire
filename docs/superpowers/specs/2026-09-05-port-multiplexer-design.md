@@ -301,18 +301,31 @@ acceptance are sent; if the peer rejects, they are dropped at the far end and th
 receives a `CLOSE`. This keeps layer 1 free of round trips — a caller that needs confirmation
 builds it at layer 2, where confirmation already exists.
 
-**Rejection is not observable at layer 1, and layer 2 must handle that.** Found during Plan A's
-implementation: `MessageTarget` has no close event and no `onclose`, and the port `openPort` returns
-exposes no queryable state, so after a rejection `postMessage` simply becomes a no-op — no error, no
-event, no callback. A consumer at this layer cannot distinguish a rejected port from a working one.
+**No close of any kind is observable at layer 1, and that constrains layer 2.** Found during Plan
+A's implementation and sharpened by its final review: `MessageTarget` has no close event and no
+`onclose`, and the port `openPort` returns exposes no queryable state. When a `CLOSE` envelope
+arrives, layer 1 clears the port's listeners and makes `postMessage` a silent no-op — no error, no
+event, no callback, and the envelope's `reason` is discarded rather than surfaced. A consumer at
+this layer cannot distinguish a closed port from a working one, and this is true of an **orderly
+peer close** just as much as of a rejection.
 
-That is consistent with D3 (a port sends and receives messages, nothing else) and it is not a defect
-to fix here. But it is a **requirement on layer 2**: a stream opened on a port the peer rejects must
-fail rather than hang forever waiting for a confirmation that will never come. `duplexOverPort`'s
-per-stream timeout (D8) is the backstop, and the explicit close notification is the fast path — but
-a rejected port never sends one, so the timeout is the *only* signal. Plan B must test that case
-explicitly: open a stream against a responder that rejects, and assert the stream fails rather than
-hanging.
+An earlier draft of this paragraph said a rejected port "never sends" a close. That was wrong — the
+rejection path does post one, and two tests assert it arrives. The wrong reason concealed the real
+problem, which is broader: the envelope is sent and correctly processed; it is simply never surfaced
+to whoever holds the port.
+
+This follows from D3 rather than contradicting it. A real `MessagePort` behaves the same way, and
+adding a close event would make layer 1 something other than a port. **But it means D8's "explicit
+close notification from the peer" cannot be layer 1's `CLOSE`** — layer 2 cannot see it. That
+notification must be layer 2's own end-of-stream message, sent on the port *before* the port is
+closed, with layer 1's `CLOSE` serving only as transport cleanup behind it.
+
+Two requirements on Plan B follow, and both need tests:
+
+- A stream must send its own end-of-stream message and not rely on layer 1's `CLOSE` being visible.
+- A stream opened on a port the peer **rejects** gets no layer-2 message at all, because the peer's
+  layer 2 never saw the port. For that case the per-stream timeout (D8) is the only signal. Plan B
+  must test that such a stream fails rather than hanging forever.
 
 ### Envelopes
 
@@ -322,7 +335,7 @@ Layer 1 exchanges three envelope types. Their wire representation is the codec's
 | --- | --- | --- |
 | `OPEN` | `id`, `meta?` | Peer is asked to accept a new port. `meta` is opaque to layer 1. |
 | `MESSAGE` | `id`, `payload` | Ordinary traffic for an open port. |
-| `CLOSE` | `id`, `error?` | Port is finished; `error` distinguishes fault from normal close. |
+| `CLOSE` | `id`, `reason?` | Port is finished. `reason` is opaque and layer 1 never inspects it — and, as implemented, never surfaces it either (see below). |
 
 ### Identity
 
