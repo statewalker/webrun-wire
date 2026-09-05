@@ -81,4 +81,32 @@ describe("virtual port", () => {
     expect(() => deliver("x")).not.toThrow();
     expect(seen).toEqual(["x"]);
   });
+
+  it("ignores delivery to a listener added after markClosed", () => {
+    // addEventListener has no closed check, so a listener can be registered
+    // after markClosed() is called. The deliver guard is the only thing
+    // preventing delivery to that listener on a closed port.
+    const { port, deliver, markClosed } = newVirtualPort(
+      () => {},
+      () => {},
+    );
+    const seen: unknown[] = [];
+    markClosed();
+    port.addEventListener("message", (event) => seen.push(event.data));
+    deliver("x");
+    expect(seen).toEqual([]);
+  });
+
+  it("delivers to a listener added before the port closes", () => {
+    // Floor: the identical setup without close must deliver, so the ceiling
+    // test's empty array is evidence the guard worked, not an accident.
+    const { port, deliver } = newVirtualPort(
+      () => {},
+      () => {},
+    );
+    const seen: unknown[] = [];
+    port.addEventListener("message", (event) => seen.push(event.data));
+    deliver("x");
+    expect(seen).toEqual(["x"]);
+  });
 });
