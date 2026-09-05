@@ -317,9 +317,12 @@ Two files need care rather than a blind substitution:
 
 ```bash
 pnpm --filter @statewalker/webrun-rpc typecheck
+pnpm --filter @statewalker/webrun-rpc run typecheck:tests
 ```
 
-Expected: exit 0. If a `MessagePort`-only member is being used somewhere — `start()`, `close()` — the compiler names it. `MessageTarget` declares both as optional, so the fix is `port.start?.()` rather than widening the type back.
+Expected: both exit 0. If a `MessagePort`-only member is being used somewhere — `start()`, `close()` — the compiler names it. `MessageTarget` declares both as optional, so the fix is `port.start?.()` rather than widening the type back.
+
+`typecheck` compiles `src` only; `typecheck:tests` widens the program to `tests/`. Both are needed, and only the second can see the test this task adds.
 
 - [ ] **Step 4: Run the suite unchanged**
 
@@ -392,7 +395,18 @@ pnpm --filter @statewalker/webrun-rpc exec vitest run tests/message-target-calle
 
 Expected: 1 test passing.
 
-Then revert one annotation to show the test could not have existed before: change `call-port.ts`'s port parameter back to `MessagePort` and run `pnpm --filter @statewalker/webrun-rpc typecheck`. Expected: a type error naming `message-target-callers.test.ts`. Restore it with `git checkout -- packages/webrun-rpc/src/call-port.ts` — an exact path, **never** a directory.
+Then revert one annotation to show the test could not have existed before: change `call-port.ts`'s
+port parameter back to `MessagePort` and run **`pnpm --filter @statewalker/webrun-rpc run
+typecheck:tests`** — not `typecheck`, which compiles `src` only and never sees the test file.
+Expected: `tests/message-target-callers.test.ts … error TS2739: Type 'MessageTarget' is missing the
+following properties from type 'MessagePort': dispatchEvent, onmessage, onmessageerror`.
+
+**Restore by copying a backup you took first, not with `git checkout --`.** Copy the file to a
+scratch path outside the repo before mutating it, and copy it back afterwards. `git checkout -- <file>`
+restores the file to its **last committed** state, which discards any uncommitted work in it — and
+in this step the retyping is uncommitted, so a checkout silently undoes the whole task. That
+happened during execution; it was caught only because the tool announced the file had changed on
+disk.
 
 Record the measured error text in your report. This is the step that distinguishes "the tests still pass" from "the change did something".
 
