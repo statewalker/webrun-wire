@@ -103,7 +103,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
   return {
     maxMessageSize,
 
-    openPort(meta?: unknown): MessageTarget {
+    async openPort(meta?: unknown): Promise<MessageTarget> {
       if (muxClosed) throw new Error("webrun-ports: the multiplexer is closed");
       if (open.size >= maxPorts) {
         throw new RangeError(`webrun-ports: maxPorts (${maxPorts}) reached`);

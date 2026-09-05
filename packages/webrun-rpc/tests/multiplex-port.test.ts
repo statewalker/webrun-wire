@@ -58,7 +58,7 @@ describe("multiplexPort", () => {
     );
     const client = track(multiplexPort(a, { codec: structuredCodec, side: "initiator" }));
 
-    const port = client.openPort();
+    const port = await client.openPort();
     port.postMessage("ping");
     await waitFor(() => received.length > 0, "message received");
 
@@ -102,7 +102,7 @@ describe("multiplexPort", () => {
     );
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
-    const port = client.openPort();
+    const port = await client.openPort();
     const atClient: unknown[] = [];
     port.addEventListener("message", (event) => {
       atClient.push(event.data);
@@ -179,7 +179,7 @@ describe("multiplexPort", () => {
       if (structuredCodec.read(event)?.type === "close") closeSeenAtA++;
     });
 
-    const port = client.openPort();
+    const port = await client.openPort();
     port.postMessage("before-rejection");
     await waitFor(() => rejectedMessageSeenAtB > 0, "the rejected message reaches the responder");
 

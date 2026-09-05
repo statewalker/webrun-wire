@@ -108,7 +108,7 @@ describe("layer 1 lifecycle and limits", () => {
 
     const cycles = 5000;
     for (let i = 0; i < cycles; i++) {
-      const port = client.openPort(i);
+      const port = await client.openPort(i);
       port.postMessage(i);
       port.close?.();
     }
@@ -247,7 +247,7 @@ describe("layer 1 lifecycle and limits", () => {
     const { target, closeCalls } = fakeTarget();
     const mux = multiplexPort(target, { codec: structuredCodec });
 
-    const port = mux.openPort();
+    const port = await mux.openPort();
     const events: unknown[] = [];
     port.addEventListener("message", (event) => {
       events.push(event);
@@ -284,7 +284,9 @@ describe("layer 1 lifecycle and limits", () => {
 
     await client.close();
 
-    expect(() => client.openPort()).toThrow(/closed/);
+    // openPort is async: the closed-mux guard rejects the returned promise
+    // instead of throwing synchronously.
+    await expect(client.openPort()).rejects.toThrow(/closed/);
   });
 
   it("drops post() as a no-op once the mux is closed, with no throw", async () => {
@@ -304,13 +306,15 @@ describe("layer 1 lifecycle and limits", () => {
       postMessageCalls++;
     };
     const mux = multiplexPort(target, { codec: structuredCodec });
-    const port = mux.openPort();
+    const port = await mux.openPort();
 
     await mux.close();
     const callsAtClose = postMessageCalls;
 
     expect(() => port.postMessage("late")).not.toThrow();
-    expect(() => mux.openPort()).toThrow();
+    // openPort is async: the closed-mux guard rejects the returned promise
+    // instead of throwing synchronously.
+    await expect(mux.openPort()).rejects.toThrow();
 
     // Ceiling: nothing further reached the wire through either path.
     expect(postMessageCalls).toBe(callsAtClose);

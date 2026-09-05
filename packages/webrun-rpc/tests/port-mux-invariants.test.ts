@@ -71,7 +71,7 @@ describe("layer 1 invariants", () => {
     // already been handled, one way or another" — the absence check below is
     // evidence, not an artefact of checking too early.
     const client = track(multiplexPort(a, { codec: structuredCodec }));
-    const port = client.openPort("real-port");
+    const port = await client.openPort("real-port");
     port.postMessage("real");
     await waitFor(() => accepted.length > 0, "the real message is delivered");
 
@@ -110,7 +110,7 @@ describe("layer 1 invariants", () => {
     });
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
-    const port = client.openPort();
+    const port = await client.openPort();
     port.postMessage("before");
     await waitFor(() => seen.length > 0, "the peer received 'before'");
 
@@ -139,8 +139,8 @@ describe("layer 1 invariants", () => {
     );
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
-    const first = client.openPort("first");
-    const second = client.openPort("second");
+    const first = await client.openPort("first");
+    const second = await client.openPort("second");
     await waitFor(() => perPort.has("first") && perPort.has("second"), "both ports accepted");
 
     first.postMessage(1);
@@ -180,7 +180,7 @@ describe("layer 1 invariants", () => {
     );
     const client = track(multiplexPort(a, { codec: structuredCodec }));
 
-    const port = client.openPort();
+    const port = await client.openPort();
     for (let i = 0; i < 50; i++) port.postMessage(i);
     await waitFor(() => seen.length >= 50, "all 50 messages arrive");
 
@@ -212,7 +212,7 @@ describe("layer 1 invariants", () => {
       if (structuredCodec.read(event)?.type === "message") serverMessages++;
     });
 
-    const port = client.openPort();
+    const port = await client.openPort();
     await waitFor(() => serverPort !== undefined, "responder accepted the port");
 
     // Floor: before the close, the responder's end genuinely works.
@@ -257,7 +257,9 @@ describe("layer 1 invariants", () => {
 
     client.openPort("one");
     client.openPort("two");
-    expect(() => client.openPort("three")).toThrow(RangeError);
+    // openPort is async: a guard failure (maxPorts reached) rejects the
+    // returned promise instead of throwing synchronously.
+    await expect(client.openPort("three")).rejects.toThrow(RangeError);
     await waitFor(() => acceptedIds.length >= 2, "both ports accepted");
 
     expect(acceptedIds).toEqual(["one", "two"]);
@@ -278,7 +280,7 @@ describe("layer 1 invariants", () => {
       }),
     );
     const outerClient = track(multiplexPort(a, { codec: structuredCodec }));
-    const carrier = outerClient.openPort();
+    const carrier = await outerClient.openPort();
     await waitFor(() => innerServerSide !== undefined, "the outer port is accepted");
 
     // Inner layer, riding on one virtual port of the outer one.
@@ -296,7 +298,7 @@ describe("layer 1 invariants", () => {
       }),
     );
     const innerClient = track(multiplexPort(carrier, { codec: structuredCodec }));
-    const innerPort = innerClient.openPort();
+    const innerPort = await innerClient.openPort();
     innerPort.postMessage("through two layers");
     await waitFor(() => seen.length > 0, "the message crosses both mux layers");
 

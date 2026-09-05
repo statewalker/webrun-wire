@@ -59,8 +59,8 @@ export interface PortMuxOptions {
 
 /** One port in, many ports out. */
 export interface PortMux {
-  /** Allocate a port, announce it, and return the local end immediately. */
-  openPort(meta?: unknown): MessageTarget;
+  /** Allocate a port, announce it, and return the local end. */
+  openPort(meta?: unknown): Promise<MessageTarget>;
   /** Close every virtual port, then release the underlying port. */
   close(): Promise<void>;
   /** See {@link PortMuxOptions.maxMessageSize}. */
