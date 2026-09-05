@@ -20,6 +20,12 @@
 - **`emulateMux` is not deleted here.** That is Plan C. It stays working and tested throughout.
 - ESM only (`"type": "module"`), TypeScript strict, `moduleResolution: "Bundler"`, relative imports carry a `.js` suffix.
 - biome: 2-space indent, line width 100, double quotes, semicolons always, trailing commas all. Use the **package-scoped** lint before each commit; the root `pnpm lint` exits 1 on a pre-existing baseline and is not this plan's gate.
+- **A filtered command that prints `None of the selected packages has a "<script>" script` EXITS 0.**
+  Treat that line as a failure, always. `webrun-rpc` had no `typecheck` script until Task 1 added
+  one (`tsc --noEmit`, commit `b3fda64`); before that, every `pnpm --filter @statewalker/webrun-rpc
+  typecheck` in this plan would have reported success without compiling anything — and Task 4's red
+  phase *is* a typecheck, so it would have produced a green red phase. If any command in this plan
+  prints that line, stop and report it rather than treating the exit code as the answer.
 - Tests: vitest, files under `tests/`, named `*.test.ts`.
 - **`virtual-port.js` is never exported from any barrel.** `VirtualPortHandle` carries `deliver` and `markClosed`, which are the multiplexer's private levers; publishing them would let a consumer forge inbound traffic.
 - **Per-task test deltas, never running totals.** Counts in this plan are per-task deltas because absolute totals go stale the moment a fix round adds a test — that mistake cost four corrections across the two previous plans.
