@@ -1,5 +1,6 @@
 import { ioHandle } from "./io-handle.js";
 import { listenPort } from "./listen-port.js";
+import type { MessageTarget } from "./message-target.js";
 
 export type BidiHandler<TIn, TOut> = (
   input: AsyncIterable<TIn>,
@@ -14,7 +15,7 @@ export type BidiHandler<TIn, TOut> = (
  * unwanted calls. Returns a cleanup function that removes the listener.
  */
 export function listenBidi<TIn, TOut>(
-  port: MessagePort,
+  port: MessageTarget,
   action: BidiHandler<TIn, TOut>,
   accept: (params: Record<string, unknown>) => boolean = () => true,
 ): () => void {

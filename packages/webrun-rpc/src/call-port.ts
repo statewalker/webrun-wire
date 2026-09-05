@@ -1,5 +1,6 @@
 import { deserializeError, type SerializedError } from "@statewalker/webrun-streams";
 import { getPortCloseSignal } from "./close-signal.js";
+import type { MessageTarget } from "./message-target.js";
 
 export interface CallPortOptions {
   /** Timeout in ms after which the call rejects (default 1000). */
@@ -30,7 +31,7 @@ type ResponseEnvelope<T> =
  * rejects with the deserialised error.
  */
 export function callPort<TResult = unknown, TParams = unknown>(
-  port: MessagePort,
+  port: MessageTarget,
   params: TParams,
   {
     timeout = 1000,

@@ -1,5 +1,6 @@
 import { type CallPortOptions, callPort } from "./call-port.js";
 import { ioSend } from "./io-send.js";
+import type { MessageTarget } from "./message-target.js";
 
 export interface CallBidiOptions extends CallPortOptions {
   /** Timeout for the outer stream (default: `Number.MAX_SAFE_INTEGER` / max int). */
@@ -25,7 +26,7 @@ export interface CallBidiArgs {
  * error is then re-thrown to the caller.
  */
 export async function* callBidi<TIn, TOut>(
-  port: MessagePort,
+  port: MessageTarget,
   input: AsyncIterable<TIn> | Iterable<TIn>,
   { options = {}, ...params }: CallBidiArgs = {},
 ): AsyncGenerator<TOut> {

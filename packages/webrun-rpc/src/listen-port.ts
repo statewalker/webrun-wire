@@ -1,4 +1,5 @@
 import { serializeError } from "@statewalker/webrun-streams";
+import type { MessageTarget } from "./message-target.js";
 
 export interface ListenPortOptions {
   /** Channel name filter — ignore messages whose `channelName` doesn't match. */
@@ -18,7 +19,7 @@ export type PortHandler<TParams = unknown, TResult = unknown> = (
  * Returns a cleanup function that removes the listener.
  */
 export function listenPort<TParams = unknown, TResult = unknown>(
-  port: MessagePort,
+  port: MessageTarget,
   handler: PortHandler<TParams, TResult>,
   { channelName = "", log = () => {} }: ListenPortOptions = {},
 ): () => void {

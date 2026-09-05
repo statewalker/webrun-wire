@@ -1,5 +1,6 @@
 import { listenCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
+import type { MessageTarget } from "./message-target.js";
 import { recieve } from "./recieve.js";
 import { send } from "./send.js";
 
@@ -17,7 +18,7 @@ import { send } from "./send.js";
  * `callPort` timeouts.
  */
 export async function* ioHandle<T, U = T>(
-  port: MessagePort,
+  port: MessageTarget,
   handler: (input: AsyncIterable<T>) => AsyncIterable<U> | Promise<AsyncIterable<U>>,
   options: ListenPortOptions = {},
 ): AsyncGenerator<number> {

@@ -20,15 +20,16 @@
  * `bindBytesToPort`) return `undefined` from `getPortCloseSignal` — there's
  * no underlying transport so there's nothing to track.
  */
+import type { MessageTarget } from "./message-target.js";
 
-const closeSignals = new WeakMap<MessagePort, AbortSignal>();
+const closeSignals = new WeakMap<MessageTarget, AbortSignal>();
 
 /**
  * Internal: register a port's close signal. Called once by `bindBytesToPort`.
  *
  * @internal
  */
-export function setPortCloseSignal(port: MessagePort, signal: AbortSignal): void {
+export function setPortCloseSignal(port: MessageTarget, signal: AbortSignal): void {
   closeSignals.set(port, signal);
 }
 
@@ -37,6 +38,6 @@ export function setPortCloseSignal(port: MessagePort, signal: AbortSignal): void
  * `undefined` if `port` is not transport-backed (e.g., a raw
  * `MessageChannel().port1`).
  */
-export function getPortCloseSignal(port: MessagePort): AbortSignal | undefined {
+export function getPortCloseSignal(port: MessageTarget): AbortSignal | undefined {
   return closeSignals.get(port);
 }

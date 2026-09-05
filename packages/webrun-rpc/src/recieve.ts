@@ -1,5 +1,6 @@
 import { type IteratorChunk, recieveIterator } from "@statewalker/webrun-streams";
 import { type ListenPortOptions, listenPort } from "./listen-port.js";
+import type { MessageTarget } from "./message-target.js";
 
 export interface RecieveOptions extends ListenPortOptions {
   /**
@@ -34,7 +35,7 @@ export interface RecieveOptions extends ListenPortOptions {
  * next inbound chunk (or `callPort` timeout).
  */
 export async function* recieve<T>(
-  port: MessagePort,
+  port: MessageTarget,
   options: RecieveOptions = {},
 ): AsyncGenerator<AsyncGenerator<T>> {
   const { signal, ...listenOptions } = options;

@@ -1,5 +1,6 @@
 import { sendIterator } from "@statewalker/webrun-streams";
 import { type CallPortOptions, callPort } from "./call-port.js";
+import type { MessageTarget } from "./message-target.js";
 
 export interface SendOptions extends CallPortOptions {
   /**
@@ -22,7 +23,7 @@ export interface SendOptions extends CallPortOptions {
  * envelope, or once `options.signal` aborts (whichever comes first).
  */
 export async function send<T>(
-  port: MessagePort,
+  port: MessageTarget,
   output: AsyncIterable<T> | Iterable<T>,
   options: SendOptions = {},
 ): Promise<void> {

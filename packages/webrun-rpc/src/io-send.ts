@@ -1,5 +1,6 @@
 import { postCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
+import type { MessageTarget } from "./message-target.js";
 import { type RecieveOptions, recieve } from "./recieve.js";
 import { send } from "./send.js";
 
@@ -27,7 +28,7 @@ export interface IoSendOptions extends ListenPortOptions {
  * waiting for `callPort` timeouts to fire.
  */
 export async function* ioSend<T, U = T>(
-  port: MessagePort,
+  port: MessageTarget,
   output: AsyncIterable<U> | Iterable<U>,
   options: IoSendOptions = {},
 ): AsyncGenerator<T> {

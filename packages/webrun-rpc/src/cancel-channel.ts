@@ -8,6 +8,8 @@
  * Format: `port.postMessage({ type: "cancel-channel", channelName })`.
  * Fire-and-forget; no callId, no response.
  */
+import type { MessageTarget } from "./message-target.js";
+
 export const CANCEL_CHANNEL_TYPE = "cancel-channel";
 
 interface CancelChannelMessage {
@@ -15,7 +17,7 @@ interface CancelChannelMessage {
   channelName: string;
 }
 
-export function postCancelChannel(port: MessagePort, channelName: string): void {
+export function postCancelChannel(port: MessageTarget, channelName: string): void {
   if (!channelName) return;
   try {
     port.postMessage({ type: CANCEL_CHANNEL_TYPE, channelName } satisfies CancelChannelMessage);
@@ -25,7 +27,7 @@ export function postCancelChannel(port: MessagePort, channelName: string): void 
 }
 
 export function listenCancelChannel(
-  port: MessagePort,
+  port: MessageTarget,
   channelName: string,
   onCancel: () => void,
 ): () => void {
