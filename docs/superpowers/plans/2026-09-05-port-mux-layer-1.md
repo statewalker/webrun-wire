@@ -338,7 +338,7 @@ export interface PortMuxOptions {
    * has no consumer, and accepting one would mean dropping its traffic
    * silently rather than telling the peer.
    */
-  onPort?: (port: MessageTarget, meta?: unknown) => boolean | void;
+  onPort?: (port: MessageTarget, meta?: unknown) => boolean | undefined;
   /**
    * Id parity. The initiator allocates even ids, the responder odd, so both
    * ends may open concurrently with no negotiation. Defaults to `"initiator"`.
@@ -1485,7 +1485,7 @@ transport that already multiplexes natively supplies its own `PortMux` instead.
 | option | type | meaning |
 | --- | --- | --- |
 | `codec` | `PortCodec` | How envelopes reach the wire. Required. |
-| `onPort` | `(port, meta?) => boolean \| void` | Called when the peer opens a port. Return `false` to reject. **Without it, inbound ports are rejected.** |
+| `onPort` | `(port, meta?) => boolean \| undefined` | Called when the peer opens a port. Return `false` to reject. **Without it, inbound ports are rejected.** |
 | `side` | `"initiator" \| "responder"` | Id parity — initiator allocates even, responder odd, so both ends may open concurrently. Defaults to `"initiator"`. |
 | `maxPorts` | `number` | Ceiling on concurrently open ports. Defaults to `1024`. Bounds the id table only; it never delays a message. |
 | `maxMessageSize` | `number` | Largest message this transport can carry, if it has a limit. Reported, not enforced — the layer above chunks to it. |
