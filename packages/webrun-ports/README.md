@@ -78,7 +78,7 @@ transport that already multiplexes natively supplies its own `PortMux` instead.
 | `codec` | `PortCodec` | How envelopes reach the wire. Required. |
 | `onPort` | `(port, meta?) => boolean \| undefined` | Called when the peer opens a port. Return `false` to reject. **Without it, inbound ports are rejected.** |
 | `side` | `"initiator" \| "responder"` | Id parity — initiator allocates even, responder odd, so both ends may open concurrently. Defaults to `"initiator"`. |
-| `maxPorts` | `number` | Ceiling on concurrently open ports. Defaults to `1024`. Bounds the id table only; it never delays a message. |
+| `maxPorts` | `number` | Ceiling on **concurrently** open ports. Defaults to `1024`. Closing a port frees its slot immediately, so a long-lived mux can open unboundedly many over its lifetime — this bounds the id table, never the total. It also never delays a message. |
 | `maxMessageSize` | `number` | Largest message this transport can carry, if it has a limit. Reported, not enforced — the layer above chunks to it. |
 
 ### `PortMux`
@@ -91,9 +91,19 @@ transport that already multiplexes natively supplies its own `PortMux` instead.
 
 `openPort` returning before acceptance is deliberate: it keeps layer 1 free of
 round trips. Messages posted before the peer accepts are sent, and dropped at the
-far end if it rejects; the port becomes inert. However, layer 1 provides no direct
-signal of rejection — `MessageTarget` has no close event — so detecting acceptance
-or rejection is the responsibility of the layer above.
+far end if it rejects; the port becomes inert.
+
+**No close is observable at this layer — not a rejection, and not an orderly close
+either.** `MessageTarget` has no close event and the port you hold exposes no
+queryable state, so when a port closes its listeners are simply cleared and
+`postMessage` becomes a silent no-op. You get no event, no error, and no callback,
+and a `close` envelope's `reason` is discarded rather than delivered. A closed port
+is indistinguishable from a working one that nobody is answering.
+
+This is deliberate — a real `MessagePort` behaves the same way, and a close event
+would make this something other than a port — but it means **the layer above must
+carry its own end-of-stream signal** as an ordinary message, sent before the port
+closes, rather than relying on the close being seen.
 
 ### `structuredCodec`
 
@@ -107,8 +117,12 @@ A byte transport needs a codec that encodes; that one ships with
 ### `PortEnvelope`
 
 What crosses the wire: `{ type: "open", id, meta? }`, `{ type: "message", id,
-payload }`, `{ type: "close", id, reason? }`. `reason` is opaque — layer 1 never
-inspects it.
+payload }`, `{ type: "close", id, reason? }`.
+
+`reason` is opaque: layer 1 never inspects it — and, as implemented, never surfaces
+it either. Setting one accomplishes nothing observable at this layer today; it
+exists so the wire format does not have to change when a layer above starts
+carrying it.
 
 ## Dependencies
 
