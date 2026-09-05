@@ -55,9 +55,12 @@ const server = multiplexPort(channel.port2, {
 // The initiator opens them.
 const client = multiplexPort(channel.port1, { codec: structuredCodec });
 const chat = client.openPort("chat");
-chat.addEventListener("message", (event) => console.log(event.data));
+
+const reply = new Promise<unknown>((resolve) => {
+  chat.addEventListener("message", (event) => resolve(event.data));
+});
 chat.postMessage("hello");
-// -> "echo: hello"
+console.log(await reply); // -> "echo: hello"
 
 await client.close();
 await server.close();
@@ -88,8 +91,9 @@ transport that already multiplexes natively supplies its own `PortMux` instead.
 
 `openPort` returning before acceptance is deliberate: it keeps layer 1 free of
 round trips. Messages posted before the peer accepts are sent, and dropped at the
-far end if it rejects — the local port is then closed, so the rejection is
-observable rather than silent.
+far end if it rejects; the port becomes inert. However, layer 1 provides no direct
+signal of rejection — `MessageTarget` has no close event — so detecting acceptance
+or rejection is the responsibility of the layer above.
 
 ### `structuredCodec`
 
