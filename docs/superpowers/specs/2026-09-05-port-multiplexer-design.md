@@ -185,13 +185,18 @@ applies `toChunks(maxMessageSize)` to the *payload*, and the envelope framing �
 characters *per chunk* because `Math.random()` drops trailing zeros; the port id's integer width
 adds 0-4; the channel name adds 1 for `"out"` over `"in"`; and a chunk at or above 64 KiB adds 2
 as the payload's bin header widens. **Worst realistic case: 134 bytes** — that figure is the
-model's ceiling, not an observation; the largest overhead actually measured is **126 bytes**, over
-eight runs at a 16 KiB cap. Either number is covered by the margin below.
+model's ceiling, not an observation; **the observed range is 123-128 bytes** across every run
+recorded. The largest, 128, was measured at a **64 KiB** cap (a 65,664-byte frame in the capped
+conformance run), which is the regime where the bin-header term applies; a sweep of eight runs at a
+**16 KiB** cap never exceeded 126 at that cap. The two are separate experiments and neither is the
+other's ceiling. Every one of these numbers is covered by the margin below.
 
 So an adapter author who reads this decision and sets `maxMessageSize` to its transport's hard
 limit overruns it on the first full-size chunk: a 16 KiB cap for an `RTCDataChannel` was measured
-producing **16,507-byte frames**, and a 12 KiB cap for LiveKit **12,411-byte frames**. That is
-precisely the class of failure recorded under R3 — a body exceeding the ceiling delivered as zero
+producing **16,507-byte frames**, and a 12 KiB cap for LiveKit **12,411-byte frames** — a later run
+at the same two caps measured 16,508 and 12,413; the one- and two-byte differences are the `callId`
+and port-id integer-width variance described just above, not a disagreement about the finding.
+That is precisely the class of failure recorded under R3 — a body exceeding the ceiling delivered as zero
 bytes with no error on either side.
 
 Until this is fixed, `maxMessageSize` bounds the payload and **the caller must leave a margin of at
@@ -398,7 +403,8 @@ export interface PortMux {
    * It bounds the payload, NOT the frame: layer 2 chunks to it and the
    * envelope framing is then added on top (D10's correction). Over
    * `msgpackCodec` that overhead is `87 + len(callId)` bytes — modelled
-   * ceiling 134, largest actually observed 126 over eight runs. A caller
+   * ceiling 134, observed 123-128 across every run (the 128 at a 64 KiB
+   * cap; 126 was the largest over eight runs at a 16 KiB cap). A caller
    * must leave a margin of at least 256 bytes below its transport's real
    * limit.
    */
@@ -752,10 +758,11 @@ is the place to find out, since it runs against a real SFU.
 
 **R3. RESOLVED, with a correction — `maxMessageSize` on `PortMux` (D10).** LiveKit reports 12 KiB,
 and layer 2 chunks **the payload** to it — not the frame. D10's correction has the measurement: the
-envelope framing is added on top afterwards, so a 12 KiB setting was measured producing
-12,413-byte frames, and an adapter must set the limit ~256 bytes *below* its transport's real
-ceiling. No fragmentation exists below the multiplexer, so head-of-line blocking is not
-reintroduced.
+envelope framing is added on top afterwards, so a 12 KiB setting was measured producing 12,413-byte
+frames — 12,411 in an earlier run at the same cap, the two-byte difference being the `callId` and
+port-id integer-width variance recorded in D10 rather than two different findings — and an adapter
+must set the limit ~256 bytes *below* its transport's real ceiling. No fragmentation exists below
+the multiplexer, so head-of-line blocking is not reintroduced.
 The residual risk is that a transport limit is *wrong* rather than absent: the previous failure was
 silent, so `-livekit` needs a test that a body many times `maxMessageSize` arrives intact rather
 than as zero bytes.

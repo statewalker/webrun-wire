@@ -34,7 +34,8 @@
     "typecheck:tests": "tsc -p tsconfig.tests.json",
     "clean": "rimraf dist",
     "lint": "biome check src tests",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@statewalker/webrun-rpc": "workspace:*",

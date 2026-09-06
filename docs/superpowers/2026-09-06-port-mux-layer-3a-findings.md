@@ -66,7 +66,7 @@ Measured over `msgpackCodec`, the overhead is **`87 + len(callId)` bytes, and it
 - the channel name adds **1** for `"out"` over `"in"`;
 - a chunk at or above 64 KiB adds **2** as the payload's `bin` header widens.
 
-**Worst case 134 bytes; practical margin 256.**
+**Modelled worst case 134 bytes; largest actually observed 128 (below); practical margin 256.**
 
 Reproduced independently for this document, on the shipped stack, with a 512 KiB body:
 
@@ -76,12 +76,25 @@ Reproduced independently for this document, on the shipped stack, with a 512 KiB
 | `12 * 1024` | LiveKit's safe packet size (`-livekit`'s own `LIVEKIT_SAFE_MTU`) | **12,413 B** | 125 |
 | `64 * 1024` | the conformance run's cap | **65,662 B** | 126 |
 
-Task 3 measured 16,507 / 12,411 / 65,664 for the same three; the one-and-two-byte disagreements are
-the `callId` and port-id width variance, not a disagreement about the finding. Over eight runs at a
-16 KiB cap with a 1 MiB body — several thousand chunks, so several thousand `callId`s — the largest
-overhead observed was **126 bytes**. So: 134 is a computed worst case, not an observed one, and the
-honest statement is that the observed range is 124–126 with a modelled ceiling of 134. Either way
-256 covers it and the transport's hard limit does not.
+Task 3 measured 16,507 / 12,411 / 65,664 for the same three caps — overheads of **123 / 123 / 128**;
+the one-and-two-byte disagreements with the row above are the `callId` and port-id width variance,
+not a disagreement about the finding.
+
+**128 is the largest overhead observed anywhere in this plan.** It is the 65,664-byte frame the
+capped conformance run reports — `maxFrame a->b=65664`, Task 3's 10 MiB body under a 64 KiB cap —
+the same figure the paragraph above quotes, and which both earlier drafts of this document
+(`97a0595`, `da40f23`) quoted while asserting 126 in the next breath. It belongs to the 64 KiB regime specifically: a payload at
+or above 64 KiB widens the msgpack `bin` header by 2, so that cap is where the model predicts the
+widest frames and the measurement agrees.
+
+The **126** is a different experiment and must not be read as the same one: eight runs at a **16 KiB**
+cap with a 1 MiB body — several thousand chunks, so several thousand `callId`s — whose largest
+overhead *at that cap* was 126, against the single 512 KiB-body run in the table's 16 KiB row at 124.
+The table is one run per cap; the 126 is a sweep at one cap.
+
+So: 134 is a computed worst case, not an observed one, and the honest statement is that the observed
+range across every run recorded here is **123–128**, with a modelled ceiling of 134. Either way 256
+covers it and the transport's hard limit does not.
 
 **The consequence is exactly risk R3's failure mode.** An adapter author who reads D10 ("layer 2
 chunks to it") and sets `maxMessageSize` to the transport's hard limit overruns it on the first
@@ -348,10 +361,13 @@ The first: the spec's `PortMux` interface block still carried "Layer 2 chunks to
 itself was corrected two hundred lines above it. Fixed in `4f8eb3a`.
 
 The second is what that fix then did. `4f8eb3a` wrote that the framing overhead is "**measured** at
-up to 134 bytes" — and 134 is *modelled arithmetic*; the largest overhead ever observed is 126, as
-this document said at the time. So the plan's signature defect — a number asserted rather than
-traced — was written into the one block C2's adapters will be built against, by the correction meant
-to make that block true. And its commit message quoted Plan B1's "grep for every other place that
+up to 134 bytes" — and 134 is *modelled arithmetic*; no run ever observed 134, and this document
+said so at the time. What it said instead was that the largest overhead ever observed is 126 — and
+**that was wrong in the other direction**: Task 3's 64 KiB-capped run measured 128, a number this
+document reproduces four lines above the sentence that contradicted it. Corrected above; recorded
+here as the same defect's third turn on this branch and its second inside a correction. So the
+plan's signature defect — a number asserted rather than traced — was written into the one block
+C2's adapters will be built against, by the correction meant to make that block true. And its commit message quoted Plan B1's "grep for every other place that
 states the same fact" while leaving two live sites standing (the table above). Both are corrected in
 this document's fix round.
 
@@ -406,9 +422,9 @@ in a second place writes an unbacked number into the first.
 ## For Plan C2
 
 **The framing margin is the first thing to write into the adapters.** `maxMessageSize` bounds the
-payload; the envelope and codec framing ride on top, at 124–126 bytes measured and 134 modelled
-worst-case. **Set `maxMessageSize` to `limit - 256`, not to `limit`.** Measured overruns at the two
-real ceilings: 16 KiB → 16,508 B, 12 KiB → 12,413 B. Until D10's fix lands (C3), this margin is the
+payload; the envelope and codec framing ride on top, at 123–128 bytes measured (the 128 at a 64 KiB
+cap) and 134 modelled worst-case. **Set `maxMessageSize` to `limit - 256`, not to `limit`.**
+Measured overruns at the two real ceilings: 16 KiB → 16,508 B, 12 KiB → 12,413 B. Until D10's fix lands (C3), this margin is the
 whole defence, and the transport that punishes getting it wrong does so silently.
 
 **The bridge cost, and the decision it feeds.** Small messages: a real and consistent **1.14–1.51×**

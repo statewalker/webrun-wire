@@ -47,8 +47,11 @@ iframe. `msgpackCodec` is the byte-transport sibling: one envelope becomes one m
 npm install @statewalker/webrun-msgpack
 ```
 
-One runtime dependency ([`@ygoe/msgpack`](https://www.npmjs.com/package/@ygoe/msgpack)),
-no peer dependencies. ESM only (`"type": "module"`).
+One runtime dependency **in the emitted bundle**
+([`@ygoe/msgpack`](https://www.npmjs.com/package/@ygoe/msgpack)), no peer dependencies. ESM only
+(`"type": "module"`). That is not the same as the install cost: `@statewalker/webrun-rpc` is a
+declared `dependency`, so `npm install` also pulls it and, transitively, `@statewalker/webrun-streams`
+into `node_modules` — even for a consumer who uses only the stream codec.
 
 `@statewalker/webrun-rpc` is declared as a dependency but is **type-only**: `msgpackCodec` imports
 the `PortCodec` interface from it and no runtime code, so nothing of `webrun-rpc` is in the built
@@ -186,6 +189,13 @@ The same stack passes the unmodified `webrun-streams-conformance` L0–L6 suite 
 both framing regimes — unlimited, and with frames capped at 64 KiB
 (`tests/conformance-bytes.test.ts`).
 
+**Read that green narrowly: an in-process pipe is not a transport.** The pipe hands `Uint8Array`s
+straight from one object to another inside one process, so what the suite covers is this codec's own
+contract end to end, including under chunking. It covers *none* of what a real byte transport brings:
+framing, message-size ceilings and what a transport does when you exceed one, backpressure,
+reconnection, close codes and error semantics. A WebSocket, an `RTCDataChannel` and a LiveKit data
+track each need their own run before anything here is claimed of them.
+
 ## `maxMessageSize` bounds the payload, not the frame
 
 **Leave a margin of at least 256 bytes below your transport's hard limit.** This is the one thing
@@ -202,10 +212,14 @@ adds 0–4; the channel name adds 1 for `"out"` over `"in"`; and a chunk at or a
 the payload's `bin` header widens.
 
 Two numbers, and the difference between them matters: adding those terms up gives a **modelled
-ceiling of 134 bytes**, while the largest overhead *actually observed* — eight runs at a 16 KiB cap
-with a 1 MiB body, so several thousand chunks and several thousand `callId`s — is **126 bytes**. The
-134 is arithmetic; the 126 is a measurement. A 256-byte margin covers both, which is why the advice
-is a round number rather than a tight one.
+ceiling of 134 bytes**, while the overheads *actually observed* span **123–128 bytes**. The 134 is
+arithmetic; the 123–128 is measurement.
+
+The largest, 128, comes from a **64 KiB** cap — a 65,664-byte frame in the capped conformance run
+over a 10 MiB body — which is the regime where the `bin`-header term applies. A separate sweep, eight
+runs at a **16 KiB** cap with a 1 MiB body (several thousand chunks, so several thousand `callId`s),
+never exceeded **126** at that cap; the table below is one run per cap and is not that sweep. A
+256-byte margin covers all of it, which is why the advice is a round number rather than a tight one.
 
 Measured, with a 512 KiB body through the stack above:
 

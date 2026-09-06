@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The build config roots at `src` to shape `dist`. This one only
+    // typechecks, so it widens the root to take `tests` in as well.
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["./src", "./tests"]
+}
