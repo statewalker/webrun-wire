@@ -1,3 +1,13 @@
+// Measurement, not a conformance test — it reports a number, it does not gate.
+// Deliberately NOT matched by the repo's default `**/tests/**/*.test.ts` glob
+// (a 30-60s harness that only asserts "both paths completed" has no business
+// in `pnpm test` or CI's default run). Run it explicitly with:
+//
+//   pnpm --filter @statewalker/webrun-streams-ws test:bench
+//
+// Do not "fix" this by renaming to `.test.ts` or widening the shared
+// `vitest.config.ts` include glob — that was tried and reverted; see
+// task-4-report.md in .superpowers/sdd/2026-09-06-port-mux-layer-3a-byte-codec/.
 import { describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 import type { WebSocketLike } from "../src/websocket-like.js";
@@ -72,7 +82,15 @@ describe("cost of bridging a WebSocket to a real MessagePort", () => {
           (cb) =>
             wsDirect.addEventListener("message", (ev) => {
               const d = (ev as MessageEvent).data as ArrayBufferView | ArrayBuffer;
-              cb(d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array((d as ArrayBufferView).buffer));
+              cb(
+                d instanceof ArrayBuffer
+                  ? new Uint8Array(d)
+                  : new Uint8Array(
+                      (d as ArrayBufferView).buffer,
+                      (d as ArrayBufferView).byteOffset,
+                      (d as ArrayBufferView).byteLength,
+                    ),
+              );
             }),
           count,
           size,
@@ -88,16 +106,28 @@ describe("cost of bridging a WebSocket to a real MessagePort", () => {
         // pump: transport -> port2 -> (caller holds port1)
         wsBridged.addEventListener("message", (ev) => {
           const d = (ev as MessageEvent).data as ArrayBufferView | ArrayBuffer;
-          const bytes = d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array((d as ArrayBufferView).buffer, (d as ArrayBufferView).byteOffset, (d as ArrayBufferView).byteLength);
+          const bytes =
+            d instanceof ArrayBuffer
+              ? new Uint8Array(d)
+              : new Uint8Array(
+                  (d as ArrayBufferView).buffer,
+                  (d as ArrayBufferView).byteOffset,
+                  (d as ArrayBufferView).byteLength,
+                );
           channel.port2.postMessage(bytes.slice());
         });
         // pump: port2 <- port1 -> transport
         channel.port2.addEventListener("message", (ev) => {
-          (wsBridged as unknown as { send(d: Uint8Array): void }).send((ev as MessageEvent).data as Uint8Array);
+          (wsBridged as unknown as { send(d: Uint8Array): void }).send(
+            (ev as MessageEvent).data as Uint8Array,
+          );
         });
         const bridged = await timeRoundTrips(
           (bytes) => channel.port1.postMessage(bytes),
-          (cb) => channel.port1.addEventListener("message", (ev) => cb((ev as MessageEvent).data as Uint8Array)),
+          (cb) =>
+            channel.port1.addEventListener("message", (ev) =>
+              cb((ev as MessageEvent).data as Uint8Array),
+            ),
           count,
           size,
         );

@@ -27,6 +27,7 @@
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "test": "vitest run",
+    "test:bench": "vitest run --config vitest.bench.config.ts --reporter=verbose",
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"
   },
