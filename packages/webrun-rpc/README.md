@@ -332,7 +332,7 @@ transport that already multiplexes natively supplies its own `PortMux` instead.
 | `onPort` | `(port, meta?) => boolean \| undefined` | Called when the peer opens a port. Return `false` to reject. **Without it, inbound ports are rejected.** |
 | `side` | `"initiator" \| "responder"` | Id parity — initiator allocates even, responder odd, so both ends may open concurrently. Defaults to `"initiator"`. |
 | `maxPorts` | `number` | Ceiling on **concurrently** open ports. Defaults to `1024`. Closing a port frees its slot immediately, so a long-lived mux can open unboundedly many over its lifetime — this bounds the id table, never the total. It also never delays a message. |
-| `maxMessageSize` | `number` | Largest message this transport can carry, if it has a limit. Reported, not enforced — the layer above chunks to it. |
+| `maxMessageSize` | `number` | Largest **payload** a chunk may carry, if the transport has a limit. Reported, not enforced. It bounds the payload, **not the frame**: the layer above chunks the payload to it and the envelope framing is added on top afterwards — measured at 124–126 bytes over `msgpackCodec`, with a modelled ceiling of 134. **Set this ~256 bytes below the transport's real limit**, or a full-size chunk overruns it (a 12 KiB setting was measured producing 12,413-byte frames). |
 
 ### `PortMux`
 

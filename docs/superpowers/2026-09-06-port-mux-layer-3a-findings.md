@@ -17,8 +17,11 @@ bridging a byte transport to a real `MessagePort` was measured, because Plan C2 
 
 No adapter was touched. Nothing was deleted. `packages/webrun-rpc/` was not modified.
 
-**Range:** `25ce027..48d16f7` for the implementation, plus this document's own commit, which is the
-branch tip. (Plan B2's findings note why naming a fixed end SHA goes stale; the same applies here.)
+**Range:** `25ce027..48d16f7` for the implementation, then `97a0595` (this document, the README and
+the changeset), `4f8eb3a` (the spec's `PortMux` block, below) and this document's own fix round. Any
+end SHA here goes stale on the next commit — Plan B2's findings say why, and this document has
+already proved it twice: the first draft named `97a0595` as the tip and `4f8eb3a` landed on top of
+it. `git log --oneline 25ce027..HEAD` is the real answer.
 
 **End state, measured rather than carried forward:**
 
@@ -88,12 +91,27 @@ bytes, with no error on either side. All three of C2's adapters have hard ceilin
 **What has been done about it, and what has not.** Spec D10 was amended immediately, mid-plan
 (commit `9fae89b`), rather than waiting for this document — the reasoning being that C2 will be
 planned against D10 and leaving a measured falsehood in the binding authority while writing that
-plan is how the LiveKit bug ships twice. Two things still carry the false statement, and both are
-named for C3 below: `packages/webrun-rpc/src/port-types.ts:53-56` ("Layer 1 does not enforce it; it
-reports it so layer 2 can chunk to fit"), which is where the next adapter author actually reads it;
-and — found while writing this document — **the spec's own `PortMux` interface block still says
-"Layer 2 chunks to it (D10)"**, two hundred lines below the correction. That is Plan B1 finding 5
-reproduced verbatim: amending the decision is not amending the document.
+plan is how the LiveKit bug ships twice.
+
+Amending D10 did not amend the document, and the grep that Plan B1's finding 5 prescribes was not run
+until this document's fix round. **Four sites repeated the same false fact**, at increasing distance
+from the correction:
+
+| site | what it said | status |
+| --- | --- | --- |
+| spec, the `PortMux` interface block (~line 396) | "Layer 2 chunks to it (D10)" — 200 lines below the correction, and the block C2's adapters are written against | **fixed**, `4f8eb3a` |
+| spec, **R3** (~line 749) | "LiveKit reports 12 KiB; layer 2 chunks to it" — 350 lines below the correction, *inside the risk entry that describes the zero-bytes failure this causes* | **fixed**, this round |
+| `packages/webrun-rpc/README.md:335` | "Largest message this transport can carry… Reported, not enforced — the layer above chunks to it" — wrong twice (payload, not message; and "chunks to it") | **fixed**, this round |
+| `packages/webrun-rpc/src/port-types.ts:53-56` | "Layer 1 does not enforce it; it reports it so layer 2 can chunk to fit" | **open — Plan C3.** It is code, not documentation, and C3 is where the fix has a choice to make (see below) |
+
+The README site is the one that would have done the damage: it is the *published* document of the
+package that owns the type, and it is where an adapter author looks first. It was outside this
+plan's declared file structure and was ruled in rather than deferred, because leaving it standing
+through all of C2 is leaving it standing exactly when it is read.
+
+That is Plan B1 finding 5 reproduced twice over: amending the decision is not amending the document,
+and **saying you will grep is not grepping** — `4f8eb3a`'s own commit message quotes the finding and
+then did not execute it.
 
 ---
 
@@ -198,9 +216,9 @@ independent of payload size — consistent with a mostly fixed cost: one extra m
 structured clone of a small typed array.
 
 **The honest conclusion is narrower than one ratio.** Small messages carry a real and consistent
-cost. The 64 KiB figure is **not merely noisy — it is inconclusive**: the sixth run measured
-**0.89×**, bridged *faster* than direct (87.0 ms vs 77.1 ms). Five of six runs put bridged behind,
-one put it ahead, and the spread straddles both "negligible" and "a third slower". Nothing about
+cost. The 64 KiB figure is **not merely noisy — it is inconclusive**: the seventh run measured
+**0.89×**, bridged *faster* than direct (87.0 ms vs 77.1 ms). **Six of the seven** runs at that size
+put bridged behind, one put it ahead, and the spread straddles both "negligible" and "a third slower". Nothing about
 large bodies should be claimed from this. The `.slice()` copy in the inbound pump is the named
 suspect for the variance and was **not** isolated; the harness times whole round trips and cannot
 decompose them.
@@ -238,11 +256,17 @@ so and points here.
 
 ---
 
-## A third instance of "a green signal for an untested claim" — as one pattern
+## "A green signal for an untested claim", twice more — and the pattern across four plans
 
-Plan B1 recorded this shape three times and called them "the same defect wearing different clothes".
-This plan produced a fourth and a fifth instance, and they belong together rather than as separate
-anecdotes.
+Plan B1 named this shape, recording **three instances of its own** and calling them "the same defect
+wearing different clothes": a missing pnpm script exiting 0; `tsc` not compiling the test files at
+all, so a type-level proof step could not produce the error it predicted; and six primitives tested
+only against a `MessageChannel`, which satisfied both the old signature and the new one, so their
+tests would have passed had the task never happened.
+
+C1 produced two more. Every plan in this project has now hit it. The table below is one instance per
+row **across four plans** — B1's first, the two earlier ones it retro-fits, and C1's two — because
+the transferable thing is the shape, not any one anecdote.
 
 | # | plan | the green signal | what was actually verified |
 | --- | --- | --- | --- |
@@ -257,8 +281,8 @@ a reporter — and the shape never does: **a command reports success while the t
 was not exercised, and the success is what stops anyone looking.** Instances 4 and 5 are the same
 artifact failing this way twice, at two different layers, within one task.
 
-The generalisation that would have caught all five: **a verification must name what it would have
-looked like had it failed.** "No test files found" and "1 passed with no output" are both
+The generalisation that would have caught all five here, and B1's other two: **a verification must
+name what it would have looked like had it failed.** "No test files found" and "1 passed with no output" are both
 distinguishable from a real pass — but only if someone asks what a real pass looks like first.
 
 Instance 4's fix is worth recording too, because the obvious ones were both wrong. Renaming to
@@ -318,10 +342,22 @@ finding 6 for the fourth time (absolute counts go stale; per-task deltas would s
 the good case — a reviewer's Important that was answered by adding a run rather than by softening a
 sentence.
 
-**One defect that is this document's own to report:** the spec's `PortMux` interface block still
-carries "Layer 2 chunks to it (D10)" after D10 itself was corrected two hundred lines above it. Not
-fixed here — this task's deliverables are the README, the changeset and this file — and named for C3
-alongside `port-types.ts`.
+**Two defects that are this document's own to report, and they compound.**
+
+The first: the spec's `PortMux` interface block still carried "Layer 2 chunks to it (D10)" after D10
+itself was corrected two hundred lines above it. Fixed in `4f8eb3a`.
+
+The second is what that fix then did. `4f8eb3a` wrote that the framing overhead is "**measured** at
+up to 134 bytes" — and 134 is *modelled arithmetic*; the largest overhead ever observed is 126, as
+this document said at the time. So the plan's signature defect — a number asserted rather than
+traced — was written into the one block C2's adapters will be built against, by the correction meant
+to make that block true. And its commit message quoted Plan B1's "grep for every other place that
+states the same fact" while leaving two live sites standing (the table above). Both are corrected in
+this document's fix round.
+
+The lesson is not "check your corrections", which nobody disagrees with. It is that **a correction
+inherits the failure modes of the thing it corrects**: the same haste that leaves a stale sentence
+in a second place writes an unbacked number into the first.
 
 ---
 
@@ -412,12 +448,15 @@ not one a transport enforced. A WebSocket's close codes, an `RTCDataChannel`'s h
 
 ## For Plan C3
 
-- **`packages/webrun-rpc/src/port-types.ts:53-56` still says "Layer 1 does not enforce it; it
-  reports it so layer 2 can chunk to fit."** That is false in exactly the way D10 was, and it sits in
-  the API's own doc comment, where the next adapter author reads it. Two ways to make the name true:
-  correct the comment, or have layer 2 reserve the framing budget — the codec advertising its own
-  overhead — so the limit means the *frame*. **And the spec's own `PortMux` interface block carries
-  the same sentence**, below the correction; fix both or the next reader finds the stale one.
+- **`packages/webrun-rpc/src/port-types.ts:53-56` is the last site that still says "Layer 1 does not
+  enforce it; it reports it so layer 2 can chunk to fit."** False in exactly the way D10 was, and it
+  sits in the API's own doc comment. The other three sites — the spec's `PortMux` block, the spec's
+  R3, and `packages/webrun-rpc/README.md:335` — were fixed in C1 (`4f8eb3a` and this document's fix
+  round); this one was left because it is **code**, and because the fix has a decision in it that
+  C3 owns: either correct the comment, or have layer 2 reserve the framing budget — the codec
+  advertising its own overhead — so that the limit means the *frame* and the margin advice can be
+  retired. Choosing the second makes the other three sites wrong again in the opposite direction, so
+  update all four together.
 - **No conformance level is sensitive to layer 1's `close`.** Dropping every inbound layer-1 `close`
   envelope leaves the byte-pipe suite 11/11 and — re-measured across the repo for this document —
   leaves all 84 `webrun-msgpack` tests and both `webrun-rpc` conformance runs green. The only test

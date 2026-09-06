@@ -184,7 +184,9 @@ applies `toChunks(maxMessageSize)` to the *payload*, and the envelope framing �
 `call-${Date.now()}-${String(Math.random()).substring(2)}`, whose real length varies **31-40**
 characters *per chunk* because `Math.random()` drops trailing zeros; the port id's integer width
 adds 0-4; the channel name adds 1 for `"out"` over `"in"`; and a chunk at or above 64 KiB adds 2
-as the payload's bin header widens. **Worst realistic case: 134 bytes.**
+as the payload's bin header widens. **Worst realistic case: 134 bytes** — that figure is the
+model's ceiling, not an observation; the largest overhead actually measured is **126 bytes**, over
+eight runs at a 16 KiB cap. Either number is covered by the margin below.
 
 So an adapter author who reads this decision and sets `maxMessageSize` to its transport's hard
 limit overruns it on the first full-size chunk: a 16 KiB cap for an `RTCDataChannel` was measured
@@ -394,9 +396,11 @@ export interface PortMux {
    * Undefined means unlimited. Layer 1 never inspects a payload's size itself.
    *
    * It bounds the payload, NOT the frame: layer 2 chunks to it and the
-   * envelope framing is then added on top, measured at up to 134 bytes over
-   * `msgpackCodec` (D10's correction). A caller must leave a margin of at
-   * least 256 bytes below its transport's real limit.
+   * envelope framing is then added on top (D10's correction). Over
+   * `msgpackCodec` that overhead is `87 + len(callId)` bytes — modelled
+   * ceiling 134, largest actually observed 126 over eight runs. A caller
+   * must leave a margin of at least 256 bytes below its transport's real
+   * limit.
    */
   readonly maxMessageSize?: number;
 }
@@ -746,8 +750,12 @@ unaffected. **Open:** whether any real workload moves a large body over a single
 if so, D13's windowing stops being future work and becomes required. The `-livekit` browser suite
 is the place to find out, since it runs against a real SFU.
 
-**R3. RESOLVED — `maxMessageSize` on `PortMux` (D10).** LiveKit reports 12 KiB; layer 2 chunks to
-it. No fragmentation exists below the multiplexer, so head-of-line blocking is not reintroduced.
+**R3. RESOLVED, with a correction — `maxMessageSize` on `PortMux` (D10).** LiveKit reports 12 KiB,
+and layer 2 chunks **the payload** to it — not the frame. D10's correction has the measurement: the
+envelope framing is added on top afterwards, so a 12 KiB setting was measured producing
+12,413-byte frames, and an adapter must set the limit ~256 bytes *below* its transport's real
+ceiling. No fragmentation exists below the multiplexer, so head-of-line blocking is not
+reintroduced.
 The residual risk is that a transport limit is *wrong* rather than absent: the previous failure was
 silent, so `-livekit` needs a test that a body many times `maxMessageSize` arrives intact rather
 than as zero bytes.

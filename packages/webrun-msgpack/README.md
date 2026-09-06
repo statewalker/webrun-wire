@@ -189,8 +189,8 @@ both framing regimes — unlimited, and with frames capped at 64 KiB
 ## `maxMessageSize` bounds the payload, not the frame
 
 **Leave a margin of at least 256 bytes below your transport's hard limit.** This is the one thing
-that will bite you when wiring `msgpackCodec` to a capped transport, and it is measured, not
-cautious:
+that will bite you when wiring `msgpackCodec` to a capped transport, and the frame sizes below are
+measured rather than cautious:
 
 `duplexOverPort` applies `toChunks(maxMessageSize)` to the *payload*. The envelope framing —
 `WireChunk`, `callPort`'s `{type, channelName, callId, params}`, the mux's `{type, id, payload}`,
@@ -199,15 +199,21 @@ then this codec — is added **on top, afterwards**. Over `msgpackCodec` that ov
 `` `call-${Date.now()}-${String(Math.random()).substring(2)}` ``, whose length varies **31–40**
 characters *per chunk* because `Math.random()` drops trailing zeros; the port id's integer width
 adds 0–4; the channel name adds 1 for `"out"` over `"in"`; and a chunk at or above 64 KiB adds 2 as
-the payload's `bin` header widens. Worst case: **134 bytes**.
+the payload's `bin` header widens.
+
+Two numbers, and the difference between them matters: adding those terms up gives a **modelled
+ceiling of 134 bytes**, while the largest overhead *actually observed* — eight runs at a 16 KiB cap
+with a 1 MiB body, so several thousand chunks and several thousand `callId`s — is **126 bytes**. The
+134 is arithmetic; the 126 is a measurement. A 256-byte margin covers both, which is why the advice
+is a round number rather than a tight one.
 
 Measured, with a 512 KiB body through the stack above:
 
-| `maxMessageSize` | intent | largest frame actually posted |
-| --- | --- | --- |
-| `16 * 1024` | an `RTCDataChannel`'s conservative ceiling | **16,508 bytes** |
-| `12 * 1024` | LiveKit's safe packet size | **12,413 bytes** |
-| `64 * 1024` | | **65,662 bytes** |
+| `maxMessageSize` | intent | largest frame actually posted | overhead |
+| --- | --- | --- | --- |
+| `16 * 1024` | an `RTCDataChannel`'s conservative ceiling | **16,508 bytes** | 124 |
+| `12 * 1024` | LiveKit's safe packet size | **12,413 bytes** | 125 |
+| `64 * 1024` | | **65,662 bytes** | 126 |
 
 So setting `maxMessageSize` to the transport's hard limit **overruns it on the first full-size
 chunk** — and a transport that silently drops an oversized message (LiveKit does; the body arrives
