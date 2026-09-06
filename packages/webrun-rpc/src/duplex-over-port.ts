@@ -213,6 +213,15 @@ function receiveChunks(
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
   let finished = false;
+  // Set by `onAbort` the instant the signal fires, independent of whether a
+  // consumer has started iterating yet. `recieveIterator`'s installer below
+  // runs lazily, on the consumer's first `.next()` — if abort fires first,
+  // `deliver` is still undefined when `onAbort` runs, so its delivery below
+  // is a no-op. Recording the reason here lets the installer catch up and
+  // settle the generator immediately instead of leaving it to wait forever
+  // for a `deliver` call that already happened before it existed.
+  let aborted = false;
+  let abortReason: unknown;
 
   const ready = (): Promise<void> =>
     deliver || finished ? Promise.resolve() : new Promise<void>((r) => waiting.push(r));
@@ -236,13 +245,31 @@ function receiveChunks(
   );
 
   const onAbort = () => {
+    aborted = true;
+    abortReason = controller.signal.reason;
     finished = true;
     wake();
-    void deliver?.({ done: true, error: controller.signal.reason });
+    // No-op if the consumer hasn't started iterating yet — `deliver` is only
+    // assigned inside the installer below. That ordering is exactly what the
+    // `aborted` check in the installer exists to catch.
+    void deliver?.({ done: true, error: abortReason });
   };
   controller.signal.addEventListener("abort", onAbort, { once: true });
 
   const stream = recieveIterator<Uint8Array>((d) => {
+    if (aborted) {
+      // The signal already fired before this installer ran. `onAbort`'s
+      // delivery above was a no-op because `deliver` didn't exist yet — settle
+      // the generator immediately instead of registering `deliver` and
+      // waiting for a chunk that will never arrive.
+      void d({ done: true, error: abortReason });
+      return () => {
+        finished = true;
+        wake();
+        off();
+        controller.signal.removeEventListener("abort", onAbort);
+      };
+    }
     deliver = d;
     wake();
     return () => {
