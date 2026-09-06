@@ -98,7 +98,7 @@ describe("README: fetch layer", () => {
 });
 
 describe("README: DuplexSiteBuilder", () => {
-  // `webrun-streams-port` is not a dependency of this package, so the README's
+  // `webrun-rpc` is not a dependency of this package, so the README's
   // MessagePort snippet cannot be run from here. This substitutes the smallest
   // possible `Serve<P>` to prove the `start(serve, params)` shape and that the
   // handler is reached.

@@ -15,7 +15,7 @@ peer dependencies. ESM only (`"type": "module"`). Needs standard `Request`,
 browsers, Node 18+, Deno, Bun and Cloudflare Workers.
 
 Pair it with a transport adapter to get a `Duplex`:
-[`-ws`](../webrun-streams-ws), [`-port`](../webrun-streams-port),
+[`-ws`](../webrun-streams-ws), [`webrun-rpc`](../webrun-rpc),
 [`-webrtc`](../webrun-streams-webrtc), [`-libp2p`](../webrun-streams-libp2p),
 [`-livekit`](../webrun-streams-livekit), [`-peerjs`](../webrun-streams-peerjs).
 
@@ -26,7 +26,7 @@ Here the transport is an in-process `MessageChannel`, so the whole exchange runs
 in one process with no network:
 
 ```ts
-import { connect, serve } from "@statewalker/webrun-streams-port";
+import { connect, serve } from "@statewalker/webrun-rpc";
 import { fetchOverDuplex, serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
 
 // --- server side ---
@@ -50,7 +50,7 @@ await close();
 await stop();
 ```
 
-Swap `@statewalker/webrun-streams-port` for
+Swap `@statewalker/webrun-rpc` for
 [`-ws`](../webrun-streams-ws), [`-webrtc`](../webrun-streams-webrtc),
 [`-libp2p`](../webrun-streams-libp2p), [`-livekit`](../webrun-streams-livekit)
 or [`-peerjs`](../webrun-streams-peerjs) and nothing else changes — that is the
@@ -130,7 +130,7 @@ signal terminates the call.
 
 ```ts
 import { DuplexSiteBuilder } from "@statewalker/webrun-http-streams";
-import { serve } from "@statewalker/webrun-streams-port";
+import { serve } from "@statewalker/webrun-rpc";
 
 const stop = await new DuplexSiteBuilder()
   .setHandler(siteHandler) // (Request) => Promise<Response>
@@ -145,7 +145,7 @@ own; endpoints, files and auth belong to the `SiteHandler` producer (typically
 `SiteBuilder`).
 
 > Not runnable as written above: it needs a live `MessagePort` and
-> `@statewalker/webrun-streams-port`, which this package does not depend on.
+> `@statewalker/webrun-rpc`, which this package does not depend on.
 > `start` accepts any `Serve<P>`, so an in-process one is enough to exercise
 > it. Calling `start()` before `setHandler()` throws.
 

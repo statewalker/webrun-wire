@@ -15,7 +15,7 @@ export type SiteHandler = (request: Request) => Promise<Response>;
  * ```ts
  * import { SiteBuilder } from "@statewalker/webrun-site-builder";
  * import { DuplexSiteBuilder } from "@statewalker/webrun-http-streams";
- * import { serve } from "@statewalker/webrun-streams-port";
+ * import { serve } from "@statewalker/webrun-rpc";
  *
  * const handler = new SiteBuilder()
  *   .setEndpoint("/api/time", () => new Response(new Date().toISOString()))

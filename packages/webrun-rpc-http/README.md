@@ -31,7 +31,7 @@ transport you wire it to:
 | Real HTTP over the network | Default: `fetch = globalThis.fetch`. |
 | An in-browser ServiceWorker | `@statewalker/webrun-http-browser` — the SW intercepts the standard `fetch` call with no special wiring. |
 | In-process tests | Pass `fetch: (request) => handler(request)` — no network at all. |
-| A MessagePort channel | `@statewalker/webrun-streams-port` for the `Duplex`, then `fetchOverDuplex` / `serveFetchOverDuplex` from `@statewalker/webrun-http-streams`. |
+| A MessagePort channel | `@statewalker/webrun-rpc` for the `Duplex`, then `fetchOverDuplex` / `serveFetchOverDuplex` from `@statewalker/webrun-http-streams`. |
 | A WebSocket | Same, with `@statewalker/webrun-streams-ws` supplying the `Duplex`. |
 | Deno / Cloudflare Workers / Node's built-in HTTP | The handler is `(Request) ⇒ Response` — drop in as-is. |
 
