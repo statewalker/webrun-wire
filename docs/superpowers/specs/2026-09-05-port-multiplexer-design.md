@@ -173,7 +173,31 @@ therefore apply to the new stack unchanged, and are the regression net for the m
 `maxMessageSize?: number`, and a single-pipe adapter returns it beside its port
 (`{ port, maxMessageSize? }`) rather than handing back a bare `MessagePort` that cannot carry it.
 Layer 2 chunks to it. LiveKit's mux reports 12 KiB, a `MessagePort`
-reports nothing, and no layer hardcodes another layer's limit. Fragmenting *below* the multiplexer
+reports nothing, and no layer hardcodes another layer's limit.
+
+**Correction, measured 2026-09-06 during Plan C1: "chunks to it" is false as implemented, and the
+gap is big enough to reproduce the failure this decision exists to prevent.** `duplexOverPort`
+applies `toChunks(maxMessageSize)` to the *payload*, and the envelope framing — `WireChunk`,
+`callPort`'s `{type, channelName, callId, params}`, the mux's `{type, id, payload}`, then the codec
+— is added **on top, afterwards**. Measured over `msgpackCodec`: the overhead is
+**`87 + len(callId)` bytes**, and it is not constant. `callId` is
+`call-${Date.now()}-${String(Math.random()).substring(2)}`, whose real length varies **31-40**
+characters *per chunk* because `Math.random()` drops trailing zeros; the port id's integer width
+adds 0-4; the channel name adds 1 for `"out"` over `"in"`; and a chunk at or above 64 KiB adds 2
+as the payload's bin header widens. **Worst realistic case: 134 bytes.**
+
+So an adapter author who reads this decision and sets `maxMessageSize` to its transport's hard
+limit overruns it on the first full-size chunk: a 16 KiB cap for an `RTCDataChannel` was measured
+producing **16,507-byte frames**, and a 12 KiB cap for LiveKit **12,411-byte frames**. That is
+precisely the class of failure recorded under R3 — a body exceeding the ceiling delivered as zero
+bytes with no error on either side.
+
+Until this is fixed, `maxMessageSize` bounds the payload and **the caller must leave a margin of at
+least 256 bytes** below the transport's real limit. Two ways to make the name true again, both for
+Plan C3: correct `PortMuxOptions.maxMessageSize`'s doc comment, which today says "layer 2 can chunk
+to fit" and is wrong in the same way; or have layer 2 reserve the framing budget — the codec
+advertising its own overhead — so that the limit means the frame rather than the payload. **This is
+a gate on Plan C2**, whose three adapters all have hard transport ceilings. Fragmenting *below* the multiplexer
 was rejected: a 10 MiB message would become ~800 transport packets that block every other port
 behind them, reintroducing head-of-line blocking underneath the layer that exists to prevent it.
 
