@@ -14,7 +14,10 @@ unconfirmed chunk closes the offending port. `transferPortMux` is a second `Port
 real transferred `MessagePort`s. And the **unmodified** L0–L6 conformance suite now runs a *second*
 time, against the new stack.
 
-**Range:** `d5ab4cc..ab1f377`, 14 commits.
+**Range:** everything on `feat/port-mux-layer-2b` since `d5ab4cc` — Tasks 1-8 and this fix round,
+whose commit is the branch tip; `git log --oneline d5ab4cc..HEAD` is the count. Naming a fixed end
+SHA and a commit count here went stale immediately, and twice over, because two of the commits it
+was already missing edited this very file.
 
 **End state, measured rather than carried forward:**
 
@@ -25,9 +28,25 @@ time, against the new stack.
 
 The 5 skips are unchanged (`-webrtc`, `-peerjs`, `-livekit`, one libp2p case, one
 `site-builder-jspm-demo` case — all environment-gated). `npx changeset status` exits 0.
-`pnpm -r typecheck` fails only in `apps/site-builder-demo` and `apps/site-builder-jspm-demo`, which
-is pre-existing: `webrun-site-{builder,host}/dist` do not exist in this worktree, neither app
-references `webrun-rpc`, and no commit in this range touches `apps/` or `packages/webrun-site-*`.
+`pnpm -r --no-bail typecheck` fails in **five** apps — `site-builder-demo`,
+`site-builder-jspm-demo`, `livekit-demo`, `p2p-demo` and `site-builder-tsx-spike` (pnpm's own
+summary: 5 fails, 4 passes). All five are the same pre-existing class: no `dist` exists in this
+worktree for `webrun-site-{builder,host}`, `webrun-http-streams`, `webrun-streams-{livekit,libp2p}`
+or `webrun-http-browser/sw`, so every import of them is a `TS2307`, and the implicit-`any` errors
+that follow are downstream of those. Not one failure mentions `webrun-rpc`, and this branch touches
+only `.changeset/`, `docs/` and `packages/webrun-rpc/`, so nothing new hides behind the label.
+
+**Fail-fast hid three of the five.** Plain `pnpm -r typecheck` bails on the first failure and
+reports exactly the two `site-builder-*` apps — which is what an earlier draft of this document
+recorded, and reported as the complete list. It was not: `livekit-demo`, `p2p-demo` and
+`site-builder-tsx-spike` were behind the bail. This is the same shape as Plan A's standing finding
+that a *missing* script exits 0 — a recursive runner's verdict describes the packages it reached,
+not the ones it did not, and in both cases the honest-looking output is the trap. Characterise a
+failure with `--no-bail`; gate on the default.
+
+Worth stating in the same breath: only **4 of the 15 packages have a `typecheck` script at all** —
+`webrun-rpc`, `webrun-streams`, `webrun-msgpack` and `webrun-http-streams`. Those four are the four
+passes, and all five failures are apps. Eleven packages are typechecked by nothing in this command.
 
 Nothing was deleted. `emulateMux`, `connect`/`serve`, `byteChannelFromMessagePort` and the original
 conformance run are all still present and green.
@@ -119,8 +138,13 @@ A `PORT_TRANSFER` message with no attached port is malformed. Deleting the guard
 throw `TypeError: Cannot read properties of undefined (reading 'start')` — but the throw happens
 inside Node's own `MessagePort` dispatch, outside any `it()` body and outside every assertion's
 reach. **Every individual test still reports passed.** Only the process exit code goes to 1, via
-vitest's unhandled-exception detector (`ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`), measured 3× by the
-implementer and 2× by the reviewer.
+vitest's own unhandled-exception handling: it prints an `Uncaught Exception` block, then a summary
+reading `Test Files 1 passed` / `Tests N passed` / `Errors  1 error`, and exits 1. Measured 3× by
+the implementer and 2× by the reviewer, and re-measured on the reproduction since. (An earlier
+version of this paragraph attributed that exit to `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`. That code is
+**pnpm's** — it is how `pnpm -r` reports the first failing package, it lives in pnpm's own bundle
+and appears nowhere in vitest. It is what you see when the failure is relayed through `pnpm -r`, not
+what detects it.)
 
 So: the suite still exits non-zero and CI does go red — but nothing *covers* this line, and saying
 otherwise would be a lie. Catching it inside an assertion would need a process-level
@@ -336,9 +360,16 @@ indistinguishable from one nobody noticed.
 - A handler that never iterates its input leaves the eager `listenPort` handler parked in
   `await ready()` with no deadline of its own. Probed: no leak in practice, because the caller's
   `STREAM_ABORT` resolves `ended`. The serve side's only exit on that shape is the peer.
-- After poison the serve side posts no `STREAM_ABORT` and `sendChunks` returns without a `done`
-  chunk. The offender learns through `response:error` on `in`, but a peer parked on the `out` half
-  has only layer 1's close, which is unobservable to layer 2. Reachable only by a hostile peer.
+- **`STREAM_ABORT` is posted from two places only** — `teardownOnce` and `runCallerSide`'s
+  `finally` — so a serve-side inactivity timeout and a window violation on either side post
+  *nothing*. Re-probed for this fix round: serve-side idle timeout → 0 notices at the caller,
+  which — absent a `timeout` of its own — then never settles; window violation → 0 notices, on
+  either side, because the enforcer's own deferred `port.close()` runs before the unwinding
+  generator's `finally` gets to post. The offender
+  learns through `response:error` on the violated channel; a peer parked on the other half has only
+  layer 1's close, which is unobservable to layer 2. Reachable by a hostile peer, or by anyone who
+  sets `timeout` on the serve side. Now stated in the README's Cancellation section rather than
+  papered over there.
 - A stream abort unwinds a producing handler via `iter.return()`, so the handler's `catch` never
   sees the abort reason — only `finally` runs. It cost a re-reviewer one wrong probe; now in the
   README.
@@ -379,6 +410,19 @@ the code rather than quoted from the spec:
   while streams get a port each (`{ kind: "stream" }`), so a one-shot call costs a request and a
   reply rather than `OPEN`/request/reply/`CLOSE`. Nothing in B2 implements the control half; the
   discriminator is passed through `meta` today and inspected by nobody.
+- **D23's `MessageSink` entry point.** D23 gives three justifications for `transferPortMux`; the
+  second is that it "reaches a `MessageSink`" — `callChannel` working against a
+  `ServiceWorkerClient` you can only `postMessage` to, because the reply arrives on the transferred
+  port rather than the parent. **That is not what shipped.** `transferPortMux` calls
+  `target.addEventListener("message", listener)` unconditionally, so its `target` must be a full
+  `MessageTarget` and a send-only sink cannot be passed at all. The implementation is honest about
+  it — the file's docstring and the README both say `target` must be full-duplex and that a
+  `MessageSink` "needs a different entry point" — but unlike D14 and D17 no deferral was ever
+  recorded for it, which is how a promise in the design and a disclaimer in the code came to sit
+  side by side with nothing joining them. A send-only entry point is still owed. Two of D23's three
+  justifications did ship (crossing a boundary to code that never saw the parent; no id table, no
+  `maxPorts`, no per-message envelope), and they are enough on their own — this is a missing item,
+  not a wrong decision.
 - **`-ws` on the new stack.** The spec's Plan B ends with "`-port` and `-ws` on the new stack passing
   L0–L6". B2 delivered `-port` and not `-ws`, because `-ws` needs the adapter to expose a port
   factory — layer 3, which is Plan C's. Nothing here blocks it; Plan C gains one item.

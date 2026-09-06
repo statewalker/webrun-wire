@@ -199,11 +199,16 @@ await server.close();
 
 Within one direction the next chunk is never sent until the previous one has
 been delivered **and** pulled past by the consumer. There is no credit window
-and no buffer ceiling to tune, because there is nothing to tune: memory is
-bounded by construction at `maxPorts × one chunk`. A peer that sends a second
-chunk before the first is confirmed has that call refused and **that port
-closed** — the penalty is scoped to the offending port and every other port on
-the mux is untouched.
+and no buffer ceiling to tune, because there is nothing to tune: **one open
+port holds at most one chunk.** Over `multiplexPort` that composes into a
+whole-mux bound of `maxPorts × one chunk`, because `maxPorts` caps concurrent
+ports. `transferPortMux` has no `maxPorts` (see
+[Transferring ports](#transferring-ports)), so the per-port bound is the same
+but the mux-wide one is yours to impose by bounding how many ports you open.
+
+A peer that sends a second chunk before the first is confirmed has that call
+refused and **that port closed** — the penalty is scoped to the offending port
+and every other port on the mux is untouched.
 
 The honest cost, from the design's own numbers: single-stream throughput is
 `chunk ÷ RTT`. In-process that is negligible. Over a 50 ms WAN round trip a
@@ -231,10 +236,29 @@ of the box.
 ### Cancellation
 
 Layer 1's close is invisible to layer 2 (see
-[Port multiplexing](#port-multiplexing)), so each side posts its own
-out-of-band `STREAM_ABORT` notice on the port when it abandons a stream. A
-caller that stops iterating, a serve-side teardown, an inactivity timeout and a
-window violation all route through the same abort.
+[Port multiplexing](#port-multiplexing)): a closed port drops its listeners
+silently and is indistinguishable from a working port nobody is answering. So a
+side that abandons a stream posts an out-of-band `STREAM_ABORT` notice on the
+port — which is the only signal the peer can act on.
+
+**Three routes post that notice; two do not.** The notice is posted from
+exactly two places in the implementation — the teardown returned by
+`serveDuplexOverPort`, and the caller's own `finally` as its generator unwinds
+— and everything else that ends a stream simply aborts locally. Measured:
+
+| what ends the stream | notice posted? | what the peer actually observes |
+| --- | --- | --- |
+| the caller stops iterating (`break`, `return`, `throw`) | **yes** | `STREAM_ABORT`; the handler unwinds through `iter.return()` |
+| the caller's inactivity `timeout` elapses | **yes** — the abort rejects the caller's stream, and its `finally` posts on the way out | `STREAM_ABORT` |
+| you call the teardown `serveDuplexOverPort` returned | **yes** | `STREAM_ABORT`; the caller's stream rejects with `the peer abandoned the stream` |
+| the **serve side's** inactivity `timeout` elapses | **no** | nothing on the `out` half — a caller parked there waits forever. A caller still *sending* has its chunk calls answered `webrun-rpc: the stream is closed`, but `duplexOverPort` surfaces only the inbound half, so that rejection never reaches its consumer either |
+| a **window violation** (a second unconfirmed chunk), on either side | **no** | the offender gets `response:error` on the channel it violated, naming the violation. Nothing else: the enforcer closes the port, and that close is exactly the layer 1 signal layer 2 cannot see. A peer parked on the other half waits forever |
+
+So the notice is what makes a *cooperative* abandonment observable. It is not a
+general liveness mechanism, and the two rows without one are a known gap rather
+than a subtlety of the wording: **give the side that must not hang its own
+`timeout`.** A caller with a `timeout` set detects both of the silent rows on
+its own clock; a caller without one does not detect them at all.
 
 **An abort unwinds a producing handler through `iter.return()`, not by
 throwing into it.** A handler's `catch` never sees the abort reason; only its
