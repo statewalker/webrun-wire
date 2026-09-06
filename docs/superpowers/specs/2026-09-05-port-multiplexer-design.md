@@ -390,9 +390,13 @@ export interface PortMux {
   /** Close every virtual port, then release the underlying transport. */
   close(): Promise<void>;
   /**
-   * Largest message this mux's ports can carry, if the transport imposes one.
-   * Undefined means unlimited. Layer 2 chunks to it (D10); layer 1 never
-   * inspects a payload's size itself.
+   * Largest PAYLOAD this mux's ports can carry, if the transport imposes one.
+   * Undefined means unlimited. Layer 1 never inspects a payload's size itself.
+   *
+   * It bounds the payload, NOT the frame: layer 2 chunks to it and the
+   * envelope framing is then added on top, measured at up to 134 bytes over
+   * `msgpackCodec` (D10's correction). A caller must leave a margin of at
+   * least 256 bytes below its transport's real limit.
    */
   readonly maxMessageSize?: number;
 }
