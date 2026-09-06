@@ -54,12 +54,12 @@ confirming with `diff` — never `git checkout --` (Plan B1 finding 2).
 | 10 | `installStreamTimeout` never arms | — | 2 — the stall test (via its rejection assertion) and the timer-leak test's floor | kills the stall test through the *old* assertion, not the new floor — which is why 11 was needed |
 | 11 | arm the timer at `timeout × 10` | — | the stall test fails **on the new timing floor** (`expected 1503 to be less than 1000`), the rejection assertion still passing | the floor, not the rejection, is the discriminating check |
 | 12 | remove `resolveEnded()` from `detach()` | — | exactly the new "stops pulling early" test, twice; the re-reviewer also killed both of its own probes with it | matches |
-| 13 | `receiveChunks`: `if (outstanding)` → `if (false)`, against the **as-written** hostile suite | 1, with an explicit question about test 3 | **1** of 4, 5/5 runs. Test 3 survived | **discrepancy — overcount.** Test 3 never inspects the offending port, so it passes with enforcement wholly disabled. This is how its vacuity was found |
+| 13 | `receiveChunks`: `if (outstanding)` → `if (false)`, against the **as-written** hostile suite | 1, with an explicit question about test 3 | **1** of 4, 5/5 runs. Test 3 survived | **the prediction was right; the suite was wrong.** The plan predicted one killer and *asked* whether test 3 also moved rather than claiming it would. It did not: test 3 never inspects the offending port, so it passes with enforcement wholly disabled. This is how its vacuity was found |
 | 14 | the same mutation against the **fixed** hostile suite | — | **4 of 6**, 5/5 runs | survivors are exactly the two deliberately orthogonal floors (a cooperative sender is never refused; garbage is ignored) |
 | 15 | `setTimeout(…, 0)` before `port.close()` → close immediately | — | the re-reviewer's probe plus hostile tests 1 and 3 | the deferred close is load-bearing on a *virtual* port: it goes inert the instant it closes, so an immediate close eats the refusal |
 | 16 | `transferPortMux`: delete `if (!accepted) { port.close(); return; }`, against the **as-written** suite | 1 — the rejection test | **0.** 6/6 in the file, 109/109 across the package, 3/3 runs | **discrepancy — overcount.** Tests 2 and 3 assert `expect(seen).toEqual([])` on the *client's* end of a channel nobody was ever going to send on. How their vacuity was found |
 | 17 | the same mutation against the **fixed** suite | — | **2** — tests 2 and 3, with real assertion failures (`["should not arrive: port was rejected"]`; a `waitFor` timeout). Implementer 2×, re-reviewer 2× | the fix earns the claim in the tests' titles |
-| 18 | `transferPortMux`: delete `if (!port) return;` | 1 — the "ignores traffic on the parent" test | **kills no assertion.** All 6 tests report passed; only the process exit code goes to 1 (implementer 3×, reviewer 2×) | **survives**, in the honest sense. See below |
+| 18 | `transferPortMux`: delete `if (!port) return;` | 1 — the "ignores traffic on the parent" test, with the brief's own hedge: "if it kills nothing observable, say so" | **kills no assertion.** All 6 tests report passed; only the process exit code goes to 1 (implementer 3×, reviewer 2×) | **discrepancy — overcount**, and **survives** in the honest sense. The hedge was the right instinct and the prediction beside it was still wrong. See below |
 | 19 | `transferPortMux.close()`: delete `removeEventListener` and the listener's `closed` guard | reviewer's own; originally left the suite green | after the test fix, kills test 5 (`expected 2 to be 1`), 2/2 | |
 | 20 | conformance: a module-level `AbortController` in `runCallerSide` | — | **7 of 11**, including L1; L1 alone kills in 21 ms in isolation | proves the new conformance run is live and detects the per-module-vs-per-port defect class |
 | 21 | conformance: `openPort` returns a cached port | — | L1 and L4 | |
@@ -68,15 +68,23 @@ confirming with `diff` — never `git checkout --` (Plan B1 finding 2).
 
 ### The pattern in the discrepancies
 
-**Six of this plan's mutation predictions came out wrong** — rows 2, 5, 9, 13, 16 and 18 — and the
+**Five of this plan's mutation predictions came out wrong** — rows 2, 5, 9, 16 and 18 — and the
 split is not what it first looks like. Three (2, 5, 9) *undercounted*: the mutation killed more than
 predicted, in each case because a single shared mechanism serves more callers than the prediction
-traced. Those are the harmless kind; they end with a stronger result than claimed. Three (13, 16, 18)
-*overcounted*: the mutation killed **less** than predicted, and in two of them it killed nothing at
-all. Every one of those three exposed a vacuous test.
+traced. Those are the harmless kind; they end with a stronger result than claimed. Two (16, 18)
+*overcounted*: the mutation killed **less** than predicted, and in both it killed nothing at all —
+row 16 left the whole package green, row 18 left every individual test reporting passed. Both
+exposed a vacuous test.
 
-Row 1 is a seventh discrepancy of a different kind: the plan was right and the first report of the
-measurement was wrong, corrected only because a reviewer re-ran it five times instead of once.
+Two further rows are discrepancies of a different kind, where the plan's prediction was **right**:
+
+- **Row 1** — the prediction stood and the first *report* of the measurement was wrong (2 kills
+  claimed as deterministic; actually 1 deterministic and 1 flaky). Corrected only because a reviewer
+  re-ran it five times instead of once.
+- **Row 13** — the plan predicted exactly one killer and *asked*, rather than asserted, whether
+  test 3 would also move. It did not. The prediction was right; the suite was wrong, and test 3's
+  vacuity is what the question found. A prediction that names its own uncertainty is the one shape
+  in this table that could not come out wrong, and it still bought the finding.
 
 The lesson, which is Plan A finding 1 restated in a new register: a mutation prediction is a
 hypothesis about a *test suite*, not about a code path, and both halves can be wrong independently.
@@ -126,11 +134,36 @@ tests, and after the fix round it kills two of them (row 17). It is a fixed vacu
 
 ## Where this plan was wrong
 
-Four defects reached review **in the plan's own code** — code the briefs wrote out verbatim for
-implementers to transcribe, not anything an implementer invented. Not one was caught by reading.
-Every one was caught by a mutation or a probe.
+**Eight defects, in two classes.** Four were caught before a line of code was written, by the
+controller reading the plan against the files it described; four survived into implementation and
+reached review, and every one of those was caught by a mutation or a probe rather than by reading.
+All eight are in the plan's own text — briefs written out verbatim for implementers to transcribe,
+not anything an implementer invented. Which class a defect fell into is the useful part, and it is
+taken up at the end of this section.
 
-### 1. An abort before the consumer's first pull hung the caller forever (Task 2)
+### Caught before execution, by reading the plan against the code
+
+Recorded as pre-flight rulings in the ledger before Task 1 was dispatched. Each names its own cost
+if the ruling was wrong, which is why none of them needed a fix round.
+
+| # | what the plan said | what the code said | cost if the ruling were wrong |
+| --- | --- | --- | --- |
+| **R1** | Task 4: `sendChunks` gains a `touch` parameter; threads it through `runCallerSide` and `serveDuplexOverPort` | `serveDuplexOverPort` has a **third** call site — the early-error `failing(err)` path. Ruling: update all three | none; `tsc` catches a missing argument. But it under-named them, and a missed one is a compile error rather than a silent bug |
+| **R2** | Task 1's third test, titled "NO_TIMEOUT does not leak a timer that keeps the process alive" | its body asserts only that a normal call completes. Ruling: rename it to "NO_TIMEOUT still completes a normal call" | a blander name. The test's real job — being the floor for the two above it — is unchanged |
+| **R3** | Task 1: import `NO_TIMEOUT` "from `../src/index.js`" | `tests/call-port.test.ts` imports from `../src/call-port.js` and `../src/listen-port.js`, never the index. Ruling: import from `call-port.js`, and reuse the file's existing `newChannel()` helper | none; the wrong path would not resolve. Written without reading that file's imports |
+| **R4** | Task 6's test 2 carried a comment claiming an in-test floor ("The floor for the rejection: a port the peer ACCEPTS still works") | the test never accepts a port. Ruling: correct the comment to point at the genuine floors — test 1, and test 4's second half — and do **not** weaken the tests | if a reviewer judged the file-level floor insufficient, one extra assertion is a cheap fix |
+
+R2 is Plan A's finding 5 reproduced verbatim — a test named for coverage it does not have — and R4
+is its close relative, a *comment* claiming a floor that is not there, which is worse than no claim
+because it stops anyone looking. Both were visible on the page. Neither would have been caught by
+running anything: R2's test passes either way, and R4's comment is not executable at all.
+
+### Reached review, and only measurement found them
+
+Four defects in the plan's code got past the pre-flight read, past the implementers who transcribed
+them, and into a commit. Not one was caught by reading.
+
+#### 1. An abort before the consumer's first pull hung the caller forever (Task 2)
 
 `receiveChunks`'s `onAbort` delivered the abandonment through `void deliver?.(…)`. But `deliver` is
 assigned inside `recieveIterator`'s installer, and `newAsyncGenerator` runs that installer *lazily*
@@ -144,7 +177,7 @@ proved it with a probe (unsettled after 300 ms) rather than by argument.
 Fixed in `257f862` by recording `aborted`/`abortReason` the instant the signal fires and having the
 installer replay it if it is already set. Killed by row 4.
 
-### 2. A vacuous `.not.toThrow()` idempotence test (Task 3)
+#### 2. A vacuous `.not.toThrow()` idempotence test (Task 3)
 
 "teardown is idempotent" asserted only that three `off()` calls did not throw. That is satisfied
 unconditionally — even by `off() {}` — because every primitive underneath is independently
@@ -155,7 +188,7 @@ Fixed in `42d1250` by giving it the peer-visible effect a caller actually depend
 honestly rather than assuming: the `torn` guard is not load-bearing, and that is recorded as a
 survivor instead of being papered over with a contrived test.
 
-### 3. A vacuous `cleanupRan` assertion, satisfied by the fixture's own sleep (Task 4)
+#### 3. A vacuous `cleanupRan` assertion, satisfied by the fixture's own sleep (Task 4)
 
 The stall test polled a `cleanupRan` flag inside a 6000 ms window. The reviewer instrumented both
 worlds: with `{ timeout: 150 }` the rejection lands at 165 ms and `cleanupRan` flips at **5015 ms**;
@@ -174,7 +207,7 @@ open. Fixing that opened a second hole — `ended` had a terminating path that n
 handler that stopped pulling input early re-armed the leak through a different door — closed in
 `298ce05` and pinned by row 12.
 
-### 4. A poison branch that bypassed the abort machinery (Task 5)
+#### 4. A poison branch that bypassed the abort machinery (Task 5)
 
 D15's enforcement closed the offending port but set neither `aborted`/`abortReason` nor
 `controller.abort()`. The reviewer proved two consequences:
@@ -191,7 +224,7 @@ D15's enforcement closed the offending port but set neither `aborted`/`abortReas
 Fixed in `c652dc7` by routing through `controller.abort(poison)`, which does all of it and made the
 hand-rolled quartet redundant — strictly less code than the path it replaced.
 
-### The pattern worth naming: five vacuous assertions, none found by reading
+### The pattern worth naming: what reading catches, and what it cannot
 
 The four defects above are the plan's own; two of them are vacuous tests. Counting across the whole
 plan, **five assertions turned out to be satisfied whether or not the machinery worked**, and all
@@ -205,13 +238,27 @@ five were in test code the briefs wrote out verbatim:
 | Task 6, test 2 | "a rejected port is closed rather than silently kept" | `expect(seen).toEqual([])` on a channel nobody would ever send on |
 | Task 6, test 3 | "with no `onPort` at all, an inbound port is rejected" | identical shape, identical reason |
 
-**Not one was found by reading.** Each was found by running a mutation and noticing the number was
-wrong — three of them by a mutation that killed *fewer* tests than predicted. This plan's
-test-writing had a systematic blind spot for assertions that hold whether or not the mechanism
-exists, and the only instrument that detected it was measurement. It is the third consecutive plan
-in this project to hit the same shape (Plan A finding 5, Plan B1 section 1); what is new here is
-that the "killed less than predicted" signal is *diagnostic* of it, and should be treated as a
-finding rather than as a relief.
+**Not one of the five was found by reading**, and the reason is worth more to a future reviewer
+than the count is.
+
+Reading the plan caught the errors that were **visible on the page**: a wrong import path (R3), an
+uncounted call site (R1), a test title that did not match its own body (R2), and a comment claiming
+a floor the test did not have (R4). Four defects, all caught before a line of code was written, and
+none of them needing anything to be run — R2's test passes either way, and R4's comment is not
+executable at all. A careful read is genuinely good at this class, and it is cheap: all four cost
+one ruling each and no fix round.
+
+Only measurement caught the ones that were **not** visible on the page — where the code reads
+correctly, the test reads correctly, and the test simply cannot fail. Every one of the five above is
+that shape, and three were found by a mutation that killed *fewer* tests than predicted. So:
+
+> A careful review will catch a test that is *named* wrong. It will not catch a test that is
+> *satisfied* wrong. Only a mutation distinguishes those two.
+
+This plan's test-writing had a systematic blind spot for assertions that hold whether or not the
+mechanism exists. It is the third consecutive plan in this project to hit the same shape (Plan A
+finding 5, Plan B1 section 1); what is new here is that the "killed less than predicted" signal is
+*diagnostic* of it, and should be treated as a finding rather than as a relief.
 
 A related note on the same theme, from the reviewers' side: an all-green first run proves nothing.
 Task 7's conformance run passed 11/11 on first contact, which is exactly when a suite is worth
@@ -343,11 +390,17 @@ row 3 kills it). The gap is that no *conformance* pair exercises framing — whi
 reshapes `PairTuning` around `maxMessageSize`, because that reshape is the natural place to close
 it.
 
-**And two habits worth keeping:**
+**And three habits worth keeping:**
 
+- **Read the plan against the files it names, before dispatching anything.** Four of this plan's
+  eight defects were caught that way, at one ruling each and no fix round: a wrong import path, an
+  uncounted call site, a test title that did not match its body, and a comment claiming a floor the
+  test lacked. That read is cheap and it catches a whole class — but only the class that is visible
+  on the page.
 - Run every mutation more than once, and report the number measured rather than the number
-  predicted. Row 1 exists because someone did, and rows 13/16/18 are where "fewer kills than
-  predicted" turned out to mean "the test is vacuous", not "the guard is unimportant".
+  predicted. Row 1 exists because someone did, and rows 13, 16 and 18 are where a mutation killing
+  fewer tests than expected turned out to mean "the test is vacuous", not "the guard is
+  unimportant".
 - Copy a file to a scratch path before mutating it and copy it back, verifying with `diff` or
   `md5sum`. Every probe in this plan did. `git checkout -- <path>` restores the last *committed*
   state and silently discards uncommitted work, file path or not (Plan B1 finding 2).
