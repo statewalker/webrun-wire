@@ -252,6 +252,18 @@ and the sender races ahead immediately.
 breaking change to `webrun-streams-conformance`'s public API and touches every adapter's pair
 factory.
 
+**Sequenced into Plan C, not Plan B.** The suite is shared: `-ws`, `-livekit`, `-peerjs`,
+`-webrtc` and `-port` all still run L6 against `emulateMux`, where the credit window is real and
+the level genuinely covers it. Redefining L6 while those adapters have not migrated would remove
+their only flow-control coverage to gain coverage for a stack that has one adapter. So L6 is
+redefined in Plan C, in the same change that migrates the adapters and deletes `emulateMux`.
+
+Until then, a new-stack pair passes L6 as an **integrity check only** — it ignores `PairTuning`
+exactly as the loopback pair does, and its green says the body round-trips, nothing about flow
+control. That must be stated where the pair is declared, because L6's whole hazard is reading as
+coverage it does not provide. The new stack's flow-control coverage in Plan B comes from its own
+tests (the one-chunk-ahead assertion and the F5 regression), not from L6.
+
 **D18. Non-goal: reconnection.** A transport that drops takes every virtual port with it, and
 nothing is resumed. Ports are not durable and carry no sequence numbers for replay. Stated so it is
 a boundary rather than an oversight.
@@ -509,10 +521,17 @@ throttled to one outstanding chunk and cannot accumulate. A peer that ignores th
 posts without waiting can. `emulateMux` defended this with `maxStreamBuffer` and a 19-test hostile
 suite; under D3 that defence cannot live at layer 1.
 
-**Resolution:** `duplexOverPort` carries a `maxBufferedBytes` ceiling. Exceeding it closes that
-stream with an error and leaves every other port untouched. The hostile suite is re-pointed at
-layer 2 rather than deleted, because its questions — what happens under a flood, an undrained
-stream, exhausted ids — remain exactly right; only the layer that answers them changes.
+**Resolution: D15, not a byte ceiling.** An earlier draft of this section proposed a
+`maxBufferedBytes` tunable on `duplexOverPort`. D15 supersedes it and this paragraph is corrected
+rather than left to contradict the decision: the receiver refuses a *second unconfirmed chunk*
+outright and closes that virtual port with an error. A count of one needs no threshold, no
+byte accounting and nothing to tune, and it bounds memory by construction
+(`maxPorts × one chunk`) rather than by a guessed number — which was `maxStreamBuffer`'s defect.
+Every other port is untouched.
+
+The hostile suite is re-pointed at layer 2 rather than deleted, because its questions — what
+happens under a flood, an undrained stream, exhausted ids — remain exactly right; only the layer
+that answers them changes.
 
 ---
 
@@ -731,15 +750,28 @@ for composability (D2). `msgpackCodec` lands in `webrun-msgpack` with a type-onl
 `webrun-ports` keeps zero runtime dependencies. Consumes nothing, changes no adapter, deletes
 nothing.
 
-**Plan B — layer 2 on layer 1.** Move and re-type the primitives into `webrun-rpc`; build
-`duplexOverPort` on `callPort`-per-chunk (D12) with receiver-side window enforcement (D15); open one
-control port for calls and one port per stream (D14); replace `callPort`'s 1000 ms default with the
-per-stream timeout defaulting to none (D8, fixing F5); rewrite L6 and reshape `PairTuning` (D17);
-re-home the hostile suite. Ends with `-port` and `-ws` on the new stack passing L0–L6, with
-`emulateMux` still present.
+**Plan B — layer 2 on layer 1.** Split in two during execution.
+
+**B1 (done, `1279cf9..0ed16a0`) — packaging.** Renamed `webrun-streams-port` to `webrun-rpc`; moved
+`MessageTarget` and the port layer into it; re-typed the RPC primitives from `MessagePort` to
+`MessageTarget`; made `openPort` asynchronous.
+
+**B2 — the stream tier.** Build `duplexOverPort` on `callPort`-per-chunk (D12) with receiver-side
+window enforcement (D15); make the per-chunk deadline optional and give the stream one timeout
+defaulting to none (D8, fixing F5); add `transferPortMux` (D23); re-home the hostile suite at
+layer 2; prove the whole stack at the `Duplex` seam with a second conformance run over a
+`MessageChannel` pair, alongside the existing `emulateMux` run. `emulateMux` stays.
 
 The F5 regression test — a consumer deliberately slower than 1000 ms per value completing a
-transfer — is this plan's headline assertion, because it fails on today's code.
+transfer — is B2's headline assertion, because it fails on today's code.
+
+**Deferred out of B2 into Plan C, deliberately:**
+
+- **the shared control port for one-shot calls (D14).** It is a property of how `connect`/`serve`
+  compose a mux, and `connect`/`serve` are realigned in Plan C. Conformance exercises `Duplex`
+  only, so nothing in B2 needs it, and building it in B2 would mean building it against a
+  `connect`/`serve` shape Plan C immediately replaces.
+- **L6's redefinition and the `PairTuning` reshape (D17)** — see the reasoning recorded under D17.
 
 **Plan C — layer 3 and the deletion.** Native `PortMux` implementations for `-port`, `-webrtc` and
 `-libp2p`, each reporting its `maxMessageSize` (16 KiB for `-webrtc`; verify `-peerjs`'s before
