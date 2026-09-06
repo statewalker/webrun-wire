@@ -2,8 +2,20 @@ import { deserializeError, type SerializedError } from "@statewalker/webrun-stre
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
 
+/**
+ * Pass as `timeout` to install no deadline at all. Used by the stream tier,
+ * where the deadline belongs to the stream rather than to one chunk (spec D8):
+ * a slow consumer is throttled, never failed.
+ */
+export const NO_TIMEOUT = Number.POSITIVE_INFINITY;
+
 export interface CallPortOptions {
-  /** Timeout in ms after which the call rejects (default 1000). */
+  /**
+   * Timeout in ms after which the call rejects (default 1000). A value that is
+   * not a finite number greater than zero — {@link NO_TIMEOUT}, or 0 — installs
+   * no deadline, and the call then settles only on a reply, an abort, or the
+   * port's close signal.
+   */
   timeout?: number;
   /** Channel name filter — peers with a different `channelName` ignore the message. */
   channelName?: string;
@@ -58,7 +70,9 @@ export function callPort<TResult = unknown, TParams = unknown>(
       reject(abortReason(combinedSignal));
       return;
     }
-    timerId = setTimeout(() => reject(new Error(`Call timeout. CallId: "${callId}".`)), timeout);
+    if (Number.isFinite(timeout) && timeout > 0) {
+      timerId = setTimeout(() => reject(new Error(`Call timeout. CallId: "${callId}".`)), timeout);
+    }
     onMessage = (event: MessageEvent) => {
       const data = event.data as ResponseEnvelope<TResult> | undefined;
       if (!data) return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callPort } from "../src/call-port.js";
+import { callPort, NO_TIMEOUT } from "../src/call-port.js";
 import { listenPort } from "../src/listen-port.js";
 
 function newChannel() {
@@ -76,5 +76,55 @@ describe("callPort / listenPort", () => {
     expect(await callPort(port2, {})).toBe("ok");
     close();
     await expect(callPort(port2, {}, { timeout: 50 })).rejects.toThrow(/Call timeout/);
+  });
+});
+
+describe("callPort deadlines", () => {
+  it("resolves a reply that arrives long after the 1000 ms default", async () => {
+    const channel = newChannel();
+    const off = listenPort<string, string>(channel.port2, async (params) => {
+      await new Promise((r) => setTimeout(r, 1200));
+      return `${params}-late`;
+    });
+    try {
+      await expect(
+        callPort<string, string>(channel.port1, "slow", { timeout: NO_TIMEOUT }),
+      ).resolves.toBe("slow-late");
+    } finally {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  }, 10_000);
+
+  it("still rejects at the default deadline when none is given", async () => {
+    const channel = newChannel();
+    const off = listenPort<string, string>(channel.port2, async (params) => {
+      await new Promise((r) => setTimeout(r, 1200));
+      return `${params}-late`;
+    });
+    try {
+      await expect(callPort<string, string>(channel.port1, "slow")).rejects.toThrow(/Call timeout/);
+    } finally {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  }, 10_000);
+
+  it("NO_TIMEOUT still completes a normal call", async () => {
+    const channel = newChannel();
+    const off = listenPort<string, string>(channel.port2, (params) => `${params}-ok`);
+    try {
+      // The floor for the two assertions above: with no deadline installed a
+      // normal call must still complete normally and clean up its listener.
+      await expect(
+        callPort<string, string>(channel.port1, "fast", { timeout: NO_TIMEOUT }),
+      ).resolves.toBe("fast-ok");
+    } finally {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    }
   });
 });
