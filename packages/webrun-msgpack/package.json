@@ -41,6 +41,8 @@
     "@ygoe/msgpack": "catalog:"
   },
   "devDependencies": {
+    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:*",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
