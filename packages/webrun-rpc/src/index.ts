@@ -17,3 +17,4 @@ export type { PortCodec, PortEnvelope, PortMux, PortMuxOptions } from "./port-ty
 export * from "./recieve.js";
 export * from "./send.js";
 export { structuredCodec } from "./structured-codec.js";
+export * from "./transfer-port-mux.js";
