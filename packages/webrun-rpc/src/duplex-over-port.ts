@@ -294,6 +294,8 @@ function receiveChunks(
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
   let finished = false;
+  let outstanding = false;
+  let poison: Error | undefined;
   // Resolves once no more chunks are coming on this channel — either the
   // wire declared `done` (with or without an error) or the signal aborted.
   // Used by `serveDuplexOverPort` to know when it is safe to disarm the
@@ -323,13 +325,49 @@ function receiveChunks(
     port,
     async ({ done, value, error }) => {
       touch();
-      await ready();
-      if (finished) throw new Error("webrun-rpc: the stream is closed");
-      await deliver?.({
-        done,
-        value,
-        error: error ? deserializeError(error) : undefined,
-      });
+      if (poison) throw poison;
+      if (outstanding) {
+        // Spec D15: a second chunk before the first was confirmed is a
+        // protocol violation, not a resource question. A count of one needs
+        // no threshold and no byte accounting, and it bounds memory by
+        // construction: maxPorts x one chunk.
+        poison = new Error(
+          "webrun-rpc: peer sent a second unconfirmed chunk; the stream port is closed",
+        );
+        finished = true;
+        wake();
+        void deliver?.({ done: true, error: poison });
+        // No more chunks are coming on this channel once poisoned — resolve
+        // `ended` here too (as `onAbort` already does), or a server with a
+        // configured `timeout` would leave `serveDuplexOverPort`'s clock
+        // armed forever after this port is closed: `disarmClockWhenBothSidesSettle`
+        // waits on this promise and it would never settle otherwise.
+        resolveEnded();
+        // Close on the next macrotask, so listenPort still gets to post the
+        // refusal on this one — a virtual port goes inert the instant it
+        // closes, and a silent drop would leave the offender hanging rather
+        // than telling it what it did wrong.
+        setTimeout(() => {
+          try {
+            void port.close?.();
+          } catch {
+            /* already gone */
+          }
+        }, 0);
+        throw poison;
+      }
+      outstanding = true;
+      try {
+        await ready();
+        if (finished) throw poison ?? new Error("webrun-rpc: the stream is closed");
+        await deliver?.({
+          done,
+          value,
+          error: error ? deserializeError(error) : undefined,
+        });
+      } finally {
+        outstanding = false;
+      }
       if (done) resolveEnded();
     },
     { channelName },
