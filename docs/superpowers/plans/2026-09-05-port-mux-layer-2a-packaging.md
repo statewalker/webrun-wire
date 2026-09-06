@@ -545,7 +545,7 @@ headings one level (`####` → `###`) since it becomes a top-level section there
 Then make exactly two corrections to the moved text, because Task 4 changed the API:
 
 ```markdown
-| `openPort(meta?)` | Allocate a port, announce it, and return the local end. **Asynchronous** — a natively multiplexed transport cannot produce a port synchronously, and the two must share a shape. Does not wait for the peer to accept. Throws `RangeError` past `maxPorts`. |
+| `openPort(meta?)` | Allocate a port, announce it, and return the local end. **Asynchronous** — a natively multiplexed transport cannot produce a port synchronously, and the two must share a shape. Does not wait for the peer to accept. **Rejects** with `RangeError` past `maxPorts`, and rejects on a closed mux — it does not throw synchronously. |
 ```
 
 and in the paragraph below that table, replace "returning before acceptance" with "returning a

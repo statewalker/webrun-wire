@@ -106,9 +106,13 @@ asserts L0–L6 against any `ConnectServePair`. As of the credit work: Node 683 
 
 Ratified in conversation on 2026-09-05.
 
-**D1. Everything in the stack is a port.** The universal interface is `MessageTarget` from
-`@statewalker/webrun-streams` — `addEventListener("message")`, `removeEventListener`, optional
-`start()`, `postMessage(message, transfer?)`, optional `close()`.
+**D1. Everything in the stack is a port.** The universal interface is `MessageTarget` —
+`addEventListener("message")`, `removeEventListener`, optional `start()`,
+`postMessage(message, transfer?)`, optional `close()`.
+
+It lives in `@statewalker/webrun-rpc` alongside the port layer (D22). An earlier draft of this
+decision placed it in `webrun-streams`, which is where Plan A built it; Plan B1 moved it, and this
+line is corrected rather than left to contradict D22.
 
 **D2. The multiplexer is a port transformer: one port in, many ports out.** Not
 channel-to-ports. This makes it composable: a multiplexer over a virtual port yields further
@@ -320,7 +324,7 @@ export interface PortMuxOptions {
 
 export interface PortMux {
   /** Allocate a port, announce it, return the local end immediately. */
-  openPort(meta?: unknown): MessageTarget;
+  openPort(meta?: unknown): Promise<MessageTarget>;
   /** Close every virtual port, then release the underlying transport. */
   close(): Promise<void>;
   /**
@@ -335,7 +339,7 @@ export interface PortMux {
 export function multiplexPort(port: MessageTarget, options: PortMuxOptions): PortMux;
 ```
 
-`openPort` returns synchronously and does not wait for the peer to accept. Messages posted before
+`openPort` returns a promise that resolves without waiting for the peer to accept (D2). Messages posted before
 acceptance are sent; if the peer rejects, they are dropped at the far end and the local port
 receives a `CLOSE`. This keeps layer 1 free of round trips — a caller that needs confirmation
 builds it at layer 2, where confirmation already exists.
@@ -562,6 +566,15 @@ can be **transferred into a worker or iframe** — a capability the `MessageTarg
   the replenishment *policy* object, so windowing arrives as configuration rather than as new code.
   Deleting them would mean rewriting proven, mutation-tested code later. A dormant module with a
   README line saying so is cheaper and honest; an unused export that claims to be wired up is not.
+
+  **Correction from Plan B1's final review: these two do not share a fate, and bundling them here
+  was wrong.** Both are still consumed *today* — `emulate-mux.ts` imports and uses both — so neither
+  is dormant until Plan C. Past that they diverge. `flow-control.ts` is correctly dormant: it is
+  unit-agnostic, exported, tested, and D13's stated mechanism for windowing, so Plan C should decide
+  consciously whether it follows windowing into `webrun-rpc`. **`uint32.ts` is genuinely dead after
+  Plan C** — its own docstring calls it "an internal codec for the `emulateMux` wire format", it is
+  unexported, and `PortEnvelope` has no big-endian credit field for it to encode. It and
+  `tests/uint32.test.ts` belong on Plan C's deletion list.
 
 What survives from that work and carries forward: the conformance suite including L6, the three
 browser harnesses and the four adapter bugs they exposed, the hostile suite's questions, and
