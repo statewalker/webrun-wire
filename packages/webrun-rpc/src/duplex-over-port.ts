@@ -43,12 +43,11 @@ export interface DuplexOverPortOptions {
    */
   maxMessageSize?: number;
   /**
-   * Inactivity timeout for the whole stream, in ms. Unset — the default —
-   * means no timeout at all (spec D8): a slow consumer is throttled, never
-   * failed.
-   *
-   * Accepted here but not yet honoured — nothing in this file installs a
-   * timer against it. Task 4 wires it up.
+   * Inactivity timeout for the whole stream, in ms: the clock is reset by any
+   * chunk in either direction, and elapsing aborts the stream. Unset — the
+   * default — means no timeout at all (spec D8): a slow consumer is throttled,
+   * never failed. Any finite default would reintroduce F5 at a different
+   * threshold.
    */
   timeout?: number;
   /** Logging function; defaults to a no-op. */
@@ -83,21 +82,24 @@ export function serveDuplexOverPort(
 ): () => void {
   const controller = new AbortController();
   const notice = installAbortNotice(port, controller);
-  const inbound = receiveChunks(port, CHANNEL_IN, controller);
+  const clock = installStreamTimeout(controller, options.timeout);
+  const inbound = receiveChunks(port, CHANNEL_IN, controller, clock.touch);
   let output: AsyncGenerator<Uint8Array>;
   try {
     output = handler(inbound.stream);
   } catch (err) {
     // A handler that throws before returning a generator still owes the peer
     // an end-of-stream, or its `callPort` never settles.
-    void sendChunks(port, CHANNEL_OUT, failing(err), options, controller.signal).catch(() => {});
-    return teardownOnce(controller, notice, inbound, undefined);
+    void sendChunks(port, CHANNEL_OUT, failing(err), options, controller.signal, clock.touch).catch(
+      () => {},
+    );
+    return teardownOnce(controller, notice, clock, inbound, undefined);
   }
-  const pump = sendChunks(port, CHANNEL_OUT, output, options, controller.signal);
+  const pump = sendChunks(port, CHANNEL_OUT, output, options, controller.signal, clock.touch);
   void pump.catch(() => {
     // Reported to the peer inside sendChunks; nothing to surface locally.
   });
-  return teardownOnce(controller, notice, inbound, output);
+  return teardownOnce(controller, notice, clock, inbound, output);
 }
 
 async function* failing(err: unknown): AsyncGenerator<Uint8Array> {
@@ -108,6 +110,7 @@ async function* failing(err: unknown): AsyncGenerator<Uint8Array> {
 function teardownOnce(
   controller: AbortController,
   notice: { post(): void; stop(): void },
+  clock: { touch(): void; stop(): void },
   inbound: { stop(): void },
   output: AsyncGenerator<Uint8Array> | undefined,
 ): () => void {
@@ -118,6 +121,7 @@ function teardownOnce(
     if (!controller.signal.aborted) controller.abort(new Error("webrun-rpc: stream torn down"));
     notice.post();
     notice.stop();
+    clock.stop();
     inbound.stop();
     void output?.return(undefined as never).catch(() => {});
   };
@@ -130,8 +134,9 @@ function runCallerSide(
 ): AsyncGenerator<Uint8Array> {
   const controller = new AbortController();
   const notice = installAbortNotice(port, controller);
-  const inbound = receiveChunks(port, CHANNEL_OUT, controller);
-  const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal);
+  const clock = installStreamTimeout(controller, options.timeout);
+  const inbound = receiveChunks(port, CHANNEL_OUT, controller, clock.touch);
+  const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal, clock.touch);
   void pump.catch(() => {
     // The outbound half's failure surfaces to the peer, not to this consumer:
     // the consumer's contract is the inbound half.
@@ -150,6 +155,7 @@ function runCallerSide(
       }
       notice.post();
       notice.stop();
+      clock.stop();
       inbound.stop();
       await pump.catch(() => {});
       try {
@@ -197,6 +203,39 @@ function installAbortNotice(
 }
 
 /**
+ * The per-stream inactivity timeout (spec D8). Reset by any chunk in either
+ * direction; elapsing aborts the stream. Unset, zero or non-finite installs no
+ * timer at all, which is the default: a slow consumer is throttled, not failed.
+ */
+function installStreamTimeout(
+  controller: AbortController,
+  timeout: number | undefined,
+): { touch(): void; stop(): void } {
+  if (timeout === undefined || !Number.isFinite(timeout) || timeout <= 0) {
+    return { touch() {}, stop() {} };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    timer = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        controller.abort(new Error(`webrun-rpc: stream idle for ${timeout} ms`));
+      }
+    }, timeout);
+  };
+  arm();
+  return {
+    touch() {
+      if (timer !== undefined) clearTimeout(timer);
+      arm();
+    },
+    stop() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
+/**
  * The receiving half of one direction.
  *
  * The `listenPort` listener is installed **eagerly**, not lazily inside
@@ -209,6 +248,7 @@ function receiveChunks(
   port: MessageTarget,
   channelName: string,
   controller: AbortController,
+  touch: () => void,
 ): { stream: AsyncGenerator<Uint8Array>; stop(): void } {
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
@@ -233,6 +273,7 @@ function receiveChunks(
   const off = listenPort<WireChunk, void>(
     port,
     async ({ done, value, error }) => {
+      touch();
       await ready();
       if (finished) throw new Error("webrun-rpc: the stream is closed");
       await deliver?.({
@@ -301,6 +342,7 @@ async function sendChunks(
   output: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   { maxMessageSize, log }: DuplexOverPortOptions,
   signal: AbortSignal,
+  touch: () => void,
 ): Promise<void> {
   const framed = maxMessageSize ? toChunks(maxMessageSize)(output) : output;
   const stream = throughAbort(framed, signal);
@@ -318,6 +360,7 @@ async function sendChunks(
         timeout: NO_TIMEOUT,
         signal,
       });
+      touch();
     }, stream);
   } catch (err) {
     // An abort is the expected way this ends when the local side walks away;
