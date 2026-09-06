@@ -24,4 +24,4 @@ const makePortPair: MakePair = async (mux) => {
   };
 };
 
-describeDuplexAdapter("webrun-streams-port (MessageChannel pair)", makePortPair);
+describeDuplexAdapter("webrun-rpc (MessageChannel pair)", makePortPair);

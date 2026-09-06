@@ -126,7 +126,7 @@ are rare and listed per package below.
 
 | Package | Version | Summary |
 | --- | --- | --- |
-| [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.1.1 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, the `PortMux` port multiplexer, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
+| [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.1.1 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
 | [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | Length-prefixed MessagePack frame codec for async iterables. |
 
 #### [`@statewalker/webrun-streams`](./packages/webrun-streams)

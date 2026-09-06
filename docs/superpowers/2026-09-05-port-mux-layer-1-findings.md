@@ -1,5 +1,11 @@
 # `webrun-ports` layer 1 — tests and findings
 
+> **Plan B1 update:** everything below describes the layer as it lived in `webrun-streams` at the
+> end of Plan A. Plan B1 moved the whole port layer — `multiplexPort`, `PortMux`, `structuredCodec`,
+> `PortEnvelope` and `MessageTarget` — into `@statewalker/webrun-rpc`, alongside the RPC tier, which
+> now types against `MessageTarget` instead of `MessagePort`. The tests, invariants and mutation
+> coverage recorded here moved with the code and are otherwise unchanged.
+
 What the test suite covers, why each part exists, and what executing the plan taught that the plan
 itself got wrong. Written at the end of Plan A (`c7393b4..2af8f65`) so the reasoning survives the
 scratch directory that held it.
@@ -159,5 +165,11 @@ corrections across two plans.
 - The `meta` field carries layer 2's port-kind discriminator (`{ kind: "control" }` /
   `{ kind: "stream" }`); layer 1 passes it through without inspecting it.
 - `PortMux.maxMessageSize` is reported, never enforced. Layer 2 chunks to it.
+- **`openPort(meta?)` is now `async`, returning `Promise<MessageTarget>`** (Plan B1, Task 4). It
+  still does not wait for the peer to accept — the promise resolves once the port is allocated and
+  announced, before acceptance — but a natively multiplexed transport cannot hand back a port
+  synchronously, so the signature had to change to accommodate one. Guard failures that used to
+  throw synchronously (`maxPorts` exceeded, mux already closed) now reject the returned promise
+  instead: a caller wrapping a bare `openPort(...)` call in `try`/`catch` will not catch them.
 - Use `waitFor`-style condition polling in tests, never tick counts, and use the sentinel pattern
   above for absence assertions.
