@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": false,
   "type": "module",
-  "description": "Length-prefixed MessagePack frame codec for async iterables. Streams-safe encode/decode for values and Float32Arrays.",
+  "description": "MessagePack codecs for the wire: a length-prefixed stream codec for async iterables (values and Float32Arrays), and msgpackCodec, a PortCodec that carries webrun-rpc port envelopes over a byte transport.",
   "homepage": "https://github.com/statewalker/webrun-wire",
   "author": {
     "name": "Mikhail Kotelnikov",
