@@ -773,12 +773,48 @@ transfer — is B2's headline assertion, because it fails on today's code.
   `connect`/`serve` shape Plan C immediately replaces.
 - **L6's redefinition and the `PairTuning` reshape (D17)** — see the reasoning recorded under D17.
 
-**Plan C — layer 3 and the deletion.** Native `PortMux` implementations for `-port`, `-webrtc` and
-`-libp2p`, each reporting its `maxMessageSize` (16 KiB for `-webrtc`; verify `-peerjs`'s before
-migrating it). Migrate `-livekit` and `-peerjs` onto the emulated mux. Then delete `emulateMux`,
-`byteChannelFromMessagePort` and `ByteChannel` as a seam; mark `flow-control.ts` and `uint32.ts`
+**Plan C — layer 3 and the deletion. Split into three after a survey done 2026-09-06**, because
+what this paragraph described as one plan is three independent subsystems, and because the survey
+found a blocker the paragraph does not mention.
+
+**The blocker: `msgpackCodec` does not exist.** Plan A's entry below says it "lands in
+`webrun-msgpack` with a type-only dependency"; Plan A shipped `structuredCodec` and nothing else.
+`structuredCodec` passes envelopes through unencoded, which works only on a transport whose
+messages are structured values. **Every byte transport — `-ws`, `-livekit`, `-peerjs` — therefore
+has no way to run `multiplexPort` at all.** No adapter can move to the new stack until a byte codec
+exists, so the codec is layer 3's true first step rather than a footnote of it. Note also that
+`webrun-msgpack`'s existing `encodeMsgpack`/`decodeMsgpack` are *stream* transforms
+(`AsyncIterable` in, `AsyncGenerator` out); `PortCodec` needs synchronous single-envelope
+encode/decode, so the codec builds on `@ygoe/msgpack`'s own serialize/deserialize rather than on
+those two.
+
+**C1 — the byte codec.** `msgpackCodec` implementing `PortCodec` over bytes, with the conformance
+suite run against `multiplexPort` + `duplexOverPort` over an **in-process byte pipe**. Touches no
+adapter. It also carries the measurement this spec asked for under "Cost of bridging to a real
+`MessagePort`" and Plan B did not do: a single-pipe adapter must create a `MessageChannel` and pump
+between the transport and one end, adding a structured-clone hop and a macrotask per message. That
+cost gates C2, and measuring it on `-ws` before migrating three adapters is cheaper than
+discovering it after.
+
+**C2 — the single-pipe adapters.** `-ws`, `-livekit` and `-peerjs` expose
+`{ port: MessagePort; maxMessageSize? }`; the caller composes `multiplexPort`. `-peerjs`'s ceiling
+is measured *first* — see the gate below. `emulateMux` stays throughout, and both conformance runs
+stay green.
+
+**C3 — the native adapters and the deletion.** `-webrtc` and `-libp2p` expose a `PortFactory`
+directly, each reporting its `maxMessageSize` (16 KiB for `-webrtc`). Then delete `emulateMux`,
+`connect`/`serve`, `byteChannelFromMessagePort`, `uint32.ts` and the **old** conformance run;
+redefine L6 and reshape `PairTuning` (D17); add D14's shared control port; mark `flow-control.ts`
 dormant. Update every README, `docs/adr/0004-duplex-as-seam.md`, the root package tables, and add
 changesets.
+
+**`ByteChannel`'s deletion is not free, and this spec understated it.** The survey found
+`@statewalker/webrun-streams-signaling` consuming `ByteChannel` as a **public type** across eight
+files — `PeerManager.connect(peerId): Promise<ByteChannel>`, the QR signaling API, and its own
+`byteChannelFromDataChannel`. It never calls `emulateMux`; the dependency is type-only. So deleting
+`ByteChannel` is a breaking change to a package this spec never names, and C3 must decide its fate
+explicitly — keep the type, move it to `-signaling`, or change that package's API — rather than
+discovering it mid-deletion. `webrun-http-streams`'s references, by contrast, are comments only.
 
 **Gates between plans.** R2's question — whether any real workload pushes a large body over a
 single high-RTT stream — should be answered on the `-livekit` browser suite during Plan B, because
