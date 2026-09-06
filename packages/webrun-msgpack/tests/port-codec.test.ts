@@ -163,4 +163,40 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
     const view = padded.subarray(4, 4 + tight.byteLength);
     expect(msgpackCodec.read(event(view))).toEqual({ type: "message", id: 8, payload: { a: 1 } });
   });
+
+  it("accepts a DataView, not only a Uint8Array-shaped view", () => {
+    // A `subarray` is still a `Uint8Array`, so the previous test never reaches
+    // `toBytes`'s `ArrayBuffer.isView` branch — it returns one line earlier.
+    // A `DataView` is the shape that actually forces that branch, offset and
+    // length arithmetic included: it shares `padded`'s backing buffer at the
+    // same non-zero offset, so a `toBytes` that dropped `byteOffset`/
+    // `byteLength` (e.g. `new Uint8Array(view.buffer)`) would read from the
+    // wrong place — either zeros at the front or the wrong length — not this
+    // envelope.
+    const port = recordingPort();
+    msgpackCodec.post(port, { type: "message", id: 8, payload: { a: 1 } });
+    const tight = port.sent[0] as Uint8Array;
+
+    const padded = new Uint8Array(tight.byteLength + 8);
+    padded.set(tight, 4);
+    const dataView = new DataView(padded.buffer, 4, tight.byteLength);
+    expect(msgpackCodec.read(event(dataView))).toEqual({
+      type: "message",
+      id: 8,
+      payload: { a: 1 },
+    });
+  });
+
+  it("ignores a well-formed envelope shape with a non-integer or negative id", () => {
+    // Valid type, invalid id — the id checks in `isEnvelope` are what reject
+    // these, not the type check (which passes both).
+    const port = recordingPort();
+    msgpackCodec.post(port, { type: "message", id: -1, payload: { a: 1 } });
+    expect(msgpackCodec.read(event(port.sent[0]))).toBeUndefined();
+
+    const port2 = recordingPort();
+    // `id: number` does not itself forbid a non-integer.
+    msgpackCodec.post(port2, { type: "message", id: 1.5, payload: { a: 1 } });
+    expect(msgpackCodec.read(event(port2.sent[0]))).toBeUndefined();
+  });
 });
