@@ -32,7 +32,7 @@ It is a **test-time** dependency: it bundles `vitest` and defines suites via
 - **L3** Mid-stream cancellation — caller `.return()`s output; handler's `finally` runs.
 - **L4** Error propagation — handler `throw`s; caller sees `message` + `stack` + custom fields preserved.
 - **L5** Transport teardown — calling the `serve` teardown twice resolves rather than throwing, and closing the pair after a completed call resolves cleanly. (It does *not* assert what an in-flight call does when the transport closes underneath it; that is deliberately left to each adapter.)
-- **L6** Flow control — a 256 KiB body reaches a deliberately slow consumer intact through a 16 KiB advertised window, so the sender must exhaust its credit and resume on grants sixteen times over. Adapters that accept `mux` options can run it at that window; today that is `-ws` and `-port`, the only two with an executable conformance run. `-peerjs` and `-livekit` accept the option but have no pair helper yet, so L6 does not run for them. The loopback, `-webrtc` and `-libp2p` have no `emulateMux` to tune, so for them it is an end-to-end integrity check and nothing more.
+- **L6** Flow control — a 256 KiB body reaches a deliberately slow consumer intact through a 16 KiB advertised window, so the sender must exhaust its credit and resume on grants sixteen times over. Adapters that accept `mux` options can run it at that window; today that is `-ws` and `webrun-rpc`, the only two with an executable conformance run. `-peerjs` and `-livekit` accept the option but have no pair helper yet, so L6 does not run for them. The loopback, `-webrtc` and `-libp2p` have no `emulateMux` to tune, so for them it is an end-to-end integrity check and nothing more.
 
 ## Reference loopback
 

@@ -16,7 +16,7 @@ export interface IoSendOptions extends ListenPortOptions {
 }
 
 /**
- * Client half of a full-duplex exchange over a `MessagePort`.
+ * Client half of a full-duplex exchange over any `MessageTarget`.
  *
  * Concurrently reads one inbound stream from the peer and writes `output`
  * to it. Yields each value received from the peer. Completes once both

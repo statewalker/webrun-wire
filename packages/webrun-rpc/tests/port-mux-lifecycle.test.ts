@@ -224,6 +224,10 @@ describe("layer 1 lifecycle and limits", () => {
     await waitFor(() => acceptedIds.length > 0, "the hostile OPEN is accepted");
 
     // The initiator's own first local open would naively also compute id 0.
+    // Deliberately not awaited: openPort is async, but only the synchronous
+    // prefix (putting OPEN on the wire) matters for the assertions below —
+    // the promise itself resolves on its own and is retained only so the
+    // linter doesn't flag a discarded return value (see `void` below).
     const localPort = client.openPort("local");
     await waitFor(() => openIdsOnWire.length > 0, "the local open reaches the wire");
 
@@ -240,6 +244,7 @@ describe("layer 1 lifecycle and limits", () => {
     expect(messagesForHostileId).toEqual(["still-hostile"]);
     expect(acceptedIds).toEqual(["hostile"]);
 
+    // Fire-and-forget by design — see the comment where localPort is opened.
     void localPort;
   });
 

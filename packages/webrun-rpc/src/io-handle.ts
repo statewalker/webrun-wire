@@ -5,7 +5,7 @@ import { recieve } from "./recieve.js";
 import { send } from "./send.js";
 
 /**
- * Server half of a full-duplex exchange over a `MessagePort`.
+ * Server half of a full-duplex exchange over any `MessageTarget`.
  *
  * For each inbound stream, invokes `handler` with the stream, sends the
  * handler's output back, and yields a counter. The generator never ends

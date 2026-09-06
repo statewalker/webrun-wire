@@ -255,6 +255,9 @@ describe("layer 1 invariants", () => {
     );
     const client = track(multiplexPort(a, { codec: structuredCodec, maxPorts: 2 }));
 
+    // Deliberately not awaited: only the synchronous prefix of openPort (the
+    // part that puts OPEN on the wire) needs to run before the accept-count
+    // check below; both promises resolve on their own.
     client.openPort("one");
     client.openPort("two");
     // openPort is async: a guard failure (maxPorts reached) rejects the

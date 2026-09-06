@@ -104,9 +104,9 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     maxMessageSize,
 
     async openPort(meta?: unknown): Promise<MessageTarget> {
-      if (muxClosed) throw new Error("webrun-ports: the multiplexer is closed");
+      if (muxClosed) throw new Error("webrun-rpc: the multiplexer is closed");
       if (open.size >= maxPorts) {
-        throw new RangeError(`webrun-ports: maxPorts (${maxPorts}) reached`);
+        throw new RangeError(`webrun-rpc: maxPorts (${maxPorts}) reached`);
       }
       // A hostile or misconfigured peer may have opened using our own
       // parity. Skipping a claimed id costs one line and keeps a local open

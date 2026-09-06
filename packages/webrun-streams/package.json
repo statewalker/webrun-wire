@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json",
     "clean": "rimraf dist",
-    "lint": "biome check --write .",
+    "lint": "biome check src tests",
     "format": "biome format --write ."
   },
   "devDependencies": {

@@ -22,7 +22,7 @@ Three pieces, one dependency:
 - **Typed-JSON RPC tier** (`callPort` / `listenPort` / `callBidi` /
   `listenBidi` / `ioSend` / `ioHandle` / `send` / `recieve`) — request/response
   with typed JSON arguments per call, relocated here from the retired
-  `webrun-ports` package. It types against `MessageTarget` rather than
+  `webrun-streams-port` package. It types against `MessageTarget` rather than
   `MessagePort`, so it also runs directly over a virtual port from
   `multiplexPort` — one raw port fans out into many independent RPC channels
   with no byte-stream layer in between. Use this when you want plain JSON

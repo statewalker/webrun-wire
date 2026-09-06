@@ -24,7 +24,7 @@ type ResponseEnvelope<T> =
   | { type: "response:error"; channelName: string; callId: string; error: SerializedError };
 
 /**
- * Asynchronous request/response over a `MessagePort`.
+ * Asynchronous request/response over any `MessageTarget`.
  *
  * Sends `params` to the peer listening with `listenPort`, waits up to
  * `timeout` ms for a matching reply, and either resolves with the result or

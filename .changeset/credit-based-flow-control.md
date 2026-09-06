@@ -1,6 +1,6 @@
 ---
 "@statewalker/webrun-streams": minor
-"@statewalker/webrun-streams-port": minor
+"@statewalker/webrun-rpc": minor
 "@statewalker/webrun-streams-conformance": minor
 "@statewalker/webrun-streams-ws": minor
 "@statewalker/webrun-streams-peerjs": minor
@@ -19,7 +19,8 @@ round trip per stream at open time, to establish the initial credit window.
 Every package that embeds `emulateMux` is bumped explicitly here — rather than
 left to the automatic "dependent" bump — because a dependent-only changelog
 entry does not mention a protocol break, and consumers need to see one:
-`@statewalker/webrun-streams-port`, `@statewalker/webrun-streams-ws`,
+`@statewalker/webrun-rpc` (renamed from `@statewalker/webrun-streams-port`),
+`@statewalker/webrun-streams-ws`,
 `@statewalker/webrun-streams-peerjs`, and `@statewalker/webrun-streams-livekit`
 all embed the new wire format and gain a `mux` parameter on their connection
 params (`PortParams`, `ConnectWsParams`/`ServeWsParams`, and the peerjs/livekit
@@ -43,5 +44,6 @@ the dependent bump: `src/core/index.ts` re-exports
 so the four new credit-ledger exports above, plus Task 6's four
 `MessageTarget` types, become public exports of this package too.
 
-The RPC tier (`webrun-streams-port`'s send/receive) is unchanged here; it is
-credited in Plan 2, when it moves to `webrun-rpc`.
+The RPC tier (`webrun-rpc`'s send/receive) is unchanged here; its move from
+`webrun-streams-port` and its retyping to accept any `MessageTarget` are
+credited separately, in the `port-layer-to-webrun-rpc` changeset.
