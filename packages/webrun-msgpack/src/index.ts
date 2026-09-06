@@ -4,3 +4,4 @@ export {
   encodeFloat32Arrays,
   encodeMsgpack,
 } from "./msgpack.js";
+export { msgpackCodec } from "./port-codec.js";
