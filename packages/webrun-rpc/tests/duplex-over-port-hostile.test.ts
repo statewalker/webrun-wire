@@ -120,6 +120,15 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     });
 
     const hostilePort = await clientMux.openPort({ kind: "stalled" });
+    const hostileReplies: Array<{ type: string; error?: { message?: string } }> = [];
+    hostilePort.addEventListener("message", (event) => {
+      const data = (event as MessageEvent).data as
+        | { type?: string; error?: { message?: string } }
+        | undefined;
+      if (data?.type === "response:error") {
+        hostileReplies.push(data as { type: string; error?: { message?: string } });
+      }
+    });
     hostilePort.postMessage({
       type: "request",
       channelName: "in",
@@ -132,12 +141,136 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
       callId: "h2",
       params: { done: false, value: enc.encode("b") },
     });
-    await new Promise((r) => setTimeout(r, 60));
+
+    // The scoping claim has two halves: the offender actually gets refused
+    // (checked first — this is the half a mux-isolation-only test misses,
+    // since it never inspects the hostile port's own traffic), and everyone
+    // else on the mux is unaffected by it (checked second).
+    await waitFor("a refusal arrives on the hostile port", () => hostileReplies.length > 0);
+    const refusal = hostileReplies[0];
+    expect(refusal.error?.message).toMatch(/second unconfirmed chunk/);
 
     const goodPort = await clientMux.openPort({ kind: "stream" });
     const out = await collectBytes(duplexOverPort(goodPort)([enc.encode("unaffected")]));
     expect(dec.decode(out)).toBe("unaffected");
   }, 20_000);
+
+  it("poison arriving before the local consumer's first pull fails the stream, not hangs it", async () => {
+    // Consequence (a) of the Critical fix: if the second, offending chunk is
+    // processed before the handler has ever called `.next()` on its input
+    // (any handler that awaits something first), `deliver` is still
+    // undefined and a hand-rolled `void deliver?.(...)` would be a silent
+    // no-op. Routing the poison through `controller.abort()` is what makes
+    // `recieveIterator`'s installer replay the error once the handler does
+    // start pulling, instead of leaving it to wait forever.
+    const channel = new MessageChannel();
+    channel.port1.start();
+    channel.port2.start();
+    const seen: Uint8Array[] = [];
+    let caught: unknown;
+    const off = serveDuplexOverPort(channel.port2, async function* lateDrain(input) {
+      // Awaits something unrelated to `input` before ever touching it, so
+      // both hostile chunks land while `deliver` is still unassigned.
+      await new Promise((r) => setTimeout(r, 100));
+      try {
+        for await (const chunk of input) seen.push(chunk);
+      } catch (err) {
+        caught = err;
+        throw err;
+      }
+    });
+    open.push(() => {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    });
+
+    channel.port1.postMessage({
+      type: "request",
+      channelName: "in",
+      callId: "hostile-1",
+      params: { done: false, value: enc.encode("first") },
+    });
+    channel.port1.postMessage({
+      type: "request",
+      channelName: "in",
+      callId: "hostile-2",
+      params: { done: false, value: enc.encode("second") },
+    });
+
+    await waitFor(
+      "the handler's for-await throws instead of hanging",
+      () => caught !== undefined,
+      3000,
+    );
+    expect((caught as Error)?.message).toMatch(/second unconfirmed chunk/);
+  }, 10_000);
+
+  it("a poisoned stream's outbound pump settles and the handler's finally runs", async () => {
+    // Consequence (b) of the Critical fix: without routing the poison through
+    // `controller.abort()`, `port.close()` makes any in-flight outbound
+    // `callPort` call (run with `NO_TIMEOUT`, spec D8) unsettleable, so the
+    // pump never returns and a producing handler's `finally` never runs —
+    // a leaked generator, and a leaked pending promise, per offending port.
+    // This is the floor: it must fail if enforcement is missing entirely
+    // (nothing ever aborts the peer's stalled call, so its own `finally`
+    // trivially runs once its own consumer eventually walks away — the
+    // assertion below is on the *offending server's* handler, which only
+    // gets torn down by this task's enforcement).
+    const channel = new MessageChannel();
+    channel.port1.start();
+    channel.port2.start();
+    let finallyRan = false;
+    // A handler that keeps producing output (so its outbound pump has an
+    // in-flight `callPort` call at the moment poison fires) while never
+    // draining its input (so the first inbound chunk stays unconfirmed).
+    const off = serveDuplexOverPort(channel.port2, async function* producer() {
+      try {
+        let i = 0;
+        while (true) {
+          yield enc.encode(String(i++));
+        }
+      } finally {
+        finallyRan = true;
+      }
+    });
+    open.push(() => {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    });
+
+    // Drain the outbound channel so the pump keeps calling `callPort`
+    // (cooperative on "out"; the violation is only on "in").
+    channel.port1.addEventListener("message", (event) => {
+      const data = (event as MessageEvent).data as
+        | { type?: string; channelName?: string; callId?: string }
+        | undefined;
+      if (data?.type === "request" && data.channelName === "out" && data.callId) {
+        channel.port1.postMessage({
+          type: "response:result",
+          channelName: "out",
+          callId: data.callId,
+          result: undefined,
+        });
+      }
+    });
+
+    channel.port1.postMessage({
+      type: "request",
+      channelName: "in",
+      callId: "hostile-1",
+      params: { done: false, value: enc.encode("first") },
+    });
+    channel.port1.postMessage({
+      type: "request",
+      channelName: "in",
+      callId: "hostile-2",
+      params: { done: false, value: enc.encode("second") },
+    });
+
+    await waitFor("the producing handler's finally runs", () => finallyRan, 5000);
+  }, 10_000);
 
   it("garbage on a stream port is ignored and the stream still works", async () => {
     const channel = new MessageChannel();

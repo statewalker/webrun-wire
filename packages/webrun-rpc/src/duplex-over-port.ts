@@ -334,15 +334,19 @@ function receiveChunks(
         poison = new Error(
           "webrun-rpc: peer sent a second unconfirmed chunk; the stream port is closed",
         );
-        finished = true;
-        wake();
-        void deliver?.({ done: true, error: poison });
-        // No more chunks are coming on this channel once poisoned — resolve
-        // `ended` here too (as `onAbort` already does), or a server with a
-        // configured `timeout` would leave `serveDuplexOverPort`'s clock
-        // armed forever after this port is closed: `disarmClockWhenBothSidesSettle`
-        // waits on this promise and it would never settle otherwise.
-        resolveEnded();
+        // Route through the existing abort machinery instead of duplicating
+        // it by hand. `onAbort` below (a) sets `aborted`/`abortReason`, so
+        // `recieveIterator`'s installer replays the error even if poison
+        // fires before the consumer's first `.next()` — otherwise `deliver`
+        // is still undefined here and the local stream hangs forever; and
+        // (b) since `controller.signal` is the very signal `sendChunks`
+        // passes into `callPort` for *both* directions of this stream,
+        // aborting it rejects any outbound call parked at `NO_TIMEOUT` —
+        // otherwise `port.close()` below makes that call unsettleable, the
+        // pump never returns, the handler's `finally` never runs, and
+        // `disarmClockWhenBothSidesSettle` never fires. `onAbort` also
+        // resolves `ended`, making a separate call here redundant.
+        controller.abort(poison);
         // Close on the next macrotask, so listenPort still gets to post the
         // refusal on this one — a virtual port goes inert the instant it
         // closes, and a silent drop would leave the offender hanging rather
