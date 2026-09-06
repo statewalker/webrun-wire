@@ -250,15 +250,21 @@ one ruling each and no fix round.
 
 Only measurement caught the ones that were **not** visible on the page — where the code reads
 correctly, the test reads correctly, and the test simply cannot fail. Every one of the five above is
-that shape, and three were found by a mutation that killed *fewer* tests than predicted. So:
+that shape, and measurement found them by three different routes: **three** (Task 3's, and Task 6's
+two) by a mutation that killed **nothing** where the test's own title implied it should; **one**
+(Task 4's) by instrumenting the working and the broken world against each other and finding the flag
+flipped at ~5015 ms and ~5002 ms — indistinguishable; and **one** (Task 5's test 3) by a mutation
+that matched its prediction exactly, where the finding came from the open question the plan asked
+beside it. So:
 
 > A careful review will catch a test that is *named* wrong. It will not catch a test that is
 > *satisfied* wrong. Only a mutation distinguishes those two.
 
 This plan's test-writing had a systematic blind spot for assertions that hold whether or not the
 mechanism exists. It is the third consecutive plan in this project to hit the same shape (Plan A
-finding 5, Plan B1 section 1); what is new here is that the "killed less than predicted" signal is
-*diagnostic* of it, and should be treated as a finding rather than as a relief.
+finding 5, Plan B1 section 1); what is new here is that a mutation killing **less than predicted** is
+*diagnostic* of it, and should be treated as a finding rather than as a relief — as should a
+mutation that kills exactly what was predicted while the test next to it does not move.
 
 A related note on the same theme, from the reviewers' side: an all-green first run proves nothing.
 Task 7's conformance run passed 11/11 on first contact, which is exactly when a suite is worth
@@ -390,7 +396,7 @@ row 3 kills it). The gap is that no *conformance* pair exercises framing — whi
 reshapes `PairTuning` around `maxMessageSize`, because that reshape is the natural place to close
 it.
 
-**And three habits worth keeping:**
+**And four habits worth keeping:**
 
 - **Read the plan against the files it names, before dispatching anything.** Four of this plan's
   eight defects were caught that way, at one ruling each and no fix round: a wrong import path, an
@@ -398,9 +404,15 @@ it.
   test lacked. That read is cheap and it catches a whole class — but only the class that is visible
   on the page.
 - Run every mutation more than once, and report the number measured rather than the number
-  predicted. Row 1 exists because someone did, and rows 13, 16 and 18 are where a mutation killing
-  fewer tests than expected turned out to mean "the test is vacuous", not "the guard is
-  unimportant".
+  predicted. Row 1 exists because someone did. Two different signals then found a vacuous test, and
+  they should not be mistaken for one: rows 16 and 18 are mutations that killed **fewer than
+  predicted** — both killed nothing at all — while row 13 is a mutation that **matched** its
+  prediction exactly, and the finding came from the open *question* the plan asked beside it
+  ("report whether test 3 also changed"). In every case the meaning was "the test is vacuous", never
+  "the guard is unimportant".
+- **Write the open question down.** Row 13 is the argument for it: a prediction that names its own
+  uncertainty cannot come out wrong, and it still bought the finding — the only row in the table of
+  which both are true.
 - Copy a file to a scratch path before mutating it and copy it back, verifying with `diff` or
   `md5sum`. Every probe in this plan did. `git checkout -- <path>` restores the last *committed*
   state and silently discards uncommitted work, file path or not (Plan B1 finding 2).
