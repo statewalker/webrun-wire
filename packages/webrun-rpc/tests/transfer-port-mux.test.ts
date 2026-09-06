@@ -71,11 +71,24 @@ describe("transferPortMux (spec D23)", () => {
     const parent = new MessageChannel();
     parent.port1.start();
     parent.port2.start();
-    let offered = 0;
+    let calls = 0;
+    let rejectedServerPort: MessageTarget | undefined;
+    const acceptedSentinel: unknown[] = [];
     const server = transferPortMux(parent.port2, {
-      onPort: () => {
-        offered++;
-        return false;
+      onPort: (port) => {
+        calls++;
+        if (calls === 1) {
+          // Capture the peer's copy of the *rejected* port without changing
+          // the outcome: still return `false`.
+          rejectedServerPort = port;
+          return false;
+        }
+        // The second call, below, is accepted — it carries the sentinel
+        // that gives the absence claim a real floor.
+        port.addEventListener("message", (e) => {
+          acceptedSentinel.push((e as MessageEvent).data);
+        });
+        return true;
       },
     });
     const client = transferPortMux(parent.port1);
@@ -87,22 +100,28 @@ describe("transferPortMux (spec D23)", () => {
     });
 
     const rejected = await client.openPort({ kind: "unwanted" });
-    await waitFor("the peer saw the offer", () => offered === 1);
+    await waitFor("the peer saw the offer", () => calls === 1);
 
-    // This test has no floor of its own — it never accepts a port, so
-    // "nothing arrived" here could just as easily mean the mux is broken.
-    // The genuine floors live elsewhere in this file: the previous test
-    // proves an accepted port carries traffic both ways, and the second half
-    // of "ignores traffic on the parent that is not a port transfer" proves a
-    // real transfer still arrives on this same kind of client/server pair.
-    // Together they rule out "the mux is broken" as the explanation below.
-    const seen: unknown[] = [];
-    rejected.addEventListener("message", (e) => {
-      seen.push((e as MessageEvent).data);
+    // The genuine test: post on the rejected port's own local end. If the
+    // peer actually closed its copy, this never arrives at it.
+    const seenOnRejected: unknown[] = [];
+    rejectedServerPort?.addEventListener("message", (e) => {
+      seenOnRejected.push((e as MessageEvent).data);
     });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(seen).toEqual([]);
-    expect(offered).toBe(1);
+    rejected.postMessage("should not arrive: port was rejected");
+
+    // The floor: a second, ACCEPTED port on the same client/server pair
+    // carries a sentinel. Waiting for it to arrive replaces a bare sleep
+    // with a positive signal — the two channels are independent, so this
+    // ordering is practical rather than spec-guaranteed, but it is strictly
+    // stronger than a sleep, and the accept path itself is independently
+    // proven live by the first test in this file.
+    const accepted = await client.openPort({ kind: "wanted" });
+    accepted.postMessage("sentinel");
+    await waitFor("the sentinel on the accepted port arrived", () => acceptedSentinel.length === 1);
+
+    expect(seenOnRejected).toEqual([]);
+    expect(calls).toBe(2);
   });
 
   it("with no onPort at all, an inbound port is rejected", async () => {
@@ -118,15 +137,24 @@ describe("transferPortMux (spec D23)", () => {
       parent.port2.close();
     });
     const local = await client.openPort();
-    // Same shape as the rejection test above, and the same floors apply: the
-    // first test proves an accepted port carries traffic both ways, and the
-    // second half of the "ignores traffic" test proves a real transfer still
-    // arrives, so a silent mux failure is not what would make `seen` empty.
+
+    // With no `onPort` at all, there is no callback to capture the peer's
+    // copy from — so the floor comes from the other end: a `MessagePort`
+    // fires a `close` event when its entangled peer is closed. (Well
+    // supported in Node and recent browsers, but a newer platform surface
+    // than the rest of this file assumes.) Waiting for it is a positive
+    // signal, in place of a bare sleep, that the rejection actually closed
+    // the peer's copy — not just that nothing happened to arrive.
+    let peerClosed = false;
+    (local as unknown as MessagePort).addEventListener("close", () => {
+      peerClosed = true;
+    });
+    await waitFor("the peer's copy was closed", () => peerClosed);
+
     const seen: unknown[] = [];
     local.addEventListener("message", (e) => {
       seen.push((e as MessageEvent).data);
     });
-    await new Promise((r) => setTimeout(r, 30));
     expect(seen).toEqual([]);
   });
 
@@ -171,7 +199,26 @@ describe("transferPortMux (spec D23)", () => {
     parent.port1.start();
     parent.port2.start();
     let offered = 0;
-    const server = transferPortMux(parent.port2, {
+
+    // The mux's own `close()` also closes its underlying `target`. Handed
+    // `parent.port2` directly, that would sever the parent channel entirely,
+    // so a *later* transfer would go nowhere at the platform level
+    // regardless of whether the mux ever detached its own listener — a
+    // mutation review caught exactly that vacuity (deleting both
+    // `removeEventListener` and the listener's `closed` guard left this
+    // test green). Wrapping `close()` as a no-op keeps the physical channel
+    // alive, so the assertions below can only pass if the mux's listener
+    // really detached.
+    const target: MessageTarget = {
+      addEventListener: (type, listener) => parent.port2.addEventListener(type, listener),
+      removeEventListener: (type, listener) => parent.port2.removeEventListener(type, listener),
+      postMessage: (message, transfer) => {
+        if (transfer && transfer.length > 0) parent.port2.postMessage(message, transfer);
+        else parent.port2.postMessage(message);
+      },
+      start: () => parent.port2.start(),
+    };
+    const server = transferPortMux(target, {
       onPort: () => {
         offered++;
       },
@@ -184,9 +231,21 @@ describe("transferPortMux (spec D23)", () => {
     await client.openPort();
     await waitFor("first transfer arrived", () => offered === 1);
 
+    // A raw, mux-independent listener straight on the physical port: it
+    // proves the channel is still alive after `server.close()`, so
+    // `offered` staying put below is discriminating — not an artifact of
+    // the transport itself having died.
+    const rawSeen: unknown[] = [];
+    parent.port2.addEventListener("message", (e) => {
+      rawSeen.push((e as MessageEvent).data);
+    });
+
     await server.close();
     await client.openPort();
-    await new Promise((r) => setTimeout(r, 30));
+    await waitFor(
+      "the parent channel is still alive after server.close()",
+      () => rawSeen.length === 1,
+    );
     expect(offered).toBe(1);
 
     await client.close();
