@@ -6,6 +6,7 @@ export * from "./call-port.js";
 export * from "./cancel-channel.js";
 export { getPortCloseSignal, setPortCloseSignal } from "./close-signal.js";
 export { connect, type PortParams, serve } from "./connect-serve.js";
+export * from "./duplex-over-port.js";
 export * from "./io-handle.js";
 export * from "./io-send.js";
 export * from "./listen-bidi.js";
