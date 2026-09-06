@@ -231,6 +231,11 @@ instead, which behaves identically on every transport. Capability detection was 
 same reason — two paths, unequally exercised, with the port-transport path better tested in
 development and the byte path only in CI.
 
+**D23 does not weaken this.** Port transfer is a *layer 1 multiplexer implementation*, not a layer 2
+payload capability. Layer 2 still may not put a port in a payload, and still cannot tell which
+multiplexer produced the port it was handed. The distinction is the whole reason both can hold at
+once.
+
 **D17. L6 is redefined around the confirmation, and `PairTuning` is reshaped.** L6 currently proves
 flow control by asking for a small credit window (`PairTuning { mtu, maxStreamBuffer }`, 16 KiB
 against a 256 KiB body). Under D11 there is no window to shrink, so that level would configure
@@ -275,6 +280,27 @@ package depend on an RPC package to describe a byte stream. The dependency runs 
 
 Since `@statewalker/webrun-streams-port` is published at 0.1.1, the npm rename needs a `major`
 changeset or a deprecation stub — though no workspace package currently declares it as a dependency.
+
+**D23. Port transfer is a second `PortMux`, available only where the platform provides it.**
+`transferPortMux` creates a real `MessageChannel` per `openPort`, transfers one end to the peer over
+the parent port, and returns the other — so its ports are genuine `MessagePort`s rather than
+emulated ones. It needs structured clone with transferables, so it exists in browsers, workers and
+iframes and nowhere else, and a caller selects it explicitly rather than by capability sniffing (D21:
+the caller decides).
+
+Why it earns its place beside the emulated multiplexer:
+
+- **It does something emulation cannot.** A transferred port can cross an origin or a worker boundary
+  and be handed to code that never saw the parent — which is how `webrun-http-browser`'s relay passes
+  a live connection between clients. An emulated port id is meaningless outside its own mux.
+- **It reaches a `MessageSink`.** `callChannel` works against a `ServiceWorkerClient` you can only
+  `postMessage` to, because the reply arrives on the transferred port rather than the parent. The
+  emulated multiplexer needs a full duplex `MessageTarget` on both ends.
+- **The platform does the multiplexing**, so there is no id table, no `maxPorts`, and no envelope
+  overhead per message.
+
+It is the same seam either way: `openPort(meta?): Promise<MessageTarget>` (D2), so layer 2 is
+identical above both. What differs is only where a new port comes from.
 
 **D19. Exceeding `maxPorts` rejects the port, never the mux.** An `OPEN` beyond the limit is
 answered with `CLOSE` carrying an error; existing ports are untouched. Ids are never reused within
