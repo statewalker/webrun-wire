@@ -128,10 +128,21 @@ describe("duplexOverPort — cancellation", () => {
     if (failed) expect(String(failed)).toMatch(/abandoned|closed|torn/);
   });
 
-  it("teardown is idempotent", () => {
+  it("teardown is idempotent, and notifies the peer exactly once", async () => {
+    // The ceiling (does not throw) is not enough on its own — every primitive
+    // teardownOnce touches (AbortController.abort, removeEventListener,
+    // generator.return on a finished generator) is already independently
+    // idempotent, so `.not.toThrow()` alone would pass even for a gutted
+    // `off`. The floor is the peer-visible effect a caller actually depends
+    // on: repeated teardown is safe *and* does not re-notify the peer.
     const channel = new MessageChannel();
     channel.port1.start();
     channel.port2.start();
+    const seen: unknown[] = [];
+    channel.port1.addEventListener("message", (event) => {
+      const data = (event as MessageEvent).data as { type?: unknown } | undefined;
+      if (data?.type === STREAM_ABORT) seen.push(data);
+    });
     const off = serveDuplexOverPort(channel.port2, async function* () {
       yield enc.encode("x");
     });
@@ -144,6 +155,8 @@ describe("duplexOverPort — cancellation", () => {
       off();
       off();
     }).not.toThrow();
+    await waitFor("abort notice reaches the peer", () => seen.length > 0);
+    expect(seen.length).toBe(1);
   });
 
   it("cancelling one stream over a mux leaves another stream working", async () => {
