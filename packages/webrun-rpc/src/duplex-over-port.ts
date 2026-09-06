@@ -247,6 +247,13 @@ function installStreamTimeout(
     return { touch() {}, stop() {} };
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Once `stop()` runs, it must stay stopped. Without this, a chunk that
+  // arrives after disarming (e.g. `touch()` called from a pump that hadn't
+  // yet noticed the stream ended) would silently re-arm a timer nobody is
+  // ever going to stop again — the same leak this task exists to close, just
+  // reachable from a different angle now that `stop()` can run mid-life
+  // (fix round 2), not only at final teardown.
+  let stopped = false;
   const arm = () => {
     timer = setTimeout(() => {
       if (!controller.signal.aborted) {
@@ -257,10 +264,12 @@ function installStreamTimeout(
   arm();
   return {
     touch() {
+      if (stopped) return;
       if (timer !== undefined) clearTimeout(timer);
       arm();
     },
     stop() {
+      stopped = true;
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
     },
@@ -326,6 +335,27 @@ function receiveChunks(
     { channelName },
   );
 
+  // Every path that stops listening to this channel — the consumer walking
+  // away early (`break`/`return`/`throw` on the `for await`), an external
+  // `stop()`, or the abort branch below — means no more chunks are coming
+  // *as far as this side is concerned*, regardless of what the wire still
+  // has in flight. `off()` unregisters the port listener right here, so
+  // nothing is left to notice a later wire `done` even if one arrives.
+  // `ended` must resolve at the same moment, or `serveDuplexOverPort`'s
+  // `Promise.allSettled([pump, inbound.ended])` waits forever for a signal
+  // that can no longer come (round-2 fix — this was the dead path: the
+  // round-1 version only resolved `ended` from the wire's own `done` chunk
+  // or from `onAbort`, missing exactly the "consumer stopped pulling before
+  // the wire said done" case, e.g. a handler that reads one chunk and
+  // returns).
+  const detach = () => {
+    finished = true;
+    wake();
+    off();
+    controller.signal.removeEventListener("abort", onAbort);
+    resolveEnded();
+  };
+
   const onAbort = () => {
     aborted = true;
     abortReason = controller.signal.reason;
@@ -346,31 +376,16 @@ function receiveChunks(
       // the generator immediately instead of registering `deliver` and
       // waiting for a chunk that will never arrive.
       void d({ done: true, error: abortReason });
-      return () => {
-        finished = true;
-        wake();
-        off();
-        controller.signal.removeEventListener("abort", onAbort);
-      };
+      return detach;
     }
     deliver = d;
     wake();
-    return () => {
-      finished = true;
-      wake();
-      off();
-      controller.signal.removeEventListener("abort", onAbort);
-    };
+    return detach;
   });
 
   return {
     stream,
-    stop() {
-      finished = true;
-      wake();
-      off();
-      controller.signal.removeEventListener("abort", onAbort);
-    },
+    stop: detach,
     ended,
   };
 }

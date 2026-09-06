@@ -166,4 +166,76 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
       clearTimeoutSpy.mockRestore();
     }
   }, 20_000);
+
+  it("disarms the clock when the handler stops pulling input before the wire says done", async () => {
+    // Fix-round-2 finding: `ended` (added in round 1) resolved only on the
+    // wire's own `done` chunk or on abort. A handler that stops consuming
+    // input early — reads one chunk and returns, without the wire ever
+    // saying `done` — left `ended` permanently unresolved: `off()` had
+    // already removed both the port listener and the abort listener that
+    // would otherwise have resolved it, so nothing was left to settle it.
+    // `Promise.allSettled([pump, inbound.ended])` then waited forever, and
+    // the clock stayed armed for the rest of `timeout` ms after the stream
+    // had genuinely, normally completed. The caller intentionally has no
+    // timeout of its own here, so the spy attributes every armed 2000 ms
+    // timer unambiguously to the serve side under test.
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const armed = new Set<ReturnType<typeof setTimeout>>();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: (...args: unknown[]) => void,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
+      const handle = realSetTimeout(fn, ms, ...args);
+      if (ms === 2000) armed.add(handle);
+      return handle;
+    }) as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(((
+      handle: Parameters<typeof clearTimeout>[0],
+    ) => {
+      armed.delete(handle as ReturnType<typeof setTimeout>);
+      return realClearTimeout(handle);
+    }) as typeof clearTimeout);
+
+    const channel = new MessageChannel();
+    channel.port1.start();
+    channel.port2.start();
+    const off = serveDuplexOverPort(
+      channel.port2,
+      async function* takeOne(input) {
+        for await (const c of input) {
+          yield c;
+          break;
+        }
+      },
+      { timeout: 2000 },
+    );
+    open.push(() => {
+      off();
+      channel.port1.close();
+      channel.port2.close();
+    });
+    const call = duplexOverPort(channel.port1); // deliberately no timeout here
+
+    try {
+      // Floor: the clock machinery actually armed a 2 s timer for this
+      // stream. Without this, a build where the timeout is never armed at
+      // all would trivially pass the "zero after completion" check below.
+      expect(armed.size).toBeGreaterThan(0);
+
+      // Three chunks sent, but the handler only ever pulls the first one.
+      const out = await collectBytes(call([enc.encode("a"), enc.encode("b"), enc.encode("c")]));
+      expect(new TextDecoder().decode(out)).toBe("a");
+
+      await waitFor(
+        "clock disarmed after handler stopped pulling early",
+        () => armed.size === 0,
+        500,
+      );
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
+  }, 20_000);
 });
