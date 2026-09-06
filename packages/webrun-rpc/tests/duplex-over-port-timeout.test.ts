@@ -1,6 +1,6 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { collectBytes } from "@statewalker/webrun-streams";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type DuplexOverPortOptions, duplexOverPort, serveDuplexOverPort } from "../src/index.js";
 
 const enc = new TextEncoder();
@@ -58,29 +58,35 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
   }, 20_000);
 
   it("aborts a stream whose peer stalls past the configured timeout", async () => {
-    let cleanupRan = false;
+    // Deliberately no `cleanupRan`/`finally` assertion here (see fix-round-1
+    // note in the task-4 report): the handler's own `finally` cannot run
+    // before its unrelated 5 s sleep settles — JS cannot preempt a generator
+    // suspended on an in-flight `await` — so `cleanupRan` flips `true` at
+    // ~5000-5015 ms *regardless* of whether the 150 ms clock ever fired. A
+    // build with the timeout machinery removed entirely (no abort, the
+    // stream just resolves "too late") still flips it at ~5000 ms. It cannot
+    // discriminate the two worlds, so it would only be decoration.
+    //
+    // What actually proves the 150 ms clock fired is that the rejection
+    // lands far under that ~5 s natural-completion time. The margin is wide
+    // (well under half the natural-completion time) so this can't flake on
+    // a loaded machine, while still being tight enough that only the
+    // configured 150 ms clock — not the fixture's own sleep — explains it.
     const call = streamPair(
       async function* stalling(input) {
-        try {
-          for await (const _ of input) {
-            /* drain */
-          }
-          await new Promise((r) => setTimeout(r, 5000));
-          yield enc.encode("too late");
-        } finally {
-          cleanupRan = true;
+        for await (const _ of input) {
+          /* drain */
         }
+        await new Promise((r) => setTimeout(r, 5000));
+        yield enc.encode("too late");
       },
       { timeout: 150 },
     );
+    const startedAt = Date.now();
     await expect(collectBytes(call([enc.encode("hi")]))).rejects.toThrow(
       /webrun-rpc: stream idle for 150 ms/,
     );
-    // The handler's own `finally` cannot run until its unrelated 5 s sleep
-    // settles (JS cannot preempt an in-flight await) — poll for it instead of
-    // asserting it synchronously right after the rejection (G13).
-    await waitFor("handler cleanup after peer stall", () => cleanupRan, 6000);
-    expect(cleanupRan).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(1000);
   }, 20_000);
 
   it("progress resets the clock: many slow-but-steady chunks complete", async () => {
@@ -106,5 +112,58 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
     });
     const out = await collectBytes(call([new Uint8Array(0)]));
     expect(new TextDecoder().decode(out)).toBe("eventually");
+  }, 20_000);
+
+  it("disarms the inactivity clock once a stream completes normally (no timer leak)", async () => {
+    // Fix-round-1 finding: `serveDuplexOverPort`'s `clock.stop()` was only
+    // reachable through its returned teardown. A stream that finishes
+    // normally, with nobody left to call that teardown, left the last
+    // `touch()`'s timer armed for up to `timeout` ms after real completion —
+    // holding the event loop open for nothing. This proves it's disarmed by
+    // watching every `setTimeout`/`clearTimeout` call at the configured
+    // 5000 ms delay, without waiting the full 5 s out.
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const armed = new Set<ReturnType<typeof setTimeout>>();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: (...args: unknown[]) => void,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
+      const handle = realSetTimeout(fn, ms, ...args);
+      if (ms === 5000) armed.add(handle);
+      return handle;
+    }) as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(((
+      handle: Parameters<typeof clearTimeout>[0],
+    ) => {
+      armed.delete(handle as ReturnType<typeof setTimeout>);
+      return realClearTimeout(handle);
+    }) as typeof clearTimeout);
+
+    try {
+      const call = streamPair(
+        async function* echo(input) {
+          for await (const chunk of input) yield chunk;
+        },
+        { timeout: 5000 },
+      );
+      // Floor: the clock machinery actually armed a 5 s timer for this
+      // stream. Without this, a build where the timeout is never armed at
+      // all (broken outright) would trivially pass the "zero after
+      // completion" check below for the wrong reason.
+      expect(armed.size).toBeGreaterThan(0);
+
+      const out = await collectBytes(call([enc.encode("hi")]));
+      expect(new TextDecoder().decode(out)).toBe("hi");
+
+      // The disarm runs off a `Promise.allSettled(...).then()` — one more
+      // turn of the microtask queue past `collectBytes` resolving. Poll
+      // rather than assert immediately (G13).
+      await waitFor("clock disarmed after normal completion", () => armed.size === 0, 500);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
   }, 20_000);
 });

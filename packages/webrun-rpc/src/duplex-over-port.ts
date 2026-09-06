@@ -90,16 +90,48 @@ export function serveDuplexOverPort(
   } catch (err) {
     // A handler that throws before returning a generator still owes the peer
     // an end-of-stream, or its `callPort` never settles.
-    void sendChunks(port, CHANNEL_OUT, failing(err), options, controller.signal, clock.touch).catch(
-      () => {},
+    const pump = sendChunks(
+      port,
+      CHANNEL_OUT,
+      failing(err),
+      options,
+      controller.signal,
+      clock.touch,
     );
+    void pump.catch(() => {});
+    disarmClockWhenBothSidesSettle(clock, pump, inbound.ended);
     return teardownOnce(controller, notice, clock, inbound, undefined);
   }
   const pump = sendChunks(port, CHANNEL_OUT, output, options, controller.signal, clock.touch);
   void pump.catch(() => {
     // Reported to the peer inside sendChunks; nothing to surface locally.
   });
+  disarmClockWhenBothSidesSettle(clock, pump, inbound.ended);
   return teardownOnce(controller, notice, clock, inbound, output);
+}
+
+/**
+ * A stream that completes normally has nobody left to call the returned
+ * teardown — the caller only knows the stream ended, not that it must also
+ * dispose the serve-side handle. Without this, the last `touch()`'s timer
+ * stays armed for up to `timeout` ms after real completion, doing nothing
+ * but holding the event loop open.
+ *
+ * Only disarms once BOTH `pump` (our output) and `inboundEnded` (the peer's
+ * declared end of input, or an abort) have settled. Disarming on `pump`
+ * alone is not safe: under half-close the handler can finish producing
+ * output while the caller is still sending input, and a clock stopped then
+ * would leave that still-open half with no deadline at all — worse than the
+ * leak this fixes.
+ */
+function disarmClockWhenBothSidesSettle(
+  clock: { stop(): void },
+  pump: Promise<void>,
+  inboundEnded: Promise<void>,
+): void {
+  void Promise.allSettled([pump, inboundEnded]).then(() => {
+    clock.stop();
+  });
 }
 
 async function* failing(err: unknown): AsyncGenerator<Uint8Array> {
@@ -249,10 +281,18 @@ function receiveChunks(
   channelName: string,
   controller: AbortController,
   touch: () => void,
-): { stream: AsyncGenerator<Uint8Array>; stop(): void } {
+): { stream: AsyncGenerator<Uint8Array>; stop(): void; ended: Promise<void> } {
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
   let finished = false;
+  // Resolves once no more chunks are coming on this channel — either the
+  // wire declared `done` (with or without an error) or the signal aborted.
+  // Used by `serveDuplexOverPort` to know when it is safe to disarm the
+  // inactivity clock on a stream nobody explicitly tears down.
+  let resolveEnded: () => void = () => {};
+  const ended = new Promise<void>((resolve) => {
+    resolveEnded = resolve;
+  });
   // Set by `onAbort` the instant the signal fires, independent of whether a
   // consumer has started iterating yet. `recieveIterator`'s installer below
   // runs lazily, on the consumer's first `.next()` — if abort fires first,
@@ -281,6 +321,7 @@ function receiveChunks(
         value,
         error: error ? deserializeError(error) : undefined,
       });
+      if (done) resolveEnded();
     },
     { channelName },
   );
@@ -294,6 +335,7 @@ function receiveChunks(
     // assigned inside the installer below. That ordering is exactly what the
     // `aborted` check in the installer exists to catch.
     void deliver?.({ done: true, error: abortReason });
+    resolveEnded();
   };
   controller.signal.addEventListener("abort", onAbort, { once: true });
 
@@ -329,6 +371,7 @@ function receiveChunks(
       off();
       controller.signal.removeEventListener("abort", onAbort);
     },
+    ended,
   };
 }
 
