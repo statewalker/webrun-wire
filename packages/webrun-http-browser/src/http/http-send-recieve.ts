@@ -39,13 +39,21 @@ async function httpFromIterator<Options>(
 }
 
 /**
- * @deprecated For new code, prefer the `MessagePort`-based stack from
- * `@statewalker/webrun-http-port`. Once a `MessagePort` is established between
- * page and worker, `httpServe(port, handler)` provides equivalent semantics
- * with `callBidi` multiplexing, full-duplex streaming, and `AbortSignal`.
- * This helper remains for existing ServiceWorker setups that still consume the
- * `MessageTarget` surface; it will be reimplemented on top of
- * `webrun-http-port` in a follow-up release.
+ * Serve an `HttpHandler` over a `MessageTarget`, using this package's own
+ * `handleStreams` transport.
+ *
+ * @deprecated Prefer the port stack in `@statewalker/webrun-rpc`: open a port
+ * (`multiplexPort` over one pipe, or `transferPortMux` where the platform can
+ * transfer a real `MessagePort`), turn it into a `Duplex` with
+ * `serveDuplexOverPort`, and serve HTTP on that with
+ * `httpServe(handler, options)` from `@statewalker/webrun-http-streams`.
+ *
+ * That path has backpressure; **this one does not.** `sendStream`'s chunk
+ * sender discards the promise it is given, so a fast producer over a slow
+ * consumer accumulates without bound. It also has no per-stream timeout and no
+ * chunking to a transport's message ceiling.
+ *
+ * Kept for existing ServiceWorker setups built on the `MessageTarget` surface.
  */
 export function handleHttpRequests(
   communicationPort: MessageTarget,
@@ -60,13 +68,18 @@ export function handleHttpRequests(
 }
 
 /**
- * @deprecated For new code, prefer the `MessagePort`-based stack from
- * `@statewalker/webrun-http-port/fetch`. Once the page and SW share a
- * `MessagePort`, `fetchOverPort(port, request)` provides the same
- * `Request → Response` semantics with multiplexing via `callBidi`, JSONL
- * envelope framing, and native `AbortSignal` support. This helper remains for
- * existing ServiceWorker setups; it will be reimplemented on top of
- * `webrun-http-port` in a follow-up release.
+ * Ship a `Request` over a `MessageTarget` and await the `Response`, using this
+ * package's own `sendStream` transport.
+ *
+ * @deprecated Prefer the port stack in `@statewalker/webrun-rpc`: open a port
+ * (`multiplexPort` over one pipe, or `transferPortMux` where the platform can
+ * transfer a real `MessagePort`), turn it into a `Duplex` with
+ * `duplexOverPort`, and drive HTTP over it with `httpFetch` from
+ * `@statewalker/webrun-http-streams`.
+ *
+ * Same caveat as {@link handleHttpRequests}: the transport underneath this
+ * helper has no backpressure, no per-stream timeout, and no chunking to a
+ * transport's message ceiling. Kept for existing ServiceWorker setups.
  */
 export async function sendHttpRequest(
   communicationPort: MessageTarget,

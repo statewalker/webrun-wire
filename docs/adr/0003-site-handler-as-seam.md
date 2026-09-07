@@ -50,6 +50,11 @@ Concretely, after this change:
 - `PortSiteBuilder` (new, in `webrun-http-port`) is the first sibling.
   Same shape: `setHandler(handler).start()`. Hosts the handler over a
   `MessagePort` via `serveFetchOverPort`.
+  (Update, 2026-09-07: `webrun-http-port` was retired — `webrun-http-streams`
+  replaced it, and neither `PortSiteBuilder` nor `serveFetchOverPort` exists in
+  this repository. The sibling that did ship is `DuplexSiteBuilder`, in
+  `@statewalker/webrun-http-streams`, over a `Duplex` rather than a
+  `MessagePort`.)
 - Future hosts (`NodeSiteBuilder`, `DenoSiteBuilder`,
   `WorkerSiteBuilder`, …) follow the same pattern — each is ~30 LOC of
   platform glue.

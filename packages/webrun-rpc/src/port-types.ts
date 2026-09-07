@@ -51,8 +51,20 @@ export interface PortMuxOptions {
    */
   maxPorts?: number;
   /**
-   * Largest message this mux's ports can carry, if the transport imposes one.
-   * Layer 1 does not enforce it; it reports it so layer 2 can chunk to fit.
+   * Largest **payload** a port on this mux can carry, if the transport imposes
+   * a limit. Layer 1 does not enforce it; it reports it so layer 2 can chunk.
+   *
+   * It bounds the payload, **not the frame**. `duplexOverPort` applies
+   * `toChunks(maxMessageSize)` and the envelope framing — the chunk wrapper,
+   * `callPort`'s request, this mux's own envelope, then the codec — is added on
+   * top afterwards. Measured over `msgpackCodec` that framing is 123-128 bytes
+   * (modelled ceiling 134), and it is not constant: the call id's length varies
+   * per chunk, the port id's integer width adds up to 4, and the payload's
+   * length header widens at 64 KiB.
+   *
+   * So set this **at least 256 bytes below** the transport's real limit. Set to
+   * the limit exactly, a full-size chunk overruns it — which on LiveKit
+   * delivered a body as zero bytes with no error on either side.
    */
   maxMessageSize?: number;
 }

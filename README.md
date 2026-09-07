@@ -127,7 +127,7 @@ are rare and listed per package below.
 | Package | Version | Summary |
 | --- | --- | --- |
 | [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.1.1 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
-| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | Length-prefixed MessagePack frame codec for async iterables. |
+| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | Two MessagePack codecs: a length-prefixed **stream** codec for async iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
 
 #### [`@statewalker/webrun-streams`](./packages/webrun-streams)
 
@@ -266,7 +266,7 @@ neither needs it.
 
 | Package | Version | Transport | Peer deps |
 | --- | --- | --- | --- |
-| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.1.1 | Ports and RPC over them: `multiplexPort`, and typed request/response and streaming primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
+| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.1.1 | Ports and RPC over them: `multiplexPort` and `transferPortMux`; `duplexOverPort`, which runs one `Duplex` over one port with window-of-one backpressure; and typed request/response primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
 | [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | 0.1.1 | WebSocket. Browser-native, or Node via an injected constructor. | — |
 | [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | 0.1.1 | WebRTC data channels — one per call, with a 1-byte DATA/END/ERROR frame for half-close and error propagation. | — |
 | [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | 0.1.1 | libp2p streams, with an authenticated `remotePeer` available to handlers via `serveConnections`. | `libp2p`, `@libp2p/interface`, `@multiformats/multiaddr` |

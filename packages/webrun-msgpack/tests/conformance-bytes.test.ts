@@ -72,7 +72,8 @@ function bytePipePair(): { a: MessageTarget; b: MessageTarget; close(): void } {
  * handed to `duplexOverPort` directly, because what needs proving is the
  * mux-to-layer-2 plumbing: each side must pick the limit up from its own
  * `mux.maxMessageSize`. Left `undefined` the limit is absent and a body of any
- * size crosses as one frame; set, `duplexOverPort` chunks to fit. Both are run
+ * size crosses as one frame; set, `duplexOverPort` chunks the payload to it —
+ * the frame is then larger by the envelope framing, 123-128 bytes. Both are run
  * below — every byte transport C2 targets imposes a frame limit (a
  * `RTCDataChannel` at 16 KiB, LiveKit at 12 KiB), so the chunked path is the
  * one those adapters engage on their first real body, and an unchunked run

@@ -47,7 +47,7 @@ npm install @statewalker/webrun-http-browser
 
 | Subpath | Purpose |
 | --- | --- |
-| `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs) and `@statewalker/webrun-streams` (stream and error helpers) |
+| `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs), `@statewalker/webrun-streams` (stream and error helpers) and the `MessageTarget` family from `@statewalker/webrun-rpc` |
 | `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap |
 | `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin |
 | `@statewalker/webrun-http-browser/sw-worker` | IIFE bundle of the same-origin SW runtime — ditto, for same-origin apps |
@@ -273,6 +273,14 @@ imports keep working after those extractions. Its own surface is below.
 | `newInvokationChannel(opts)` | function | Multiplexed invocations over one target. |
 | `InvocationChannel` / `NewInvocationChannelOptions` | interface | Its result and options. |
 | `handleStreams(...)` / `StreamHandler<T>` | function / type | Stream-shaped invocations over the same channel. |
+
+> **These stream primitives have no backpressure.** `sendStream`'s chunk sender
+> discards the promise it is handed, so a fast producer over a slow consumer
+> accumulates without bound; there is also no per-stream timeout and no chunking
+> to a transport's message ceiling. `@statewalker/webrun-rpc`'s `duplexOverPort`
+> is the replacement — one `Duplex` over one port, with the confirmation
+> withheld until the consumer has pulled. Migrating this package onto it is
+> planned, not done.
 | `MessageTarget` / `MessageSource` / `MessageSink` / `MessageListener` | interface / type | The structural port view everything above accepts — a `MessagePort`, a `Worker`, or a SW bridge. Defined in [`@statewalker/webrun-streams`](../webrun-streams) and re-exported here. |
 | `newRegistry(onError?)` | function | Small cleanup registry used for teardown. |
 | `Registry` / `NewRegistryResult` / `CleanupAction` | interface / type | Its shapes. |
@@ -281,8 +289,8 @@ imports keep working after those extractions. Its own surface is below.
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `sendHttpRequest(port, request)` | function | Ship a `Request` over a `MessagePort`, await the `Response`. |
-| `handleHttpRequests(port, handler)` | function | Serve an `HttpHandler` on the other end of one. |
+| `sendHttpRequest(port, request)` | function | **Deprecated.** Ship a `Request` over a `MessageTarget`, await the `Response`. |
+| `handleHttpRequests(port, handler)` | function | **Deprecated.** Serve an `HttpHandler` on the other end of one. |
 
 ### Subpath entry points
 

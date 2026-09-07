@@ -8,6 +8,8 @@ Superseded by [ADR-0004 — Duplex is the canonical adapter seam](./0004-duplex-
 
 The decision below remains operationally valid for the legacy `webrun-port-*` family until those packages are deleted in a follow-up change. New adapters target the `Duplex` seam.
 
+(Update, 2026-09-07: that deletion has happened. No `webrun-port-*` or `webrun-ports*` package exists in this repository any more. The framing primitives this ADR attributes to `webrun-ports` — `callPort`, `callBidi`, `listenBidi`, `ioSend`, `ioHandle` — now live in `@statewalker/webrun-rpc`, and they type against a structural `MessageTarget` rather than a native `MessagePort`. The port-as-seam idea itself survives there, generalised: see `docs/superpowers/specs/2026-09-05-port-multiplexer-design.md` D1 and D2. The body below is left as written, as the record of what was decided in May.)
+
 ## Context
 
 The `webrun-wire` stack moves bytes between peers through several layers: a transport-specific adapter (WebSocket, WebRTC, libp2p, LiveKit, PeerJS, …), a port-shaped object exposed by that adapter, `webrun-ports` framing primitives (`callPort`, `callBidi`, `listenBidi`, `ioSend`, `ioHandle`) operating on that port, and HTTP / RPC / Git layers above.
