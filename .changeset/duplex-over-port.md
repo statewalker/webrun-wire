@@ -28,3 +28,11 @@ and be used by code that never saw the parent port.
 Nothing is removed. `emulateMux`, `connect`/`serve` and the existing
 conformance run are unchanged, and the new stack is proven by a **second**
 conformance run over the same unmodified L0–L6 suite.
+
+**If you set `maxMessageSize`, leave a margin.** It bounds the **payload**, not
+the frame: `duplexOverPort` chunks to it and the envelope framing is added on
+top afterwards — measured at 123-128 bytes over `@statewalker/webrun-msgpack`'s
+`msgpackCodec`, and not constant, since the call id's length varies per chunk.
+Set it to a transport's exact ceiling and a full-size chunk overruns it, which
+on LiveKit means the body arrives as zero bytes with no error on either side.
+Use `transportLimit - 256`.
