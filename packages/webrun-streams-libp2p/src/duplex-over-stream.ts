@@ -4,13 +4,7 @@ import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 const TYPE_DATA = 0x00;
 const TYPE_ERROR = 0x02;
 
-/**
- * Default bound for {@link closeStream}'s wait for a graceful close. Matches
- * 2.x's own default (`DEFAULT_SEND_CLOSE_WRITE_TIMEOUT`,
- * `@libp2p/utils@6.7.2/dist/src/abstract-stream.js:7`) — this restores that
- * bound rather than inventing a new number.
- */
-const DEFAULT_CLOSE_TIMEOUT_MS = 5000;
+
 
 /**
  * Default bound for {@link waitForDrain}'s wait for the peer to make room in
@@ -29,6 +23,36 @@ const DEFAULT_CLOSE_TIMEOUT_MS = 5000;
  * `drainTimeoutMs` when a deployment knows better.
  */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
+
+/**
+ * Default bound for {@link closeStream}'s wait for a graceful close.
+ *
+ * WHY THIS IS MINUTES AND NOT SECONDS. `stream.close()` waits for the write
+ * queue to DRAIN, and that queue is shared with every other stream on the same
+ * muxer. Draining one stream is therefore not a function of that stream alone:
+ * with many concurrent transfers it legitimately takes far longer than it would
+ * in isolation. When the bound trips, {@link closeStream} falls back to
+ * `abort()`, which resets the stream and truncates whatever was still in
+ * flight — so a bound tuned for an idle link silently corrupts healthy
+ * transfers under load.
+ *
+ * It did. This was 5000ms, matching libp2p 2.x's `DEFAULT_SEND_CLOSE_WRITE_TIMEOUT`
+ * — a number adopted for fidelity rather than reasoned about. Eighteen
+ * concurrent 3.5 MB fetches over one connection produced five complete
+ * responses out of twenty-two; the rest arrived truncated and rendered as
+ * broken images, with nothing but this module's own warning to say why.
+ *
+ * The bound's actual purpose is to catch a peer that has stopped reading and
+ * will never close, so the caller is not parked forever. Minutes serve that
+ * purpose exactly as well as seconds, and match {@link DEFAULT_DRAIN_TIMEOUT_MS},
+ * whose comment reasons about the identical hazard: *"a bound that is too tight
+ * resets a slow-but-alive peer mid-transfer — exactly what backpressure exists
+ * to avoid."* The two guard the same thing and should not disagree by a factor
+ * of sixty.
+ *
+ * Exported so a deployment that knows its links can lower it deliberately.
+ */
+export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

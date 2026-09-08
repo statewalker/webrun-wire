@@ -9,6 +9,7 @@ export {
   serveConnections,
 } from "./connect-serve.js";
 export {
+  DEFAULT_CLOSE_TIMEOUT_MS,
   DEFAULT_DRAIN_TIMEOUT_MS,
   type DuplexOverStreamOptions,
   duplexOverStream,
