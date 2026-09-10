@@ -39,7 +39,7 @@
     "@statewalker/webrun-site-builder": "workspace:*"
   },
   "peerDependencies": {
-    "@statewalker/webrun-files": "^0.7.0"
+    "@statewalker/webrun-files": "^0.9.0"
   },
   "devDependencies": {
     "@statewalker/webrun-files": "catalog:",
