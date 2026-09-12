@@ -125,11 +125,18 @@ export async function* sendStream<T>(
   communicationPort.postMessage({ type: "START_CALL", params }, [messageChannel.port2]);
 
   const channel = newStreamChannel<T>(messageChannel.port1);
+  let drained = false;
   try {
     await channel.start();
     void channel.sendAll(input);
     yield* channel.recieveAll();
+    drained = true;
   } finally {
+    // A caller that stops early — an aborted `fetch`, a cancelled response
+    // body, a `break` — has to TELL the peer. Closing a `MessagePort` does not
+    // notify the other end, so without this the handler on the far side keeps
+    // producing into a port nobody reads, for the life of the page.
+    if (!drained) channel.cancel();
     await channel.close();
   }
 }
@@ -168,25 +175,56 @@ export function handleStreams<T>(
 interface StreamChannel<T> {
   start(): Promise<void>;
   close(): Promise<void>;
+  /** Tell the peer we have stopped reading, so it can release its producer. */
+  cancel(): void;
   recieveAll(): AsyncGenerator<T, void, unknown>;
   sendAll(it: AsyncIterable<T>): Promise<void>;
 }
 
+/** A data chunk, or — with `cancel` — the peer saying it has stopped reading. */
+type StreamMessage<T> = { done?: boolean; value?: T; error?: unknown; cancel?: boolean };
+
 function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
-  type DataListener = (msg: { done?: boolean; value?: T; error?: unknown }) => Promise<boolean>;
+  type DataListener = (msg: StreamMessage<T>) => Promise<boolean>;
   let listeners: DataListener[] = [];
   let iterators: AsyncIterable<T>[] = [];
 
-  const notifyAll = async (data: { done?: boolean; value?: T; error?: unknown }) => {
+  const notifyAll = async (data: StreamMessage<T>) => {
     for (const listener of listeners) await listener(data);
+  };
+
+  /**
+   * Release whatever we are sending. NOT awaited: `.return()` on an async
+   * generator parked awaiting its own source is queued behind that pending
+   * `next()`, so awaiting it here would block the message handler — and the
+   * chunk that would unblock it can only arrive through that same handler.
+   */
+  const cancelOutgoing = (): void => {
+    for (const it of [...iterators]) {
+      const iterable = it as AsyncIterable<T> & { return?: () => unknown };
+      void Promise.resolve(iterable.return?.()).catch(() => {});
+    }
   };
 
   const channel = newInvokationChannel({
     port,
-    handler: (data: unknown) => notifyAll(data as { done?: boolean; value?: T; error?: unknown }),
+    handler: (data: unknown) => {
+      const message = data as StreamMessage<T>;
+      if (message?.cancel) {
+        cancelOutgoing();
+        return;
+      }
+      return notifyAll(message);
+    },
   });
 
   const start = () => channel.start();
+
+  const cancel = (): void => {
+    // Best effort by design: the port may already be gone, and a peer that
+    // never hears this is no worse off than before the message existed.
+    void channel.invoke({ cancel: true }).catch(() => {});
+  };
 
   const close = async () => {
     await notifyAll({ done: true });
@@ -220,5 +258,5 @@ function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
     );
   }
 
-  return { start, close, recieveAll, sendAll };
+  return { start, close, cancel, recieveAll, sendAll };
 }
