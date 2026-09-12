@@ -1,7 +1,9 @@
 import type { ByteChannel } from "@statewalker/webrun-streams";
+import type { MessageListener, MessageTarget } from "./message-target.js";
 
 /**
- * Wrap a `MessagePort` as a `ByteChannel`. Outbound bytes are emitted via
+ * Wrap any `MessageTarget` — a real `MessagePort`, a worker, or a virtual
+ * port over some other transport — as a `ByteChannel`. Outbound bytes are emitted via
  * `port.postMessage(uint8Array)` (the structured-clone path); inbound bytes
  * are taken from `message` events whose `data` is a `Uint8Array` (or
  * coerceable byte-like value).
@@ -10,7 +12,7 @@ import type { ByteChannel } from "@statewalker/webrun-streams";
  * This adapter assumes the port carries only byte payloads — non-byte messages
  * are ignored.
  */
-export function byteChannelFromMessagePort(port: MessagePort): ByteChannel {
+export function byteChannelFromMessagePort(port: MessageTarget): ByteChannel {
   let closedResolve!: () => void;
   const closed = new Promise<void>((r) => {
     closedResolve = r;
@@ -52,7 +54,7 @@ export function byteChannelFromMessagePort(port: MessagePort): ByteChannel {
   // MessagePort doesn't fire a "close" event natively; consumers signal close
   // by calling the channel's close() (which we honour) or by tearing down the
   // underlying port (which they must observe themselves).
-  port.addEventListener("message", onMessage as unknown as EventListener);
+  port.addEventListener("message", onMessage as unknown as MessageListener);
   port.start?.();
 
   const recv: AsyncIterable<Uint8Array> = {
@@ -90,9 +92,9 @@ export function byteChannelFromMessagePort(port: MessagePort): ByteChannel {
     close() {
       if (isClosed) return;
       isClosed = true;
-      port.removeEventListener("message", onMessage as unknown as EventListener);
+      port.removeEventListener("message", onMessage as unknown as MessageListener);
       try {
-        port.close();
+        void port.close?.();
       } catch {
         /* ignore */
       }
