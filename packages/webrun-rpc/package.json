@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-rpc",
-  "version": "0.1.2",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Ports and RPC over them: a port multiplexer, and typed request/response and streaming primitives over any MessageTarget.",
