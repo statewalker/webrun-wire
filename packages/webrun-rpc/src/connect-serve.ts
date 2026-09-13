@@ -6,9 +6,16 @@ import {
   type Serve,
 } from "@statewalker/webrun-streams";
 import { byteChannelFromMessagePort } from "./byte-channel.js";
+import type { MessageTarget } from "./message-target.js";
 
 export interface PortParams {
-  port: MessagePort;
+  /**
+   * Any `MessageTarget`, not only a real `MessagePort`. Nothing below this
+   * line uses more than that surface, and narrowing it to `MessagePort` shut
+   * out every virtual port — including one backed by a libp2p stream, which is
+   * how a mesh hands out ports at all.
+   */
+  port: MessageTarget;
   /**
    * Mux side for stream-id allocation. Initiator uses even ids; responder
    * uses odd. Defaults to "initiator" on `connect` and "responder" on `serve`.

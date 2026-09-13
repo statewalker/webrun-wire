@@ -52,6 +52,16 @@ interface Stream {
   outDone: boolean;
   /** Inbound bytes pushed but not yet taken by the consumer. */
   queuedBytes: number;
+  /**
+   * Cancels the caller's outbound input, set by `pumpOutbound`.
+   *
+   * WHY THIS EXISTS. `pumpOutbound` is fire-and-forget and checks `s.closed`
+   * only AFTER a chunk arrives, so an input that yields nothing more leaves
+   * the pump parked on `input.next()` for ever — holding the producer and its
+   * `finally` — even though the consumer has cancelled and the slot is gone.
+   * Teardown has to reach back and return the input rather than wait for it.
+   */
+  cancelInput?: () => void;
 }
 
 export interface EmulateMuxOptions {
@@ -120,6 +130,11 @@ export function emulateMux(
     // for will never arrive, so fail the ledger rather than leave it queued.
     s.outboundCredit.fail(err ?? new TransportClosedError("emulateMux: stream closed"));
     void s.doneIn(err);
+    // Return the caller's input so its `finally` runs. Not awaited, and that
+    // is deliberate: `.return()` on a generator parked awaiting its own source
+    // is QUEUED behind that pending `next()`, so awaiting it here would make
+    // teardown hang on exactly the input we are trying to abandon.
+    s.cancelInput?.();
     streams.delete(s.id);
   };
 
@@ -170,8 +185,27 @@ export function emulateMux(
     s: Stream,
     input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   ): Promise<void> => {
+    // Hand teardown a way to cancel this input. An async iterator's `return`
+    // is the only cancellation the protocol has, and the pump cannot poll for
+    // one: between two chunks it is parked inside `next()`, which for a
+    // long-lived session is where it spends its whole life.
+    //
+    // THE ITERATOR IS ACQUIRED ONCE AND DRIVEN BY HAND. `for await (… of
+    // input)` would call `[Symbol.asyncIterator]()` again; for a generator
+    // that returns the same object, but for any other iterable it returns a
+    // SECOND iterator — and then `cancelInput` would be cancelling something
+    // the loop is not reading.
+    const iterator: AsyncIterator<Uint8Array> | Iterator<Uint8Array> =
+      (input as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]?.() ??
+      (input as Iterable<Uint8Array>)[Symbol.iterator]();
+    s.cancelInput = () => {
+      void (iterator as AsyncIterator<Uint8Array>).return?.(undefined);
+    };
     try {
-      for await (const chunk of input) {
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done === true) break;
+        const chunk = next.value;
         if (s.closed || muxClosed) return;
         if (chunk.byteLength === 0) continue;
         let off = 0;

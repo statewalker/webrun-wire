@@ -47,7 +47,12 @@ export class SwPortHandler {
   get serviceWorkerUrl(): string {
     if (!this._serviceWorkerUrl) {
       const url = this.options.serviceWorkerUrl
-        ? new URL(this.options.serviceWorkerUrl)
+        ? // A worker url is relative to the document that registers it, so it
+          // is resolved against `location.href` like any other url a page
+          // writes. Without the base, the root-relative form callers actually
+          // use — `"/sw-worker.js"` — threw a bare `Invalid URL` naming
+          // neither the option nor the value.
+          resolveWorkerUrl(this.options.serviceWorkerUrl)
         : new URL("./index-sw.js", this.rootUrl);
       this._serviceWorkerUrl = `${url}`;
     }
@@ -303,5 +308,25 @@ export class SwPortDispatcher {
     }
     await set("clientIds", [...index.keys()].sort());
     return index;
+  }
+}
+
+/**
+ * Resolve a `serviceWorkerUrl` option the way a page would: relative to the
+ * current document. Absolute urls pass through untouched. A url that cannot
+ * be resolved is reported with the option name and the offending value,
+ * because the raw `TypeError: Failed to construct 'URL': Invalid URL` says
+ * neither.
+ */
+function resolveWorkerUrl(serviceWorkerUrl: string): URL {
+  const base = globalThis.location?.href;
+  try {
+    return new URL(serviceWorkerUrl, base);
+  } catch (error) {
+    throw new Error(
+      `Invalid serviceWorkerUrl: ${JSON.stringify(serviceWorkerUrl)}` +
+        (base ? ` (relative to ${base})` : " (no document to resolve it against)"),
+      { cause: error },
+    );
   }
 }

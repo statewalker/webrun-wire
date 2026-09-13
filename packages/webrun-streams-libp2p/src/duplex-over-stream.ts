@@ -4,8 +4,6 @@ import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 const TYPE_DATA = 0x00;
 const TYPE_ERROR = 0x02;
 
-
-
 /**
  * Default bound for {@link waitForDrain}'s wait for the peer to make room in
  * its receive window. Without a bound, a peer that requests something and then
@@ -107,7 +105,18 @@ export async function* duplexOverStream(
     opts.onPeerInputEnd?.(err);
   };
 
-  const outboundSource = framedOutbound(input);
+  // Acquire the producer's iterator ONCE, so teardown can cancel the producer
+  // itself rather than the wrapper around it — see `framedOutbound`.
+  const inputIterator: AsyncIterator<Uint8Array> | Iterator<Uint8Array> =
+    (input as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]?.() ??
+    (input as Iterable<Uint8Array>)[Symbol.iterator]();
+  const cancelInput = (): void => {
+    void Promise.resolve((inputIterator as AsyncIterator<Uint8Array>).return?.(undefined)).catch(
+      () => undefined,
+    );
+  };
+
+  const outboundSource = framedOutbound(inputIterator);
   const outbound = (async () => {
     try {
       // libp2p 3.x streams are push-based (`send()` + drain) rather than
@@ -170,18 +179,43 @@ export async function* duplexOverStream(
     opts.onSourceCompleted?.();
   } finally {
     firePeerInputEnd();
-    // If the consumer aborted before the source completed, force the outbound
-    // generator to return so `await outbound` doesn't hang on a still-pumping
-    // handler. On natural source completion we DO NOT cut outbound short —
-    // peer closing write doesn't entitle us to silence our own writes.
+    // If the consumer aborted before the source completed, cut the outbound
+    // generator short. On natural source completion we DO NOT: the peer
+    // closing its write half does not entitle us to silence our own writes.
+    //
+    // NEITHER CALL IS AWAITED, AND THAT IS THE FIX.
+    //
+    // `.return()` on an async generator that is PARKED AWAITING ITS OWN
+    // SOURCE is queued behind that pending `next()` — it is not preemptive.
+    // For a long-lived session, waiting inside `next()` is where the pump
+    // spends its entire life, so the old `await outboundSource.return()`
+    // never settled, and the `await outbound` behind it never settled either:
+    // tearing down a duplex whose input was still open hung for ever. Two
+    // consumers of this package hit it and both worked around it with
+    // `close()`, which is a defect report, not a usage pattern.
+    //
+    // Cancelling without waiting keeps the contract a consumer is entitled to
+    // — `.return()` settles promptly, and a well-behaved producer still sees
+    // its `finally` — while a producer that cannot be woken is simply
+    // abandoned rather than allowed to hold the caller hostage. The stream is
+    // aborted below, so the peer is told rather than left guessing.
     if (!sourceCompleted) {
+      // The producer first — this is the call that actually runs its
+      // `finally` — then the wrapper, which may be parked behind it.
+      cancelInput();
+      void Promise.resolve(outboundSource.return?.(undefined)).catch(() => undefined);
+      // The pump may be parked in `next()` or in `waitForDrain`; aborting the
+      // stream is what unblocks the latter and tells the peer this call is
+      // over. `closeStream`'s graceful path belongs to a completed call.
       try {
-        await outboundSource.return?.(undefined);
+        stream.abort(new Error("duplexOverStream: consumer cancelled"));
       } catch {
-        /* ignore */
+        /* already gone */
       }
+      void outbound.catch(() => undefined);
+    } else {
+      await outbound;
     }
-    await outbound;
   }
 }
 
@@ -263,16 +297,45 @@ export async function closeStream(
   }
 }
 
+/**
+ * Frame the caller's outbound chunks.
+ *
+ * TAKES AN ITERATOR, NOT AN ITERABLE, so the caller can cancel the PRODUCER
+ * directly. Returning this wrapper generator is not enough: while it is
+ * parked awaiting the producer's `next()`, a `.return()` on the wrapper is
+ * queued behind that pending call and reaches the producer only once the
+ * producer yields — which a long-lived session never does. Teardown therefore
+ * needs a handle on the producer itself, and acquiring the iterator once (in
+ * `duplexOverStream`) is what provides it.
+ */
 async function* framedOutbound(
-  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  iterator: AsyncIterator<Uint8Array> | Iterator<Uint8Array>,
 ): AsyncGenerator<Uint8Array> {
   try {
-    for await (const chunk of toAsyncIterable(input)) {
-      yield frameData(chunk);
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done === true) return;
+      yield frameData(normalizeChunk(next.value));
     }
   } catch (err) {
     const e = err instanceof Error ? err : new Error(String(err));
     yield frameError(e);
+  } finally {
+    // PROPAGATE CANCELLATION TO THE PRODUCER, and do not wait for it.
+    //
+    // `for await (… of input)` used to do this implicitly: returning this
+    // generator ran the loop's cleanup, which returned the producer. Driving
+    // the iterator by hand (needed so teardown can hold a handle on the
+    // producer) removes that, and removing it silently stopped a server-side
+    // handler from ever being told its caller had gone — a regression caught
+    // by `cancel-server-handler.test.ts`.
+    //
+    // Not awaited: `.return()` on a producer parked at an `await` is queued
+    // behind it, so awaiting here would reintroduce the very hang this file's
+    // teardown was fixed to avoid.
+    void Promise.resolve((iterator as AsyncIterator<Uint8Array>).return?.(undefined)).catch(
+      () => undefined,
+    );
   }
 }
 
@@ -372,20 +435,4 @@ function decodeVarint(buf: Uint8Array, start: number): { value: number; offset: 
     if (shift > 28) throw new Error("decodeVarint: too long");
   }
   throw new Error("decodeVarint: truncated");
-}
-
-function toAsyncIterable(
-  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  if ((input as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]) {
-    return input as AsyncIterable<Uint8Array>;
-  }
-  const it = (input as Iterable<Uint8Array>)[Symbol.iterator]();
-  return {
-    [Symbol.asyncIterator]() {
-      return {
-        next: () => Promise.resolve(it.next()),
-      };
-    },
-  };
 }
