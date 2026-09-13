@@ -11,7 +11,8 @@
  * 01 already exercises end to end.
  */
 
-import { routeTable, urlUpstream } from "../src/proxy.js";
+import { Hono } from "hono";
+import { MARKER, urlUpstream } from "../src/proxy.js";
 
 export interface Outcome {
   name: string;
@@ -40,32 +41,65 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
     });
   };
 
-  const table = routeTable({
-    mountPrefix: "/proxy",
-    routes: () => [
-      { prefix: "/local", describe: "in-process handler", upstream: local },
-      {
-        prefix: "/echo",
-        describe: `${origin}/echo`,
-        upstream: urlUpstream({
-          base: `${origin}/echo`,
-          headers: { "x-route-header": "from-route" },
-          credential: () => ({ "x-upstream-credential": "secret-value" }),
-          via: "1.1 webrun",
-        }),
-      },
-      {
-        prefix: "/redirects",
-        describe: `${origin}/redirects`,
-        upstream: urlUpstream({ base: `${origin}/redirects` }),
-      },
-      {
-        prefix: "/stream",
-        describe: `${origin}/stream`,
-        upstream: urlUpstream({ base: `${origin}/stream` }),
-      },
-    ],
-  });
+  // A STANDARD HONO ROUTER, not a route table this package ships. Prefix
+  // matching, path rewriting and the listing are things a router already does
+  // well, so the package keeps only the part that is genuinely its own --
+  // `urlUpstream`, which re-issues a request to an outside origin safely.
+  //
+  // These twelve scenarios are unchanged and are the evidence that the
+  // simplification loses nothing: every behaviour the old `routeTable`
+  // delivered still holds, expressed with a router the caller already has.
+  const routes = [
+    { prefix: "/local", describe: "in-process handler", upstream: local },
+    {
+      prefix: "/echo",
+      describe: `${origin}/echo`,
+      upstream: urlUpstream({
+        base: `${origin}/echo`,
+        headers: { "x-route-header": "from-route" },
+        credential: () => ({ "x-upstream-credential": "secret-value" }),
+        via: "1.1 webrun",
+      }),
+    },
+    {
+      prefix: "/redirects",
+      describe: `${origin}/redirects`,
+      upstream: urlUpstream({ base: `${origin}/redirects` }),
+    },
+    {
+      prefix: "/stream",
+      describe: `${origin}/stream`,
+      upstream: urlUpstream({ base: `${origin}/stream` }),
+    },
+  ];
+
+  const app = new Hono().basePath("/proxy");
+
+  // The listing: prefixes and descriptions, never headers -- a header value
+  // may be a credential.
+  app.get("/", (c) =>
+    c.json({ routes: routes.map((r) => ({ prefix: r.prefix, upstream: r.describe })) }),
+  );
+
+  for (const route of routes) {
+    // `:rest{.*}` captures the remainder, and Hono matches on SEGMENT
+    // boundaries -- so `/open` does not swallow `/openai`, which the old table
+    // had to implement by hand.
+    app.all(`${route.prefix}/:rest{.*}`, (c) => {
+      const url = new URL(c.req.url);
+      // The upstream is given the path BELOW the prefix; it resolves that
+      // against its own base.
+      const rest = url.pathname.slice(`/proxy${route.prefix}`.length) || "/";
+      return route.upstream(new Request(`http://rewritten${rest}${url.search}`, c.req.raw));
+    });
+    app.all(route.prefix, (c) =>
+      route.upstream(new Request(`http://rewritten/${new URL(c.req.url).search}`, c.req.raw)),
+    );
+  }
+
+  app.notFound(() => new Response("no route", { status: 404, headers: { [MARKER]: "no-route" } }));
+
+  const table = (request: Request): Promise<Response> => app.fetch(request);
 
   const call = (path: string, init?: RequestInit): Promise<Response> =>
     table(new Request(`http://mesh.local${path}`, init));

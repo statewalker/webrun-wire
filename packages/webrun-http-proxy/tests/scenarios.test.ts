@@ -24,7 +24,9 @@ describe("one route table, two upstream kinds", () => {
   beforeAll(async () => {
     fixture = await startFixture();
     outcomes = await runScenarios(fixture.origin);
-    const rows = outcomes.map((o) => `  ${o.pass ? "✓" : "✗"}  ${o.name}${o.pass ? "" : ` — ${o.detail}`}`);
+    const rows = outcomes.map(
+      (o) => `  ${o.pass ? "✓" : "✗"}  ${o.name}${o.pass ? "" : ` — ${o.detail}`}`,
+    );
     console.log(`\nNode column:\n${rows.join("\n")}\n`);
   }, 120_000);
 

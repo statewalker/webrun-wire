@@ -38,6 +38,7 @@
     "livekit-client": "^2.18.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "@types/node": "catalog:",
     "@vitest/browser-playwright": "^4.1.10",

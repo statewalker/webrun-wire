@@ -43,6 +43,7 @@
     }
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "livekit-client": "^2.18.3",
     "rimraf": "catalog:",

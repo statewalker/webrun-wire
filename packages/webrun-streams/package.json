@@ -37,6 +37,7 @@
     "format": "biome format --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",

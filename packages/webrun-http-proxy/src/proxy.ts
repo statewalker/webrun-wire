@@ -30,7 +30,6 @@
  * package for it would give a proxy a dependency it has no other use for.
  */
 export type FetchHandler = (request: Request) => Promise<Response>;
-import { matchRoute } from "./routes.js";
 
 /** Marks this layer's OWN responses, so they are never mistaken for an upstream's. Same header the proxy already uses. */
 export const MARKER = "x-webrun-proxy";
@@ -40,84 +39,6 @@ export const MARKER = "x-webrun-proxy";
  * remote origin and another peer are all `(Request) => Promise<Response>`.
  */
 export type Upstream = FetchHandler;
-
-export interface Route {
-  /** Path prefix, matched on segment boundaries, longest first. */
-  prefix: string;
-  /** What this route reaches, for the listing at the mount root. Never a credential. */
-  describe: string;
-  upstream: Upstream;
-}
-
-export interface RouteTableInit {
-  /** Read per request, never snapshotted, so routes can be edited live. */
-  routes: () => readonly Route[];
-  /** Where this table is mounted; stripped before matching. */
-  mountPrefix?: string;
-}
-
-/**
- * The mount: match, strip, delegate. Identical on both platforms — it touches
- * no DOM, no `node:` module and no network of its own.
- */
-export function routeTable(init: RouteTableInit): FetchHandler {
-  const mountPrefix = init.mountPrefix ?? "/proxy";
-
-  return async (request: Request): Promise<Response> => {
-    const url = new URL(request.url);
-    const pathname = url.pathname.startsWith(mountPrefix)
-      ? url.pathname.slice(mountPrefix.length)
-      : url.pathname;
-
-    // The listing: prefixes and descriptions, never headers — a header value
-    // is a credential and every member of the mesh can read this.
-    if ((pathname === "" || pathname === "/") && request.method === "GET") {
-      const body = JSON.stringify({
-        routes: init.routes().map((r) => ({ prefix: r.prefix, upstream: r.describe })),
-      });
-      return new Response(body, { headers: { "content-type": "application/json" } });
-    }
-
-    // `matchRoute` is the PROVEN matcher, imported rather than copied: it is
-    // what enforces segment boundaries, so `/files` does not swallow
-    // `/filesystem`. It expects `{prefix, upstream, headers}`-shaped records,
-    // so the route is presented to it with `upstream` as its description.
-    const shaped = init.routes().map((r) => ({
-      prefix: r.prefix,
-      upstream: r.describe,
-      headers: {},
-    }));
-    const found = matchRoute(shaped, pathname);
-    if (found == null) {
-      return new Response(`no route for ${pathname}`, {
-        status: 404,
-        headers: { [MARKER]: "no-route" },
-      });
-    }
-
-    const route = init.routes().find((r) => r.prefix === found.route.prefix);
-    if (route == null) {
-      return new Response(`no route for ${pathname}`, {
-        status: 404,
-        headers: { [MARKER]: "no-route" },
-      });
-    }
-
-    // The rest of the path, plus the query, as a request the upstream sees.
-    // The URL's origin is carried over so a handler upstream still gets a
-    // well-formed absolute URL; a `urlUpstream` replaces it entirely.
-    const rewritten = new URL(`${found.rest || "/"}${url.search}`, url.origin);
-    const forwarded = new Request(rewritten, {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-      ...(request.body != null ? { duplex: "half" as const } : {}),
-      signal: request.signal,
-    });
-
-    return route.upstream(forwarded);
-  };
-}
 
 export interface UrlUpstreamInit {
   /**

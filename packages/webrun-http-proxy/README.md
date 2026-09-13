@@ -1,80 +1,66 @@
 # @statewalker/webrun-http-proxy
 
-A reverse proxy as a fetch handler: one route table, two kinds of upstream — an
-in-process handler, or a remote origin.
+Re-issue an HTTP request to an outside origin, safely. **One function.**
 
-**Zero runtime dependencies.**
-
-**The reverse proxy and "expose a local app" are one mechanism.** Twelve
-scenarios establish it: only the last step differs — a local handler is
-*called*, a URL upstream is *re-issued*. Matching, rewriting, the listing, the
-marker header and streaming are shared.
-
-The scenarios moved here with the code rather than being rewritten, because a
-list that changes when it moves proves nothing about the move. **They run in
-Node here, and only Node.** The prototype also ran them in Chromium, which is
-what established that both upstream kinds behave identically on both platforms
-and that exactly one row cannot pass in a browser (below). That second column
-needs a bundler and a browser and does not exist in this package yet;
-`tests/scenarios.test.ts` says so in its own header.
+**Zero runtime dependencies. One entry point.**
 
 ```ts
-import { routeTable, urlUpstream } from "@statewalker/webrun-http-proxy";
+import { Hono } from "hono";
+import { urlUpstream } from "@statewalker/webrun-http-proxy";
 
-const handler = routeTable({
-  routes: () => [
-    { prefix: "/openai", describe: "OpenAI", upstream: urlUpstream({ base: "https://api.openai.com/v1" }) },
-    { prefix: "/local",  describe: "in-process", upstream: myHandler },
-  ],
+const openai = urlUpstream({
+  base: "https://api.openai.com/v1",
+  credential: () => ({ authorization: `Bearer ${apiKey()}` }),
+});
+
+const app = new Hono();
+app.all("/openai/:rest{.*}", (c) => {
+  const { pathname, search } = new URL(c.req.url);
+  return openai(new Request(`http://upstream${pathname.slice("/openai".length)}${search}`, c.req.raw));
 });
 ```
 
-## `routes` may be a thunk, and that is load-bearing
+## Bring your own router
 
-The proxy page edits routes and types credentials **while traffic flows**. The
-table is re-read per request for exactly that reason; a snapshot taken at
-construction would serve the old table until something restarted it.
+This package used to ship a route table as well — prefix matching, path
+rewriting, a listing endpoint, a marker header on unmatched paths, a route
+store. That turned out to be the uninteresting half: it is what a router does,
+and every caller already has one.
 
-## Secrets are never persisted
+The evidence is in `tests/scenarios.ts`. Twelve scenarios established this
+proxy's behaviour in the prototype; they now run against **a plain Hono
+router** and pass unchanged. Nothing was lost with the table, and the segment
+matching got better — Hono matches on segment boundaries, so `/open` no longer
+swallows `/openai`, which the hand-written table had to special-case.
 
-A route may carry a credential. The header's **name** is configuration and is
-saved; the header's **value** lives in memory and is merged per request.
+Persisting route configuration went with the router, for the same reason: the
+shape of that configuration belongs to whoever defines the routes. If you store
+routes, store the credential's header **name** and never its **value** — the
+value belongs in memory, merged per request through `credential`. (An earlier
+shape of this API stored a whole route, and building a proxy page on it would
+have written bearer keys into `localStorage`.)
 
-`StoredRoute` has no field a value fits in, and `save()` **throws** rather than
-dropping one quietly — a silent drop means a route that worked before a reload
-and 401s after it. `assertNoSecrets` is exported so an adapter written
-elsewhere enforces the same rule instead of inventing its own idea of what a
-secret looks like.
+## What `urlUpstream` actually does
 
-This is not hypothetical: an earlier shape of this API stored a whole `Route`,
-and building the proxy page on it would have written bearer keys into
-`localStorage` — where they survive a reload, a shared machine, and anyone who
-opens devtools.
+None of this is obvious, and all of it was found by measurement:
 
-`load()` returns `undefined` for **never written**, which is not the same as
-`[]`. A first visit seeds its defaults; a visit after the operator deleted
-every route must not bring them back.
+- The caller's `authorization` is **consumed by this hop**, the way
+  `Proxy-Authorization` is consumed by the proxy it names. Forwarding it handed
+  a bearer token to an upstream that echoed it straight back.
+- `stripRequestHeaders` drops whatever else the caller's system treats as
+  proven identity. A third-party origin has no business seeing it.
+- Hop-by-hop headers (RFC 9110 §7.6.1) are dropped.
+- `credential` is read at **request** time, so a key can be typed while traffic
+  flows.
+- The body **streams** rather than buffering, and the caller's `signal` is
+  forwarded, so an abandoned request abandons the upstream call.
+- An **opaque redirect** is reported as a redirect. It has status `0`, and
+  constructing a `Response` with status 0 throws *inside* the `try` — which
+  reported a redirecting upstream as `502 upstream-unreachable`.
 
-## Hygiene belongs to the URL upstream, not to the table
-
-Two measured rows force the asymmetry:
-
-- Re-issuing to a third party **consumes** the caller's `authorization`, the
-  way `Proxy-Authorization` is consumed by the proxy it names. Forwarding it
-  handed a bearer token to an upstream that echoed it straight back.
-- Calling a **local** handler must not strip it, because a handler on this side
-  of the proxy still needs to know who is calling.
-
-Same rule, `stripRequestHeaders` for anything else your system treats as
-identity.
-
-## Two shipping defects, fixed and pinned
-
-- A **redirecting upstream** was reported as `502 upstream-unreachable`: an
-  opaque redirect has status `0`, and constructing a `Response` with it throws
-  *inside* the `try`.
-- The outbound request carried **no `signal`**, so an aborted caller left the
-  upstream call running.
+A **local** handler is just a `FetchHandler` you route to directly: do not put
+it behind this. Calling a handler on this side of the proxy must **not** strip
+`authorization`, because it still needs to know who is calling.
 
 ## One row a browser cannot pass
 
@@ -83,31 +69,20 @@ and the browser drops it with no error. ADR-0015 has an intermediary announce
 itself with `Via`, so that part is unimplementable in a browser-hosted
 intermediary. A fact about the platform, not about this code.
 
-## Entry points
+## No platform
 
-| Import | Holds |
-|---|---|
-| `.` | `routeTable`, `urlUpstream`, `RouteStore`, `assertNoSecrets`, `rehydrate` |
-| `./node` | `fileRouteStore(path)` — write-then-rename |
-| `./browser` | `localStorageRouteStore(key?)` |
-
-No transport, no crypto, no platform at the root — proxying needs none of
-them, which is why a proxy **page** and a Node process share this package.
-`tests/boundary.test.ts` asserts it, and the dependency list is **empty**.
+No transport, no crypto, no platform code at all — re-issuing a request needs
+none of it, which is why a proxy **page** and a Node process use the same entry
+point. `tests/boundary.test.ts` asserts there is no platform entry point left
+to exempt, and the dependency list is **empty**.
 
 ## Where it came from
 
 Extracted from `@statewalker/httpeers-expose`, where it was a mesh concept by
-accident of where it was written. Nothing in it is about peers: it moves a
-`Request` to an upstream and a `Response` back. The one place the old package
-knew about meshes is now **`stripRequestHeaders`** — request headers to drop
-before re-issuing upstream, beyond the `authorization` and hop-by-hop sets it
-always drops. httpeers passes its proven-peer header there, because re-issuing
-to a third party must not tell an outside origin which mesh peer called.
+accident of where it was written. Nothing in it is about peers. The one place
+the old package knew about meshes is now `stripRequestHeaders`: httpeers passes
+its proven-peer header there.
 
-The single import it carried was `FetchHandler`, a one-line type. Extracting it
-therefore *dropped* a dependency rather than moving one.
-
-**22 tests**, and the twelve scenarios run inside two of them — the suite
-asserts that every scenario ran (guarding against an empty list) and that
-none failed.
+**9 tests**, and the twelve scenarios run inside two of them — the suite
+asserts that every scenario ran (guarding against an empty list) and that none
+failed.

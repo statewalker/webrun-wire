@@ -2,7 +2,7 @@
   "name": "@statewalker/webrun-http-proxy",
   "version": "0.1.0",
   "type": "module",
-  "description": "A reverse proxy as a fetch handler: one route table, two kinds of upstream — a local handler or a remote origin.",
+  "description": "Re-issue an HTTP request to an outside origin, safely: credentials consumed, hop-by-hop headers dropped, body streamed.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -12,11 +12,15 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" },
-    "./browser": { "types": "./dist/browser.d.ts", "import": "./dist/browser.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
@@ -27,11 +31,15 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
+    "hono": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }

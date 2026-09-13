@@ -42,6 +42,7 @@
     "@ygoe/msgpack": "catalog:"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@statewalker/webrun-streams": "workspace:*",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "rimraf": "catalog:",

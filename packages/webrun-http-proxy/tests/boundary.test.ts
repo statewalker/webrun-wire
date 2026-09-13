@@ -1,15 +1,10 @@
 /**
- * The isomorphism boundary, with the platform entry points exempted BY NAME.
+ * The isomorphism boundary — and now there is only one entry to hold to it.
  *
- * The whole claim of this package is that ONE route table serves a page and a
- * server alike — twelve scenarios, run in Node and Chromium, established it.
- * So the root must reach neither platform: `./node` holds the filesystem
- * store, `./browser` holds `localStorage`, and nothing they import may leak
- * upward.
- *
- * Listing the entries by name rather than pattern-matching is deliberate: a
- * new platform file has to be added here on purpose, which is a line in a diff
- * somebody can argue with.
+ * The platform entries are GONE, not exempted: `./node` and `./browser` held
+ * route stores, and persisting route configuration left with the router. What
+ * remains is `urlUpstream`, which touches no filesystem and no browser
+ * storage, so the package is isomorphic with nothing to carve out.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -37,18 +32,8 @@ const FORBIDDEN: Array<[string, RegExp]> = [
  */
 const DOM_ONLY = /\b(document|window|navigator|localStorage|sessionStorage)\b/;
 
-/**
- * The PLATFORM entry points, listed by name.
- *
- * `./node` exists to hold the filesystem store and `./browser` to hold
- * `localStorage`; the rule they are exempt from is the rule they exist to
- * break. Listing them rather
- * than pattern-matching is the point — a new platform file has to be added
- * here deliberately, which is a line in a diff somebody can argue with, and
- * the alternative (exempting anything matching `*-node.ts`, say) lets a file
- * become platform-bound by being renamed.
- */
-const PLATFORM_ENTRIES = new Set(["node.ts", "browser.ts"]);
+/** None. Every file here must pass every check — see the header. */
+const PLATFORM_ENTRIES = new Set<string>();
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -79,13 +64,13 @@ describe("the isomorphism boundary", () => {
     expect(named).toContain("index.ts");
   });
 
-  it("every platform entry named here exists, and every one that exists is named", () => {
-    // Guards the exemption itself. A name left in this list after the file is
-    // gone silently widens it for a future file of the same name; a platform
-    // file that is not in the list should be failing the checks below, and if
-    // it is not, something else is wrong.
-    const platform = named.filter((n) => PLATFORM_ENTRIES.has(n));
-    expect(platform.sort()).toEqual([...PLATFORM_ENTRIES].filter((n) => named.includes(n)).sort());
+  it("has no platform entry points left to exempt", () => {
+    // The stores went with the router. If a `node.ts` or `browser.ts` comes
+    // back, it is a design event and this says so rather than quietly
+    // exempting it.
+    expect(PLATFORM_ENTRIES.size).toBe(0);
+    expect(named).not.toContain("node.ts");
+    expect(named).not.toContain("browser.ts");
   });
 
   for (const file of files) {

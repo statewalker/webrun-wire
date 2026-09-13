@@ -35,6 +35,7 @@
     "@statewalker/webrun-streams": "workspace:*"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@roamhq/wrtc": "^0.8.0",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "@types/node": "catalog:",

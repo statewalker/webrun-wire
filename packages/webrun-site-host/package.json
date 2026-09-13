@@ -42,6 +42,7 @@
     "@statewalker/webrun-files": "^0.9.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@statewalker/webrun-files": "catalog:",
     "@types/node": "catalog:",
     "rimraf": "catalog:",

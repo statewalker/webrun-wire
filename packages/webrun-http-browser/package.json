@@ -57,6 +57,7 @@
     "idb-keyval": "catalog:"
   },
   "devDependencies": {
+    "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "http-server": "catalog:",
     "rimraf": "catalog:",
