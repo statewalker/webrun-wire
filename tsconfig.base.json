@@ -11,6 +11,7 @@
     "declaration": true,
     "declarationMap": true,
     "paths": {
+      "@statewalker/webrun-biscuit": ["./packages/webrun-biscuit/src"],
       "@statewalker/webrun-http-browser": ["./packages/webrun-http-browser/src"],
       "@statewalker/webrun-http-browser/sw": ["./packages/webrun-http-browser/src/sw"],
       "@statewalker/webrun-http-streams": ["./packages/webrun-http-streams/src"],
