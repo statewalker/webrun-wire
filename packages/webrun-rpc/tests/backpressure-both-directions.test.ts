@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { connect, serve } from "../src/index.js";
+import { connect, overPipe, serve, structuredCodec } from "../src/index.js";
 
 describe("the direction the shipped test does not cover", () => {
   it("throttles the HANDLER when the CALLER stops reading", async () => {
@@ -30,7 +30,7 @@ describe("the direction the shipped test does not cover", () => {
     let produced = 0;
 
     const teardown = await serve(
-      { port: channel.port2, side: "responder" },
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
       async function* chatty() {
         for (let i = 0; i < TOTAL; i++) {
           produced++;
@@ -39,7 +39,9 @@ describe("the direction the shipped test does not cover", () => {
       },
     );
 
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
+    });
     const out = call((async function* () {})());
 
     // Pull exactly one chunk, then stop.
@@ -68,7 +70,7 @@ describe("the direction the shipped test does not cover", () => {
     let producedTotal = 0;
 
     const teardown = await serve(
-      { port: channel.port2, side: "responder" },
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
       async function* chatty() {
         for (let i = 0; i < PER_CALL; i++) {
           producedTotal++;
@@ -77,7 +79,9 @@ describe("the direction the shipped test does not cover", () => {
       },
     );
 
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
+    });
 
     const held: Array<AsyncIterator<Uint8Array>> = [];
     for (let i = 0; i < CALLS; i++) {
