@@ -1,5 +1,13 @@
 # @statewalker/site-builder-demo
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies
+  - @statewalker/webrun-site-builder@0.1.2
+  - @statewalker/webrun-site-host@0.1.5
+
 ## 0.0.4
 
 ### Patch Changes
