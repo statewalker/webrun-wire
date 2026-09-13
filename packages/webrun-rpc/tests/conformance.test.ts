@@ -1,6 +1,6 @@
 import type { MakePair } from "@statewalker/webrun-streams-conformance";
 import { describeDuplexAdapter } from "@statewalker/webrun-streams-conformance";
-import { connect, serve } from "../src/index.js";
+import { connect, overPipe, serve, structuredCodec } from "../src/index.js";
 
 /**
  * `PairTuning` is a credit window — `mtu` plus `maxStreamBuffer` — and
@@ -24,10 +24,11 @@ const makePortPair: MakePair = async (tuning) => {
   const channel = new MessageChannel();
   channel.port1.start();
   channel.port2.start();
-  const mux = { maxMessageSize: tuning?.mtu };
+  const shared = { codec: structuredCodec, maxMessageSize: tuning?.mtu };
   return {
-    connect: () => connect({ port: channel.port1, side: "initiator", mux }),
-    serve: (handler) => serve({ port: channel.port2, side: "responder", mux }, handler),
+    connect: () => connect({ mux: overPipe(channel.port1, { ...shared, side: "initiator" }) }),
+    serve: (handler) =>
+      serve({ mux: overPipe(channel.port2, { ...shared, side: "responder" }) }, handler),
     close: async () => {
       try {
         channel.port1.close();
