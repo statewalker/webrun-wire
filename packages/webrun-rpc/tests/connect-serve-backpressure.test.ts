@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connect, serve } from "../src/index.js";
+import { connect, overPipe, serve, structuredCodec } from "../src/index.js";
 
 /**
  * The property `connect`/`serve` exist to have: **memory is bounded by
@@ -45,7 +45,7 @@ describe("connect/serve — a fast producer over a stalled consumer", () => {
     // resolves a chunk's delivery only when the consumer pulls past it, so
     // parking here is exactly "the consumer has taken one value and no more".
     const teardown = await serve(
-      { port: channel.port2, side: "responder" },
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
       async function* stalledHandler(input) {
         for await (const _chunk of input) {
           consumed++;
@@ -63,7 +63,9 @@ describe("connect/serve — a fast producer over a stalled consumer", () => {
       },
     );
 
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
+    });
 
     const input = async function* () {
       for (let i = 0; i < TOTAL; i++) {

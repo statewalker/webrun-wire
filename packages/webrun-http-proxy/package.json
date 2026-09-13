@@ -1,0 +1,37 @@
+{
+  "name": "@statewalker/webrun-http-proxy",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A reverse proxy as a fetch handler: one route table, two kinds of upstream — a local handler or a remote origin.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/statewalker/webrun-wire.git",
+    "directory": "packages/webrun-http-proxy"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" },
+    "./browser": { "types": "./dist/browser.d.ts", "import": "./dist/browser.js" }
+  },
+  "files": ["dist", "src"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": { "access": "public" }
+}
