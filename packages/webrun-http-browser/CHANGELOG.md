@@ -1,5 +1,12 @@
 # @statewalker/webrun-http-browser
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [0e435d6]
+  - @statewalker/webrun-rpc@0.3.0
+
 ## 0.4.0
 
 ### Minor Changes
