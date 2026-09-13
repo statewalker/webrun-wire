@@ -4,7 +4,10 @@ packages:
 
 catalog:
   "@biomejs/biome": ^2.5.8
+  "@biscuit-auth/biscuit-wasm": ^0.6.0
   "@jspm/generator": ^2.16.3
+  "@noble/curves": ^2.4.0
+  "@noble/hashes": ^2.4.0
   "@statewalker/webrun-files": ^0.9.0
   "@statewalker/webrun-files-browser": ^0.9.0
   "@statewalker/webrun-files-mem": ^0.9.0
