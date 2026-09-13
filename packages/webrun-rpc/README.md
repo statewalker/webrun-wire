@@ -2,8 +2,8 @@
 
 Ports and RPC over them, in the `webrun-streams-*` family: two port
 multiplexers that turn one `MessageTarget` into many, a `Duplex` stream tier
-that runs one stream over one port, a legacy `MessagePort`-backed `Connect` /
-`Serve` adapter, and a typed-JSON RPC tier that runs over any `MessageTarget`.
+that runs one stream over one port, a `Connect` / `Serve` adapter over any
+single port, and a typed-JSON RPC tier that runs over any `MessageTarget`.
 
 ## What this is
 
@@ -22,12 +22,13 @@ Four pieces, one dependency:
   backpressure that is a property of the protocol rather than a configured
   buffer. **This is what new code should use.** See
   [Streams over a port](#streams-over-a-port).
-- **Legacy byte-stream tier** (`connect` / `serve`) — the same `Duplex` seam
-  over a `MessagePort`, but built on `emulateMux`: one port becomes one
-  `ByteChannel`, and `emulateMux` provides multi-stream inside it. **This is
-  the tier Plan C removes**, along with `emulateMux`,
-  `byteChannelFromMessagePort` and `ByteChannel` as a public seam. It still
-  works and is still tested; do not build new code on it.
+- **Connect/serve adapter** (`connect` / `serve`) — the `webrun-streams`
+  `Connect` / `Serve` seam over a single port, so a port pair drops into the
+  same slot as a socket or a data channel. It is the two pieces above wired
+  together and nothing else: `multiplexPort` allocates one virtual port per
+  call and `duplexOverPort` runs the call on it, which is why it inherits the
+  stream tier's bounded memory rather than a buffer ceiling of its own. See
+  [Connect and serve](#connect-and-serve).
 - **Typed-JSON RPC tier** (`callPort` / `listenPort` / `callBidi` /
   `listenBidi` / `ioSend` / `ioHandle` / `send` / `recieve`) — request/response
   with typed JSON arguments per call, relocated here from the retired
@@ -69,10 +70,11 @@ browsers and in Node ≥ 15 (`node:worker_threads`).
 
 ## Getting started
 
-### Legacy byte-stream tier
+### Connect and serve
 
-This is the tier Plan C removes. New code should use
-[Streams over a port](#streams-over-a-port) instead.
+Reach for this when you want the family's `Connect` / `Serve` shape over a
+port; reach for [Streams over a port](#streams-over-a-port) directly when you
+are already holding a port per call and do not need the multiplexer.
 
 ```ts
 import { connect, serve } from "@statewalker/webrun-rpc";
@@ -101,13 +103,26 @@ worker.postMessage({ port: port2 }, [port2]);
 const { call } = await connect({ port: port1 });
 ```
 
-#### Stream-id sides
+#### Port-id sides
 
 Both `connect` and `serve` accept `side: "initiator" | "responder"` — the
-`emulateMux` stream-id allocation side. It defaults asymmetrically
-(`"initiator"` on `connect`, `"responder"` on `serve`), so the ordinary pairing
-above needs no configuration. Set it explicitly only when both ends of a port
-are `connect`s, or both are `serve`s.
+`multiplexPort` id-parity side, initiator taking even port ids and responder
+odd. It defaults asymmetrically (`"initiator"` on `connect`, `"responder"` on
+`serve`), so the ordinary pairing above needs no configuration. Set it
+explicitly only when both ends of a port are `connect`s, or both are `serve`s;
+two ends on the same parity collide on their first concurrent call.
+
+#### Tuning
+
+`mux` takes `PortMuxParams`: `maxPorts` (concurrent in-flight calls),
+`maxMessageSize` (payload split size, if the transport caps a message) and
+`timeout` (per-stream inactivity, off by default). There is deliberately **no
+buffer size**. The stream tier withholds a chunk's confirmation until the
+consumer has pulled past it, so a producer is at most one chunk ahead of its
+consumer and the ceiling is one chunk per open port — a number there is nothing
+to tune. `connect-serve-backpressure.test.ts` measures it: a 5000-chunk
+producer against a handler that reads one chunk and stops gets exactly one
+chunk out.
 
 ### Typed-JSON RPC tier
 
@@ -276,16 +291,19 @@ throwing into it.** A handler's `catch` never sees the abort reason; only its
 | `DuplexOverPortOptions` | type | `maxMessageSize`, `timeout`, `log` — see [above](#duplexoverportoptions). |
 | `NO_TIMEOUT` | constant | Pass as `callPort`'s `timeout` to install no deadline at all. |
 
-### Legacy byte-stream tier — exports
-
-Everything in this table goes away with `emulateMux` in Plan C.
+### Connect/serve tier — exports
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `connect(params)` | `Connect<PortParams>` | Resolves `{ call, close }` over the port. |
-| `serve(params, handler)` | `Serve<PortParams>` | Registers a `Duplex` handler. Returns an idempotent teardown. |
-| `byteChannelFromMessagePort(port)` | function | Wraps a port as a `ByteChannel` for driving `emulateMux` yourself. |
-| `PortParams` | type | `{ port: MessagePort; side?: "initiator" \| "responder"; mux?: EmulateMuxOptions }`. `mux` forwards flow-control tuning (`mtu`, `maxStreamBuffer`) to `emulateMux`; `side` always wins over `mux.side`. |
+| `connect(params)` | `Connect<PortParams>` | Resolves `{ call, close }` over the port. One virtual port per call. |
+| `serve(params, handler)` | `Serve<PortParams>` | Registers a `Duplex` handler. Returns an idempotent teardown that abandons the live streams before releasing the port. |
+| `PortParams` | type | `{ port: MessageTarget; side?: "initiator" \| "responder"; mux?: PortMuxParams }`. |
+| `PortMuxParams` | type | `maxPorts`, `maxMessageSize`, `timeout`. No buffer size — see [Tuning](#tuning). |
+
+`byteChannelFromMessagePort(port)` is still exported, and is now the only thing
+in the package that touches `ByteChannel`: it wraps a port for driving
+`emulateMux` yourself. Nothing here uses it. It goes away with `emulateMux` in
+Plan C.
 
 ### Typed-JSON RPC tier — exports
 
@@ -452,24 +470,30 @@ adapter is needed.
 
 The unmodified L0–L6 suite of
 [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance) runs
-**twice**, 11 tests each, against two independent stacks:
+**twice**, 11 tests each, against two entry points into the same stack:
 
 | run | stack |
 | --- | --- |
-| `webrun-rpc (MessageChannel pair)` | the legacy tier — `connect` / `serve` over `emulateMux` |
-| `webrun-rpc (multiplexPort + duplexOverPort)` | the stream tier — a virtual port per call |
+| `webrun-rpc (MessageChannel pair)` | `connect` / `serve` — the adapter, driving both pieces below |
+| `webrun-rpc (multiplexPort + duplexOverPort)` | the two pieces wired by hand in the test |
 
-Neither the suite nor the legacy run was changed to accommodate the new one.
+The suite itself has never been changed to accommodate either run.
 
 ```sh
 pnpm --filter @statewalker/webrun-rpc test
 ```
 
-L6's green on the stream-tier pair is an **integrity check only**. That pair
-ignores `PairTuning`, because there is no credit window to shrink, and with
-`maxMessageSize` unset the level's 256 KiB body crosses as exactly one chunk in
-each direction. It says the body round-trips; it says nothing about flow
-control. This stack's flow-control coverage is in
+**L6 does not prove flow control on either run.** `PairTuning` is a credit
+window (`mtu`, `maxStreamBuffer`) and this stack has none to size. The
+`connect`/`serve` pair translates `mtu` to `maxMessageSize`, so its L6 at least
+runs the 256 KiB body as 64 frames rather than one, and drops
+`maxStreamBuffer`; the hand-wired pair ignores the tuning outright, and with
+`maxMessageSize` unset its L6 body crosses as exactly one chunk in each
+direction. Both greens say the body round-trips. The bounded-memory property
+is measured in `tests/connect-serve-backpressure.test.ts`, which counts how far
+a 5000-chunk producer gets against a handler that reads one chunk and stops —
+one chunk here, 5000 against the `emulateMux` implementation this replaced.
+The rest of the flow-control coverage is in
 `tests/duplex-over-port-timeout.test.ts` and
 `tests/duplex-over-port-hostile.test.ts`.
 
@@ -477,7 +501,7 @@ control. This stack's flow-control coverage is in
 
 | Dependency | Kind | Why |
 | --- | --- | --- |
-| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` / `ByteChannel` seam and `emulateMux`. |
+| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` / `Connect` / `Serve` seam, the iterator primitives underneath the stream tier, and — for `byteChannelFromMessagePort` alone — `ByteChannel` and `emulateMux`. |
 
 No runtime dependencies outside the workspace, no peer dependencies. ESM only
 (`"type": "module"`).
