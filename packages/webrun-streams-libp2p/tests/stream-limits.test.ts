@@ -97,100 +97,92 @@ const SETTLE_WAIT_MS = 300;
 // libp2p default (so the pass-through doesn't quietly change existing
 // behaviour).
 describe("serveConnections maxInboundStreams", () => {
-  it(
-    "admits more than 32 concurrent inbound streams when maxInboundStreams is raised",
-    async () => {
-      const server = await node(true);
-      const client = await node(false);
-      const attempted = 40;
+  it("admits more than 32 concurrent inbound streams when maxInboundStreams is raised", async () => {
+    const server = await node(true);
+    const client = await node(false);
+    const attempted = 40;
 
+    try {
+      const { handler, state, release } = makeHeldEchoHandler();
+      // Comfortably above `attempted` so the cap itself is never the
+      // bottleneck — this test is about proving the option is threaded
+      // through and honoured, not about finding its exact boundary.
+      const stop = await serveConnections({ node: server, maxInboundStreams: 48 }, () => handler);
+      const addr = server.getMultiaddrs()[0];
+      if (addr == null) throw new Error("server has no listen address");
+
+      const conn = await connect({ node: client, peer: addr });
       try {
-        const { handler, state, release } = makeHeldEchoHandler();
-        // Comfortably above `attempted` so the cap itself is never the
-        // bottleneck — this test is about proving the option is threaded
-        // through and honoured, not about finding its exact boundary.
-        const stop = await serveConnections({ node: server, maxInboundStreams: 48 }, () => handler);
-        const addr = server.getMultiaddrs()[0];
-        if (addr == null) throw new Error("server has no listen address");
-
-        const conn = await connect({ node: client, peer: addr });
-        try {
-          const promises: Promise<string>[] = [];
-          for (let i = 0; i < attempted; i++) {
-            promises.push(drain(conn.call(singleChunkSource(`msg-${i}`))));
-            await new Promise((r) => setTimeout(r, DIAL_STAGGER_MS));
-          }
-          // Give every negotiation a chance to reach the (blocked) handler
-          // before releasing — otherwise "peak" could just be however many
-          // happened to be in flight at an arbitrary moment.
-          await new Promise((r) => setTimeout(r, SETTLE_WAIT_MS));
-          release();
-
-          const results = await Promise.all(promises);
-
-          // Nothing was ever allowed to finish early, so this is genuinely
-          // how many were open on the wire at once, not an accumulation over
-          // time.
-          expect(state.peakConcurrency).toBeGreaterThan(32);
-          expect(state.peakConcurrency).toBe(attempted);
-          expect(results).toEqual(Array.from({ length: attempted }, (_, i) => `msg-${i}`));
-        } finally {
-          await conn.close();
+        const promises: Promise<string>[] = [];
+        for (let i = 0; i < attempted; i++) {
+          promises.push(drain(conn.call(singleChunkSource(`msg-${i}`))));
+          await new Promise((r) => setTimeout(r, DIAL_STAGGER_MS));
         }
-        await stop();
+        // Give every negotiation a chance to reach the (blocked) handler
+        // before releasing — otherwise "peak" could just be however many
+        // happened to be in flight at an arbitrary moment.
+        await new Promise((r) => setTimeout(r, SETTLE_WAIT_MS));
+        release();
+
+        const results = await Promise.all(promises);
+
+        // Nothing was ever allowed to finish early, so this is genuinely
+        // how many were open on the wire at once, not an accumulation over
+        // time.
+        expect(state.peakConcurrency).toBeGreaterThan(32);
+        expect(state.peakConcurrency).toBe(attempted);
+        expect(results).toEqual(Array.from({ length: attempted }, (_, i) => `msg-${i}`));
       } finally {
-        await Promise.allSettled([server.stop(), client.stop()]);
+        await conn.close();
       }
-    },
-    20_000,
-  );
+      await stop();
+    } finally {
+      await Promise.allSettled([server.stop(), client.stop()]);
+    }
+  }, 20_000);
 
-  it(
-    "leaves libp2p's default 32-stream cap in force when the option is not set",
-    async () => {
-      const server = await node(true);
-      const client = await node(false);
-      const attempted = 40;
-      const defaultCap = 32;
+  it("leaves libp2p's default 32-stream cap in force when the option is not set", async () => {
+    const server = await node(true);
+    const client = await node(false);
+    const attempted = 40;
+    const defaultCap = 32;
 
+    try {
+      const { handler, state, release } = makeHeldEchoHandler();
+      // No `maxInboundStreams` here — this is the "pass-through only, no
+      // new default" half of the contract: an unconfigured server must
+      // still reset streams past the 33rd concurrent one, exactly as it
+      // did before this package exposed the option.
+      const stop = await serveConnections({ node: server }, () => handler);
+      const addr = server.getMultiaddrs()[0];
+      if (addr == null) throw new Error("server has no listen address");
+
+      const conn = await connect({ node: client, peer: addr });
       try {
-        const { handler, state, release } = makeHeldEchoHandler();
-        // No `maxInboundStreams` here — this is the "pass-through only, no
-        // new default" half of the contract: an unconfigured server must
-        // still reset streams past the 33rd concurrent one, exactly as it
-        // did before this package exposed the option.
-        const stop = await serveConnections({ node: server }, () => handler);
-        const addr = server.getMultiaddrs()[0];
-        if (addr == null) throw new Error("server has no listen address");
-
-        const conn = await connect({ node: client, peer: addr });
-        try {
-          const promises: Promise<string>[] = [];
-          for (let i = 0; i < attempted; i++) {
-            promises.push(drain(conn.call(singleChunkSource(`msg-${i}`))));
-            await new Promise((r) => setTimeout(r, DIAL_STAGGER_MS));
-          }
-          await new Promise((r) => setTimeout(r, SETTLE_WAIT_MS));
-          release();
-
-          const results = await Promise.allSettled(promises);
-          const echoedCorrectly = results.filter(
-            (r, i) => r.status === "fulfilled" && r.value === `msg-${i}`,
-          ).length;
-
-          // Same reasoning as above: nothing that made it into the handler
-          // was ever allowed to finish early, so this is the registrar's
-          // actual concurrent ceiling for this run.
-          expect(state.peakConcurrency).toBe(defaultCap);
-          expect(echoedCorrectly).toBe(defaultCap);
-        } finally {
-          await conn.close();
+        const promises: Promise<string>[] = [];
+        for (let i = 0; i < attempted; i++) {
+          promises.push(drain(conn.call(singleChunkSource(`msg-${i}`))));
+          await new Promise((r) => setTimeout(r, DIAL_STAGGER_MS));
         }
-        await stop();
+        await new Promise((r) => setTimeout(r, SETTLE_WAIT_MS));
+        release();
+
+        const results = await Promise.allSettled(promises);
+        const echoedCorrectly = results.filter(
+          (r, i) => r.status === "fulfilled" && r.value === `msg-${i}`,
+        ).length;
+
+        // Same reasoning as above: nothing that made it into the handler
+        // was ever allowed to finish early, so this is the registrar's
+        // actual concurrent ceiling for this run.
+        expect(state.peakConcurrency).toBe(defaultCap);
+        expect(echoedCorrectly).toBe(defaultCap);
       } finally {
-        await Promise.allSettled([server.stop(), client.stop()]);
+        await conn.close();
       }
-    },
-    20_000,
-  );
+      await stop();
+    } finally {
+      await Promise.allSettled([server.stop(), client.stop()]);
+    }
+  }, 20_000);
 });

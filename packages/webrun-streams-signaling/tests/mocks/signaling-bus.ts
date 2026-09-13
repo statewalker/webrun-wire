@@ -6,10 +6,7 @@
 
 import type { SignalingMessage, SignalingTransport } from "../../src/types.js";
 
-export function makeSignalingPair(
-  idA = "A",
-  idB = "B",
-): [SignalingTransport, SignalingTransport] {
+export function makeSignalingPair(idA = "A", idB = "B"): [SignalingTransport, SignalingTransport] {
   const handlers: Record<string, Set<(from: string, msg: SignalingMessage) => void>> = {
     [idA]: new Set(),
     [idB]: new Set(),

@@ -50,6 +50,7 @@ export function splitTarget(
   // Both capture groups are mandatory in the regex above (neither is
   // `?`-quantified), so a successful match always populates them — an empty
   // string is possible, `undefined` is not.
+  // biome-ignore lint/style/noNonNullAssertion: mandatory capture group, per the comment above.
   const rawAuthority = match[1]!;
   if (rawAuthority === "") {
     throw new HttpParseError(`url has no authority: ${JSON.stringify(url)}`);
@@ -60,6 +61,7 @@ export function splitTarget(
   const authority = at === -1 ? rawAuthority : rawAuthority.slice(at + 1);
   assertValidHost(authority);
 
+  // biome-ignore lint/style/noNonNullAssertion: mandatory capture group, per the comment above.
   const rawTarget = match[2]!;
   const target = rawTarget === "" ? "/" : rawTarget.startsWith("/") ? rawTarget : `/${rawTarget}`;
   assertValidTarget(target);

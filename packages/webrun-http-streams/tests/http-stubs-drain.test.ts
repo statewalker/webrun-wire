@@ -39,25 +39,24 @@ function heldOpen(): { content: AsyncGenerator<Uint8Array>; cleanedUp: () => boo
 
 describe("http-stubs — releasing a body that must not be read", () => {
   describe("newHttpServerStub", () => {
-    it.each([
-      "GET",
-      "HEAD",
-      "OPTIONS",
-    ])("unwinds the request producer for %s, which carries no body", async (method) => {
-      const { content, cleanedUp } = heldOpen();
-      const stub = newHttpServerStub(async (request) => {
-        expect(request.body).toBeNull();
-        return new Response("ok");
-      });
+    it.each(["GET", "HEAD", "OPTIONS"])(
+      "unwinds the request producer for %s, which carries no body",
+      async (method) => {
+        const { content, cleanedUp } = heldOpen();
+        const stub = newHttpServerStub(async (request) => {
+          expect(request.body).toBeNull();
+          return new Response("ok");
+        });
 
-      const envelope: SerializedHttpEnvelope<SerializedHttpRequest> = {
-        options: { url: "http://peer/a", method, headers: [] },
-        content,
-      };
-      await stub(envelope);
+        const envelope: SerializedHttpEnvelope<SerializedHttpRequest> = {
+          options: { url: "http://peer/a", method, headers: [] },
+          content,
+        };
+        await stub(envelope);
 
-      expect(cleanedUp()).toBe(true);
-    });
+        expect(cleanedUp()).toBe(true);
+      },
+    );
 
     it("does not touch the producer when the method does carry a body", async () => {
       // The mirror of the above: a POST body belongs to the handler, and
@@ -79,40 +78,41 @@ describe("http-stubs — releasing a body that must not be read", () => {
   });
 
   describe("newHttpClientStub", () => {
-    it.each([
-      204, 205, 304,
-    ])("unwinds the response producer for a %d, which carries no body", async (status) => {
-      const { content, cleanedUp } = heldOpen();
-      const stub = newHttpClientStub(
-        async (): Promise<SerializedHttpEnvelope<SerializedHttpResponse>> => ({
-          options: { status, statusText: "", headers: {} },
-          content,
-        }),
-      );
+    it.each([204, 205, 304])(
+      "unwinds the response producer for a %d, which carries no body",
+      async (status) => {
+        const { content, cleanedUp } = heldOpen();
+        const stub = newHttpClientStub(
+          async (): Promise<SerializedHttpEnvelope<SerializedHttpResponse>> => ({
+            options: { status, statusText: "", headers: {} },
+            content,
+          }),
+        );
 
-      const response = await stub(new Request("http://peer/a"));
+        const response = await stub(new Request("http://peer/a"));
 
-      expect(response.status).toBe(status);
-      expect(response.body).toBeNull();
-      expect(cleanedUp()).toBe(true);
-    });
+        expect(response.status).toBe(status);
+        expect(response.body).toBeNull();
+        expect(cleanedUp()).toBe(true);
+      },
+    );
 
-    it.each([
-      "HEAD",
-      "OPTIONS",
-    ])("unwinds the response producer for %s, whatever the status", async (method) => {
-      const { content, cleanedUp } = heldOpen();
-      const stub = newHttpClientStub(
-        async (): Promise<SerializedHttpEnvelope<SerializedHttpResponse>> => ({
-          options: { status: 200, statusText: "OK", headers: {} },
-          content,
-        }),
-      );
+    it.each(["HEAD", "OPTIONS"])(
+      "unwinds the response producer for %s, whatever the status",
+      async (method) => {
+        const { content, cleanedUp } = heldOpen();
+        const stub = newHttpClientStub(
+          async (): Promise<SerializedHttpEnvelope<SerializedHttpResponse>> => ({
+            options: { status: 200, statusText: "OK", headers: {} },
+            content,
+          }),
+        );
 
-      const response = await stub(new Request("http://peer/a", { method }));
+        const response = await stub(new Request("http://peer/a", { method }));
 
-      expect(response.body).toBeNull();
-      expect(cleanedUp()).toBe(true);
-    });
+        expect(response.body).toBeNull();
+        expect(cleanedUp()).toBe(true);
+      },
+    );
   });
 });

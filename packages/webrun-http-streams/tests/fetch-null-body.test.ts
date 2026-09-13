@@ -77,22 +77,23 @@ describe("fetchOverDuplex / serveFetchOverDuplex — bodiless statuses (real Dup
     return { call: socketDuplex(client) };
   }
 
-  it.each([
-    204, 205, 304,
-  ])("a %d response round-trips with a null body, draining the handler's stream", async (status) => {
-    // The Fetch API itself refuses a body for these statuses at
-    // construction time, so the handler cannot hand back a populated
-    // stream here — the null-body enforcement this test guards against is
-    // in `fetchOverDuplex`'s reconstruction of the *response* on the wire.
-    const { call } = await connectTo(async () => new Response(null, { status }));
+  it.each([204, 205, 304])(
+    "a %d response round-trips with a null body, draining the handler's stream",
+    async (status) => {
+      // The Fetch API itself refuses a body for these statuses at
+      // construction time, so the handler cannot hand back a populated
+      // stream here — the null-body enforcement this test guards against is
+      // in `fetchOverDuplex`'s reconstruction of the *response* on the wire.
+      const { call } = await connectTo(async () => new Response(null, { status }));
 
-    const response = await fetchOverDuplex(call, new Request("http://peer.local/thing"));
+      const response = await fetchOverDuplex(call, new Request("http://peer.local/thing"));
 
-    expect(response.status).toBe(status);
-    expect(response.body).toBeNull();
-    const text = await response.text();
-    expect(text).toBe("");
-  });
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+      const text = await response.text();
+      expect(text).toBe("");
+    },
+  );
 
   it("a HEAD response round-trips with no body even for a 200 status", async () => {
     const { call } = await connectTo(async () => {

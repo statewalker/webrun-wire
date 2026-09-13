@@ -133,10 +133,10 @@ describe("strictness: every ambiguous message is refused, never guessed (19 case
   // `catch (e) { if (e instanceof HttpParseError) ... }`, the obvious way to
   // consume this codec's documented error contract, crashes on exactly the
   // kind of malformed input it exists to catch.
-  it.each(CORPUS)("rejects $name with HttpParseError specifically", async ({
-    wire,
-    maxHeaderBytes,
-  }) => {
-    await expect(parse(wire, maxHeaderBytes)).rejects.toThrow(HttpParseError);
-  });
+  it.each(CORPUS)(
+    "rejects $name with HttpParseError specifically",
+    async ({ wire, maxHeaderBytes }) => {
+      await expect(parse(wire, maxHeaderBytes)).rejects.toThrow(HttpParseError);
+    },
+  );
 });

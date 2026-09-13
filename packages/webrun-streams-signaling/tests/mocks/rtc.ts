@@ -189,6 +189,5 @@ class MockPeerConnection {
  */
 export function makeMockRtc(): RtcPeerConnectionFactory {
   const rendezvous = new Map<string, MessagePort>();
-  return (() =>
-    new MockPeerConnection(rendezvous)) as unknown as RtcPeerConnectionFactory;
+  return (() => new MockPeerConnection(rendezvous)) as unknown as RtcPeerConnectionFactory;
 }

@@ -356,7 +356,8 @@ async function* parseFrames(
     }
     while (buf.byteLength > 0) {
       if (buf.byteLength < 2) break; // need at least type + 1 varint byte
-      const type = buf[0]!; // buf.byteLength >= 2, checked above, so index 0 exists
+      // biome-ignore lint/style/noNonNullAssertion: buf.byteLength >= 2, checked above, so index 0 exists.
+      const type = buf[0]!;
       let lenInfo: { value: number; offset: number };
       try {
         lenInfo = decodeVarint(buf, 1);
@@ -428,7 +429,8 @@ function decodeVarint(buf: Uint8Array, start: number): { value: number; offset: 
   let shift = 0;
   let i = start;
   while (i < buf.length) {
-    const b = buf[i++]!; // i < buf.length, checked by the while condition, so this index exists
+    // biome-ignore lint/style/noNonNullAssertion: i < buf.length, checked by the while condition, so this index exists.
+    const b = buf[i++]!;
     value |= (b & 0x7f) << shift;
     if ((b & 0x80) === 0) return { value: value >>> 0, offset: i };
     shift += 7;

@@ -219,7 +219,12 @@ export class QrSignaling {
     const description = pc.getLocalDescription();
     if (!description) throw new Error("No local description after answer");
     const qr = encodeSignal(
-      createCompressedSignal(parsed.sessionId, "responder", description, pc.getCollectedCandidates()),
+      createCompressedSignal(
+        parsed.sessionId,
+        "responder",
+        description,
+        pc.getCollectedCandidates(),
+      ),
     );
 
     return { qr, channel: await channel };

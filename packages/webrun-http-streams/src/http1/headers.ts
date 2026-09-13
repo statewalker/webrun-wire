@@ -199,6 +199,7 @@ export function parseContentLength(values: string[]): number | undefined {
   // build, not in this package's own (which does not enable the flag, so it
   // cannot catch the regression). It was lost once already, in a rebase that
   // resolved toward a refactor of this function.
+  // biome-ignore lint/style/noNonNullAssertion: load-bearing for consumers building with noUncheckedIndexedAccess -- see above; it was lost once already.
   const raw = [...unique][0]!;
   if (!/^\d{1,15}$/.test(raw)) {
     throw new HttpParseError(`invalid Content-Length: ${JSON.stringify(raw)}`);

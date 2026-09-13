@@ -1,9 +1,9 @@
 import type { Stream } from "@libp2p/interface";
 import { describe, expect, it, vi } from "vitest";
 import {
+  closeStream,
   DEFAULT_CLOSE_TIMEOUT_MS,
   DEFAULT_DRAIN_TIMEOUT_MS,
-  closeStream,
 } from "../src/duplex-over-stream.js";
 
 /**
