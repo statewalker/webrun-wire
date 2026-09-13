@@ -1,5 +1,12 @@
 # @statewalker/webrun-msgpack
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [fbaee6a]
+  - @statewalker/webrun-rpc@0.4.0
+
 ## 0.2.1
 
 ### Patch Changes

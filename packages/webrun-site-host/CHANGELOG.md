@@ -1,5 +1,11 @@
 # @statewalker/webrun-site-host
 
+## 0.1.4
+
+### Patch Changes
+
+- @statewalker/webrun-http-browser@0.4.2
+
 ## 0.1.3
 
 ### Patch Changes
