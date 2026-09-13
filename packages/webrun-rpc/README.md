@@ -73,19 +73,35 @@ browsers and in Node ≥ 15 (`node:worker_threads`).
 ### Connect and serve
 
 Reach for this when you want the family's `Connect` / `Serve` shape over a
-port; reach for [Streams over a port](#streams-over-a-port) directly when you
-are already holding a port per call and do not need the multiplexer.
+source of ports; reach for [Streams over a port](#streams-over-a-port) directly
+when you are already holding a port per call.
+
+`connect` and `serve` take a **port factory**, not a port. They ask it for one
+port per call and run a stream on it — so *how* ports are made belongs to
+whoever knows the transport:
+
+| Transport | Factory | Id table? |
+|---|---|---|
+| one pipe of bytes (`MessagePort`, worker, WebSocket) | `overPipe(pipe, { codec })` | **yes** — there is no second port to be had |
+| a transferable boundary | `overPorts((onPort) => transferPortMux(target, { onPort }))` | no — the platform moves real ports |
+| a transport that multiplexes already (libp2p's yamux) | `overPorts((onPort) => yourMux({ onPort }))` | no — it did the work |
 
 ```ts
-import { connect, serve } from "@statewalker/webrun-rpc";
+import { connect, overPipe, serve, structuredCodec } from "@statewalker/webrun-rpc";
 
 const channel = new MessageChannel();
+const codec = structuredCodec;
 
-const stop = await serve({ port: channel.port2 }, async function* echo(input) {
-  for await (const chunk of input) yield chunk;
+const stop = await serve(
+  { mux: overPipe(channel.port2, { codec, side: "responder" }) },
+  async function* echo(input) {
+    for await (const chunk of input) yield chunk;
+  },
+);
+
+const { call, close } = await connect({
+  mux: overPipe(channel.port1, { codec, side: "initiator" }),
 });
-
-const { call, close } = await connect({ port: channel.port1 });
 
 for await (const chunk of call([new TextEncoder().encode("ping")])) {
   console.log(new TextDecoder().decode(chunk)); // "ping"
@@ -100,24 +116,43 @@ Across a Worker boundary, transfer one end and keep the other:
 ```ts
 const { port1, port2 } = new MessageChannel();
 worker.postMessage({ port: port2 }, [port2]);
-const { call } = await connect({ port: port1 });
+const { call } = await connect({ mux: overPipe(port1, { codec: structuredCodec }) });
 ```
+
+#### Why a factory and not a `PortMux`
+
+Every mux decides accept-or-reject **synchronously**, inside the `open`
+envelope, and tells the peer on the spot — `multiplexPort` posts
+`{type:"close", reason:"rejected"}` before returning. There is no "decide
+later", and layer 1 refuses to queue what it cannot deliver.
+
+So handing `serve` a mux that already exists would leave a window between its
+construction and its handler being attached, and a port arriving in that window
+is rejected outright — **measured: zero messages delivered**, with the peer told
+`rejected` for a call whose only fault was being early. A factory closes the
+window by construction: the mux cannot exist before the thing that answers it.
+`port-factory-no-race.test.ts` measures both halves.
+
+`connect` passes no handler, which is how a caller declines inbound ports —
+your factory receives `undefined`. Whichever of the two called the factory owns
+the mux and closes it.
 
 #### Port-id sides
 
-Both `connect` and `serve` accept `side: "initiator" | "responder"` — the
-`multiplexPort` id-parity side, initiator taking even port ids and responder
-odd. It defaults asymmetrically (`"initiator"` on `connect`, `"responder"` on
-`serve`), so the ordinary pairing above needs no configuration. Set it
-explicitly only when both ends of a port are `connect`s, or both are `serve`s;
-two ends on the same parity collide on their first concurrent call.
+`side: "initiator" | "responder"` belongs to `overPipe`, because it is
+`multiplexPort`'s id parity: initiator takes even port ids, responder odd. The
+two ends of one pipe must disagree, or their ids collide on the first
+concurrent call. A transport that multiplexes on its own has no ids and no
+parity, which is why this is not a `connect`/`serve` option any more.
 
 #### Tuning
 
-`mux` takes `PortMuxParams`: `maxPorts` (concurrent in-flight calls),
-`maxMessageSize` (payload split size, if the transport caps a message) and
-`timeout` (per-stream inactivity, off by default). There is deliberately **no
-buffer size**. The stream tier withholds a chunk's confirmation until the
+`overPipe` takes `maxPorts` (concurrent in-flight calls) and `maxMessageSize`
+(payload split size, if the transport caps a message); `connect`/`serve` take
+`timeout` (per-stream inactivity, off by default). `maxMessageSize` is
+*reported* by the mux to the stream tier, so a transport with no message
+ceiling — a libp2p stream — simply does not set one and nothing is split.
+There is deliberately **no buffer size**. The stream tier withholds a chunk's confirmation until the
 consumer has pulled past it, so a producer is at most one chunk ahead of its
 consumer and the ceiling is one chunk per open port — a number there is nothing
 to tune. `connect-serve-backpressure.test.ts` measures it: a 5000-chunk
@@ -295,10 +330,13 @@ throwing into it.** A handler's `catch` never sees the abort reason; only its
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `connect(params)` | `Connect<PortParams>` | Resolves `{ call, close }` over the port. One virtual port per call. |
-| `serve(params, handler)` | `Serve<PortParams>` | Registers a `Duplex` handler. Returns an idempotent teardown that abandons the live streams before releasing the port. |
-| `PortParams` | type | `{ port: MessageTarget; side?: "initiator" \| "responder"; mux?: PortMuxParams }`. |
-| `PortMuxParams` | type | `maxPorts`, `maxMessageSize`, `timeout`. No buffer size — see [Tuning](#tuning). |
+| `connect(params)` | `Connect<PortParams>` | Resolves `{ call, close }`. One port per call, opened on the consumer's first pull. |
+| `serve(params, handler)` | `Serve<PortParams>` | Registers a `Duplex` handler. Returns an idempotent teardown that abandons the live streams before releasing the mux. |
+| `PortParams` | type | `{ mux: PortMuxFactory; timeout?: number }`. |
+| `PortMuxFactory` | type | `(onPort?) => PortMux \| Promise<PortMux>`. Why a factory: [above](#why-a-factory-and-not-a-portmux). |
+| `overPipe(pipe, options)` | `PortMuxFactory` | Ports over one pipe of bytes, via `multiplexPort`. Takes `codec`, `side`, `maxPorts`, `maxMessageSize`. |
+| `overPorts(factory)` | `PortMuxFactory` | Pass-through, for a mux this package knows nothing about. |
+| `OnPort` | type | `(port, meta?) => boolean \| undefined`. `false` rejects. |
 
 `byteChannelFromMessagePort(port)` is still exported, and is now the only thing
 in the package that touches `ByteChannel`: it wraps a port for driving

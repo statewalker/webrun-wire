@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import { STREAM_ABORT } from "../src/duplex-over-port.js";
-import { connect, serve } from "../src/index.js";
+import { connect, overPipe, serve, structuredCodec } from "../src/index.js";
 
 const empty = async function* (): AsyncGenerator<Uint8Array> {};
 
@@ -50,11 +50,16 @@ describe("connect: the port is opened on the first pull", () => {
     const channel = pair();
     let handlerCalls = 0;
 
-    const teardown = await serve({ port: channel.port2, side: "responder" }, async function* () {
-      handlerCalls++;
-      yield new Uint8Array(0);
+    const teardown = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
+      async function* () {
+        handlerCalls++;
+        yield new Uint8Array(0);
+      },
+    );
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
     });
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
 
     // Build ten streams; iterate none of them.
     for (let i = 0; i < 10; i++) void call(empty());
@@ -72,11 +77,16 @@ describe("connect: the port is opened on the first pull", () => {
     const channel = pair();
     let handlerCalls = 0;
 
-    const teardown = await serve({ port: channel.port2, side: "responder" }, async function* () {
-      handlerCalls++;
-      yield new Uint8Array(0);
+    const teardown = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
+      async function* () {
+        handlerCalls++;
+        yield new Uint8Array(0);
+      },
+    );
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
     });
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
 
     for (let i = 0; i < 5; i++) {
       for await (const _ of call(empty())) {
@@ -105,12 +115,17 @@ describe("serve: teardown", () => {
       release = resolve;
     });
 
-    const teardown = await serve({ port: channel.port2, side: "responder" }, async function* () {
-      yield new Uint8Array([1]);
-      await gate; // still running when teardown happens
-      yield new Uint8Array([2]);
+    const teardown = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
+      async function* () {
+        yield new Uint8Array([1]);
+        await gate; // still running when teardown happens
+        yield new Uint8Array([2]);
+      },
+    );
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
     });
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
 
     const it = call(empty())[Symbol.asyncIterator]();
     expect((await it.next()).value).toEqual(new Uint8Array([1]));
@@ -146,10 +161,15 @@ describe("serve: teardown", () => {
     const channel = pair();
     const aborts = countAborts(channel.port2);
 
-    const teardown = await serve({ port: channel.port2, side: "responder" }, async function* () {
-      yield new Uint8Array([7]);
+    const teardown = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
+      async function* () {
+        yield new Uint8Array([7]);
+      },
+    );
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
     });
-    const { call, close } = await connect({ port: channel.port1, side: "initiator" });
 
     const CALLS = 50;
     for (let i = 0; i < CALLS; i++) {
@@ -171,9 +191,12 @@ describe("serve: teardown", () => {
 
   it("is idempotent", async () => {
     const channel = pair();
-    const teardown = await serve({ port: channel.port2, side: "responder" }, async function* () {
-      yield new Uint8Array(0);
-    });
+    const teardown = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }) },
+      async function* () {
+        yield new Uint8Array(0);
+      },
+    );
 
     await teardown();
     await expect(teardown()).resolves.toBeUndefined();
@@ -190,9 +213,13 @@ describe("connect: a caller answers no inbound calls", () => {
     // read — is the worse failure: the peer sees an open stream and waits.
     const channel = pair();
 
-    const { close } = await connect({ port: channel.port1, side: "initiator" });
+    const { close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator" }),
+    });
     // The other end tries to call US.
-    const backwards = await connect({ port: channel.port2, side: "responder" });
+    const backwards = await connect({
+      mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder" }),
+    });
 
     const it = backwards.call(empty())[Symbol.asyncIterator]();
 
@@ -200,7 +227,10 @@ describe("connect: a caller answers no inbound calls", () => {
       Promise.race([
         it.next(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("TIMED OUT — the port was accepted and starved")), 3000),
+          setTimeout(
+            () => reject(new Error("TIMED OUT — the port was accepted and starved")),
+            3000,
+          ),
         ),
       ]),
     ).rejects.toThrow();
