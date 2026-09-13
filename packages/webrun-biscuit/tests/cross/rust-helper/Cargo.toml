@@ -1,0 +1,22 @@
+[package]
+name = "biscuit-crossref"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+biscuit-auth = { git = "https://github.com/eclipse-biscuit/biscuit-rust", default-features = false }
+serde_json = "1"
+hex = "0.4"
+# pinned: newer releases require edition2024, unavailable on Rust 1.75
+base64ct = "=1.6.0"
+time = "=0.3.36"
+time-core = "=0.1.2"
+zeroize = "=1.8.1"
+subtle = "=2.5.0"
+rand_core = "=0.6.4"
+ed25519-dalek = "=2.1.1"
+
+[[bin]]
+name = "crossref"
+path = "src/main.rs"

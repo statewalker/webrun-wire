@@ -1,0 +1,3 @@
+# The upstream conformance corpus, fetched by scripts/fetch-samples.mjs rather
+# than vendored: the samples belong to the biscuit project, not to this repo.
+samples/

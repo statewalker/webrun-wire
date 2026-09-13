@@ -1,0 +1,59 @@
+{
+  "name": "@statewalker/webrun-biscuit",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Biscuit authorization tokens in pure TypeScript: proto2 codec, Ed25519 and secp256r1 signature chain, Datalog engine, parser, authorizer and builder. No WASM, no Node built-ins — runs in Node, browsers, Workers and Durable Objects.",
+  "homepage": "https://github.com/statewalker/webrun-wire",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:statewalker/webrun-wire.git",
+    "directory": "packages/webrun-biscuit"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "samples": "node scripts/fetch-samples.mjs",
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "pnpm run samples && vitest run",
+    "test:watch": "pnpm run samples && vitest",
+    "test:cross": "vitest run --config vitest.cross.config.ts",
+    "test:all": "pnpm run test && pnpm run test:cross",
+    "mutate": "pnpm run samples && node scripts/mutate.mjs",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
+    "clean": "rimraf dist",
+    "lint": "biome check src tests",
+    "format": "biome format --write .",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:"
+  },
+  "devDependencies": {
+    "@biscuit-auth/biscuit-wasm": "catalog:",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "types": "./dist/index.d.ts"
+}
