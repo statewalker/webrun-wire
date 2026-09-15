@@ -172,7 +172,9 @@ agnostic; tests may use Node APIs, the library may not.
 **Default run limits are looser than the reference.** The reference defaults `max_time` to 1
 millisecond, which is unreachably tight for a cold JS engine; this one defaults to 1 second. A caller
 exposed to untrusted tokens should lower it deliberately rather than treat the default as a
-denial-of-service bound.
+denial-of-service bound. The limit is enforced where the work happens — inside the join, for rules,
+checks and policies alike — so it bounds a single combinatorial rule, not only the number of
+iterations (up to 0.2.0 it was read only between iterations).
 
 ### The corpus is fetched, not vendored
 

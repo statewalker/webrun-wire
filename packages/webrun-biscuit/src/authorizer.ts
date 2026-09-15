@@ -562,7 +562,11 @@ export function evaluate(
   };
 
   let failure: ExecutionError | undefined;
-  const settled = (result: AuthorizationResult): Evaluation => ({
+  const settled = (result: AuthorizationResult): Evaluation => {
+    world.endBudget();
+    return evaluation(result);
+  };
+  const evaluation = (result: AuthorizationResult): Evaluation => ({
     result,
     snapshot,
     query(src: string, queryOptions: QueryOptions = {}): Predicate[] {
