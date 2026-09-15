@@ -197,10 +197,10 @@ not to change the verdict.
 ### A green suite is not the claim; a suite that can fail is
 
 ```sh
-pnpm test          # the main suite, 180 tests
-pnpm test:cross    # against the reference implementation, 56 tests
+pnpm test          # the main suite, 182 tests
+pnpm test:cross    # against the reference implementation, 58 tests
 pnpm test:all      # both
-pnpm mutate        # inject 13 known defects, require the suite to catch each
+pnpm mutate        # inject 15 known defects, require the suite to catch each
 pnpm build         # dist/ plus declarations
 ```
 
@@ -209,7 +209,7 @@ pnpm build         # dist/ plus declarations
 | `01-proto` | byte-exact round-trip of all 38 sample tokens, i64 extremes, strict rejection |
 | `02-crypto` | signature chain outcomes and revocation ids for all samples |
 | `03-datalog` | engine unit tests ported from the Rust `datalog` module |
-| `04-parser` | terms, precedence, closures, scopes, predicate/expression disambiguation |
+| `04-parser` | terms, precedence, closures, scopes, predicate/expression disambiguation, the reference's name and arity rules |
 | `05-conformance` | the official `samples.json` corpus — 38 tokens, 50 validations |
 | `06-builder` | write path, corpus rebuilt from source, forged seals, deny policies |
 | `07-api` | base64 and the public facade |
@@ -219,12 +219,12 @@ pnpm build         # dist/ plus declarations
 | `11-parameters` | `{name}` binding, hostile strings, unbound and unused parameters |
 | `12-evaluate` | queries, their scope, token-less evaluation, failed-check rule text |
 
-`scripts/mutate.mjs` is the check on all of it. It injects thirteen defects — a lenient protobuf decoder,
+`scripts/mutate.mjs` is the check on all of it. It injects fifteen defects — a lenient protobuf decoder,
 wrapping i64 arithmetic, `check all` degraded to `check if`, a universally trusting authorizer, `deny`
 treated as `allow`, unchecked seal signatures, an async verifier that ignores WebCrypto's verdict, a
-query that can read an attenuation block's facts, silently ignored parameters, missing version bounds,
+query that can read an attenuation block's facts, silently ignored parameters, zero-term predicates, non-ASCII names, missing version bounds,
 and more — and requires each to break at least one test. A surviving mutation is a hole in the tests,
-not a success. All thirteen are caught. Two of them were **not** caught when the harness was first written: nothing verified a forged
+not a success. All fifteen are caught. Two of them were **not** caught when the harness was first written: nothing verified a forged
 seal signature, and nothing exercised a matching `deny` policy.
 
 Each mutation's `find` string is a literal excerpt of the source, and must match exactly once. That is
@@ -242,6 +242,7 @@ is genuinely upstream, not a second reading of the same spec.
 | `02-ts-to-native` | we mint, the reference reads |
 | `03-interop-chains` | blocks appended alternately by both, sealing honoured across the boundary, base64 interop, agreement on the stamped Datalog version |
 | `04-random-differential` | generated programs, both directions, both algorithms — the reference is the oracle |
+| `05-grammar` | predicate and variable names, and arity — the recorded table and generated names, re-asked of the reference |
 
 Nothing in `04` hard-codes the expected answer: each generated program is authorized by both
 implementations and the verdicts compared, so a disagreement is a finding either way. Programs are
@@ -284,6 +285,13 @@ scripts by default, so a `pretest` hook would silently never fire and the suite 
 checkout with missing samples.
 
 ## Known deviations from the reference
+
+**Names follow the reference parser, not the specification's prose.** A predicate or variable name
+is one or more of `[A-Za-z0-9_:]`, ASCII, with any of them first — so `_m`, `1a` and `::` are names
+and `ärger` is not — and a predicate takes at least one term. That is what
+`@biscuit-auth/biscuit-wasm` accepts; `tests/grammar-cases.ts` records it and `05-grammar` re-asks the
+reference, including for generated names. Versions up to 0.2.0 required a Unicode letter first and
+accepted `f()`.
 
 **Regex uses JS `RegExp`, not RE2.** Every corpus pattern matches, but backreferences and lookaround
 are accepted where Rust would reject them. Documented, not enforced.

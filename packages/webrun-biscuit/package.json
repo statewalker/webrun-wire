@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-biscuit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Biscuit authorization tokens in pure TypeScript: proto2 codec, Ed25519 and secp256r1 signature chain, Datalog engine, parser, authorizer and builder. No WASM, no Node built-ins — runs in Node, browsers, Workers and Durable Objects.",
