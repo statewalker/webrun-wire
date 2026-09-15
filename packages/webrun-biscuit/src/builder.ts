@@ -30,6 +30,7 @@ import {
   type ScopeMsg,
   type TermMsg,
 } from "./proto.js";
+import type { Params } from "./parser.js";
 import { DATALOG_3_2, requiredVersion } from "./version.js";
 
 const SIGNATURE_VERSION = 1;
@@ -197,8 +198,8 @@ export function buildBlockMsg(
   };
 }
 
-const contentFromCode = (code: string): BlockContent => {
-  const parsed = parseAuthorizer(code);
+const contentFromCode = (code: string, params?: Params): BlockContent => {
+  const parsed = parseAuthorizer(code, params);
   if (parsed.policies.length)
     throw new BuilderError("allow/deny policies belong to the authorizer, not to a block");
   return {
@@ -234,6 +235,8 @@ export interface BuildOptions {
   /** supply a next keypair instead of generating one (tests, determinism) */
   nextKeypair?: Keypair;
   algorithm?: 0 | 1;
+  /** values for `{name}` parameters in the block code */
+  params?: Params;
 }
 
 /** Mint a new token whose authority block holds `code`. */
@@ -243,7 +246,7 @@ export function buildToken(
   options: BuildOptions = {},
 ): Uint8Array {
   const algorithm = options.algorithm ?? 0;
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, options.params) : code;
   const blockBytes = encodeBlock(buildBlockMsg(content));
   const next = options.nextKeypair ?? generateKeypair(algorithm);
   const nextKey: PublicKeyMsg = { algorithm, key: next.publicKey };
@@ -275,7 +278,7 @@ export function attenuate(
   const currentAlgorithm = previous.nextKey.algorithm;
 
   const tables = knownTables(token);
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, options.params) : code;
   const blockBytes = encodeBlock(buildBlockMsg(content, tables.symbols, tables.keys));
 
   const next = options.nextKeypair ?? generateKeypair(algorithm);
@@ -330,8 +333,9 @@ export function thirdPartyBlock(
   externalSecret: Uint8Array,
   code: string | BlockContent,
   algorithm: 0 | 1 = 0,
+  params?: Params,
 ): ThirdPartyResponse {
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, params) : code;
   // a third-party block carries its own symbol table, so it starts from empty,
   // and third-party blocks themselves require datalog v3.2+
   const blockBytes = encodeBlock(buildBlockMsg(content, [], [], DATALOG_3_2));

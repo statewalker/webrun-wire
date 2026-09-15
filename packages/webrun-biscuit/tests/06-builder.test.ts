@@ -46,7 +46,9 @@ test("attenuation adds a block and only ever narrows access", () => {
 
   const denied = authorize(loaded, 'resource("file2");\nallow if true;');
   assert.equal(denied.kind, "unauthorized");
-  assert.deepEqual((denied as any).checks, [{ source: "block", blockId: 1, checkId: 0 }]);
+  assert.deepEqual((denied as any).checks, [
+    { source: "block", blockId: 1, checkId: 0, rule: 'check if resource("file1")' },
+  ]);
 });
 
 test("attenuation chains, and every block keeps its own symbols", () => {
@@ -150,8 +152,13 @@ test("the sample corpus can be rebuilt from source and gives the same answers", 
           (got as any).checks,
           want.Err.FailedLogic.Unauthorized.checks.map((c: any) =>
             "Block" in c
-              ? { source: "block", blockId: c.Block.block_id, checkId: c.Block.check_id }
-              : { source: "authorizer", checkId: c.Authorizer.check_id },
+              ? {
+                  source: "block",
+                  blockId: c.Block.block_id,
+                  checkId: c.Block.check_id,
+                  rule: c.Block.rule,
+                }
+              : { source: "authorizer", checkId: c.Authorizer.check_id, rule: c.Authorizer.rule },
           ),
           `${tc.filename} failed checks`,
         );
@@ -220,7 +227,7 @@ test("variables are written as interned names, so a block may use any number of 
   assert.deepEqual(failed, {
     kind: "unauthorized",
     policy: { allow: 0 },
-    checks: [{ source: "block", blockId: 0, checkId: 1 }],
+    checks: [{ source: "block", blockId: 0, checkId: 1, rule: "check if g($k)" }],
   });
   assert.deepEqual(
     [...loaded.blocks[0].checks[1].queries[0].body[0].terms].map(

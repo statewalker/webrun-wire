@@ -20,6 +20,55 @@ import {
 
 export class ParseError extends Error {}
 
+/**
+ * A value bound to a `{name}` parameter. It becomes a TERM, never source text,
+ * so no string can change the shape of the program it is bound into.
+ */
+export type ParamValue =
+  | string
+  | number
+  | bigint
+  | boolean
+  | null
+  | Date
+  | Uint8Array
+  | readonly ParamValue[]
+  | ReadonlySet<ParamValue>;
+
+export type Params = Readonly<Record<string, ParamValue>>;
+
+const I64_MIN = -(2n ** 63n);
+const I64_MAX = 2n ** 63n - 1n;
+
+function paramTerm(name: string, value: ParamValue): Term {
+  if (typeof value === "string") return { t: "str", v: value };
+  if (typeof value === "boolean") return { t: "bool", v: value };
+  if (value === null) return { t: "null" };
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value))
+      throw new ParseError(`parameter {${name}}: ${value} is not a safe integer`);
+    return { t: "int", v: BigInt(value) };
+  }
+  if (typeof value === "bigint") {
+    if (value < I64_MIN || value > I64_MAX)
+      throw new ParseError(`parameter {${name}}: ${value} does not fit in i64`);
+    return { t: "int", v: value };
+  }
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    if (Number.isNaN(ms)) throw new ParseError(`parameter {${name}}: invalid date`);
+    return { t: "date", v: BigInt(Math.floor(ms / 1000)) };
+  }
+  if (value instanceof Uint8Array) return { t: "bytes", v: value };
+  if (Array.isArray(value)) return { t: "array", v: value.map((x) => paramTerm(name, x)) };
+  if (value instanceof Set)
+    return { t: "set", v: normalizeSet([...value].map((x) => paramTerm(name, x))) };
+  throw new ParseError(`parameter {${name}}: no Datalog term for this value`);
+}
+
+/** `{name}` in term position; `{true}`, `{false}` and `{null}` stay one-element sets */
+const PARAMETER = /^\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/;
+
 export type Statement =
   | { k: "fact"; fact: Fact }
   | { k: "rule"; rule: Rule }
@@ -33,11 +82,18 @@ const NAME_CHAR = /[\p{L}\p{N}_:]/u;
 export class Parser {
   private i = 0;
   private readonly vars: Map<string, number>;
+  private readonly usedParams = new Set<string>();
   constructor(
     private readonly src: string,
     vars?: Map<string, number>,
+    private readonly params: Params = {},
   ) {
     this.vars = vars ?? new Map();
+  }
+
+  /** names in `params` that the source never referred to */
+  unusedParameters(): string[] {
+    return Object.keys(this.params).filter((name) => !this.usedParams.has(name));
   }
 
   /** id -> name, for printing rules back out */
@@ -188,7 +244,7 @@ export class Parser {
       return { t: "bytes", v: bytes };
     }
     if (this.peek("[")) return this.array(allowVariables);
-    if (this.peek("{")) return this.setOrMap(allowVariables);
+    if (this.peek("{")) return this.parameter() ?? this.setOrMap(allowVariables);
 
     const m = /^-?\d+/.exec(this.src.slice(this.i));
     if (m) {
@@ -198,6 +254,16 @@ export class Parser {
     throw new ParseError(
       `unexpected term at offset ${this.i}: ${this.src.slice(this.i, this.i + 20)}`,
     );
+  }
+
+  private parameter(): Term | null {
+    const m = PARAMETER.exec(this.src.slice(this.i));
+    if (!m || m[1] === "true" || m[1] === "false" || m[1] === "null") return null;
+    const name = m[1];
+    if (!Object.hasOwn(this.params, name)) throw new ParseError(`unbound parameter {${name}}`);
+    this.i += m[0].length;
+    this.usedParams.add(name);
+    return paramTerm(name, this.params[name]);
   }
 
   private array(allowVariables: boolean): Term {
@@ -603,4 +669,5 @@ export class Parser {
   }
 }
 
-export const parse = (src: string): Statement[] => new Parser(src).parse();
+export const parse = (src: string, params?: Params): Statement[] =>
+  new Parser(src, undefined, params).parse();

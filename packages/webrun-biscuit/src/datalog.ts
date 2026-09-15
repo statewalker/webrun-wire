@@ -699,6 +699,16 @@ export class World {
     }
   }
 
+  /** every distinct fact `rule` derives from the facts `trusted` can see */
+  query(rule: Rule, trusted: TrustedOrigins): Predicate[] {
+    const seen = new Map<string, Predicate>();
+    for (const [, fact] of this.apply(rule, this.visible(trusted), AUTHORIZER)) {
+      const key = factKey(fact);
+      if (!seen.has(key)) seen.set(key, fact.predicate);
+    }
+    return [...seen.values()];
+  }
+
   /** `check if` / policies: does at least one combination match? */
   queryMatch(rule: Rule, origin: number, trusted: TrustedOrigins): boolean {
     for (const _ of this.apply(rule, this.visible(trusted), origin)) return true;

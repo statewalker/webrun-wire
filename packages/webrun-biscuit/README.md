@@ -49,6 +49,59 @@ const result = verified.authorize('operation("read"); allow if user("alice");');
 type system then prevents authorizing a token whose signature chain was never checked, which is the
 mistake worth designing against.
 
+### Parameters: never splice a value into Datalog
+
+Anything that did not come from you — a user id, a request path, a role name —
+goes in as a `{name}` parameter. It is bound as a **term**, so no string can
+change the shape of the program:
+
+```ts
+const token = Biscuit.build(root.secretKey, "user({id});", { params: { id: userId } });
+verified.authorize("resource({path});\nallow if user($u), owner($u, {path});", {
+  params: { path: url.pathname },
+});
+```
+
+Strings, safe-integer numbers, `bigint`, booleans, `null`, `Date`, `Uint8Array`,
+arrays and `Set`s are accepted. An unbound parameter and an unused one are both a
+`ParseError`, as in the reference; `{true}`, `{false}` and `{null}` remain one-element
+sets.
+
+### Querying the evaluated world
+
+`evaluate` is `authorize` that keeps the world, so facts can be read back — the
+reference's `Authorizer::query`. A query sees what the authorizer sees (authority
+block and authorizer facts) unless it says `trusting`, so an attenuation block cannot
+inject what it reads:
+
+```ts
+const ev = verified.evaluate("allow if true;");
+ev.result;                                   // { kind: "ok", policy: 0 }
+ev.query("claim($s) <- subject($s)");        // [{ name: "claim", terms: [{ t: "str", v: "alice" }] }]
+```
+
+Pass `null` instead of a token to decide from the authorizer's own facts and rules:
+
+```ts
+import { evaluate } from "@statewalker/webrun-biscuit";
+evaluate(null, 'role("admin");\ncapability("x") <- role("admin");').query("c($c) <- capability($c)");
+```
+
+A failed check carries its rule text, printed exactly as the reference prints it:
+`{ source: "block", blockId: 0, checkId: 0, rule: "check if bound($k), connection_peer($k)" }`.
+
+### Faster verification: `verifyAsync`
+
+`verify` is synchronous and pure JS. `verifyAsync` checks Ed25519 signatures with the
+platform's WebCrypto where it has it — Node, current browsers, Workers — which is about
+eight times faster (0.25 ms against 1.9 ms per token in Node 24). secp256r1, and any
+runtime without WebCrypto Ed25519, fall back to the same pure-JS code, and both paths
+consume one list of signature checks, so neither can skip a check the other makes.
+
+```ts
+const verified = await Biscuit.fromBase64(token).verifyAsync(root.publicKey);
+```
+
 ### Examples
 
 secp256r1 works the same way, with the algorithm passed at both ends:
@@ -144,10 +197,10 @@ not to change the verdict.
 ### A green suite is not the claim; a suite that can fail is
 
 ```sh
-pnpm test          # the main suite, 156 tests
-pnpm test:cross    # against the reference implementation, 55 tests
+pnpm test          # the main suite, 180 tests
+pnpm test:cross    # against the reference implementation, 56 tests
 pnpm test:all      # both
-pnpm mutate        # inject 10 known defects, require the suite to catch each
+pnpm mutate        # inject 13 known defects, require the suite to catch each
 pnpm build         # dist/ plus declarations
 ```
 
@@ -163,12 +216,15 @@ pnpm build         # dist/ plus declarations
 | `08-hardening` | property round-trips, mutation/truncation fuzzing, join scaling |
 | `09-world-snapshot` | the post-run world per origin, against the official snapshots |
 | `10-versions` | version bounds, feature gates, rejection of the deprecated v1/v2 corpora |
+| `11-parameters` | `{name}` binding, hostile strings, unbound and unused parameters |
+| `12-evaluate` | queries, their scope, token-less evaluation, failed-check rule text |
 
-`scripts/mutate.mjs` is the check on all of it. It injects ten defects — a lenient protobuf decoder,
+`scripts/mutate.mjs` is the check on all of it. It injects thirteen defects — a lenient protobuf decoder,
 wrapping i64 arithmetic, `check all` degraded to `check if`, a universally trusting authorizer, `deny`
-treated as `allow`, unchecked seal signatures, missing version bounds, and more — and requires each to
-break at least one test. A surviving mutation is a hole in the tests, not a success. All ten are
-caught. Two of them were **not** caught when the harness was first written: nothing verified a forged
+treated as `allow`, unchecked seal signatures, an async verifier that ignores WebCrypto's verdict, a
+query that can read an attenuation block's facts, silently ignored parameters, missing version bounds,
+and more — and requires each to break at least one test. A surviving mutation is a hole in the tests,
+not a success. All thirteen are caught. Two of them were **not** caught when the harness was first written: nothing verified a forged
 seal signature, and nothing exercised a matching `deny` policy.
 
 Each mutation's `find` string is a literal excerpt of the source, and must match exactly once. That is
@@ -240,9 +296,12 @@ only `null` and sets containing `null`, so a block using arrays may legally decl
 like an upstream oversight and is mirrored deliberately, because matching the reference matters more
 than being right here. `03-interop-chains` confirms it empirically.
 
-**Not implemented:** authorizer snapshots (`AuthorizerSnapshot` / `SnapshotBlock`); a `query(rule)` API
-for pulling facts out of an evaluated world, where `authorizeDetailed` exposes the whole world more
-coarsely; a revocation-checking helper, since revocation ids are exposed but comparing them against a
+**WebCrypto Ed25519 is not ZIP-215.** `verifyAsync` inherits the platform's verification rules, and
+`verify` those of `@noble/curves`. They agree on every honestly produced signature and on the whole
+corpus; they may differ only on deliberately malformed encodings, which neither accepts as a forgery.
+
+**Not implemented:** authorizer snapshots (`AuthorizerSnapshot` / `SnapshotBlock`); run limits on
+`query` (the evaluation it reads from is bounded, the query itself is not); a revocation-checking helper, since revocation ids are exposed but comparing them against a
 list is left to the caller; and wire-compatible third-party blocks — `thirdPartyRequest()` returns a
 plain object rather than the `ThirdPartyBlockRequest` protobuf message, so our own end-to-end
 third-party flow works and is tested, but the cross-implementation one does not.

@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import fs from "node:fs";
-import { revocationIds, verifyToken } from "../src/crypto.js";
+import { revocationIds, verifyToken, verifyTokenAsync } from "../src/crypto.js";
 import { decodeBiscuit } from "../src/proto.js";
 
 const dir = new URL("../samples/", import.meta.url).pathname;
@@ -29,6 +29,23 @@ test("signature chain verification matches expectations for all 38 samples", () 
       ok = false;
     }
     assert.equal(ok, !EXPECT_FAIL.has(tc.filename), `${tc.filename} verification`);
+    checked++;
+  }
+  assert.equal(checked, 38);
+});
+
+test("async verification (WebCrypto where available) agrees with sync on all 38 samples", async () => {
+  let checked = 0;
+  for (const tc of samples.testcases) {
+    const raw = new Uint8Array(fs.readFileSync(dir + tc.filename));
+    let ok: boolean;
+    try {
+      await verifyTokenAsync(decodeBiscuit(raw), rootKey);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    assert.equal(ok, !EXPECT_FAIL.has(tc.filename), `${tc.filename} async verification`);
     checked++;
   }
   assert.equal(checked, 38);
