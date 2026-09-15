@@ -52,7 +52,13 @@ class SymbolWriter {
   constructor(
     private readonly known: string[] = [],
     private readonly knownKeys: string[] = [],
+    private readonly varNames: ReadonlyMap<number, string> = new Map(),
   ) {}
+
+  /** A variable's wire id is the symbol index of its NAME, not the parser's local id. */
+  variable(id: number): number {
+    return this.insert(this.varNames.get(id) ?? String(id));
+  }
 
   insert(s: string): number {
     const d = DEFAULT_SYMBOLS.indexOf(s);
@@ -85,7 +91,7 @@ const parseKeyString = (key: string): PublicKeyMsg => {
 function toTerm(t: Term, w: SymbolWriter): TermMsg {
   switch (t.t) {
     case "var":
-      return { kind: "variable", value: t.v };
+      return { kind: "variable", value: w.variable(t.v) };
     case "int":
       return { kind: "integer", value: t.v };
     case "str":
@@ -130,7 +136,11 @@ const toOps = (ops: Op[], w: SymbolWriter): OpMsg[] =>
       case "binary":
         return { kind: "binary", op: op.op, ffiName: op.ffi ? w.insert(op.ffi) : undefined };
       case "closure":
-        return { kind: "closure", params: op.params, ops: toOps(op.ops, w) };
+        return {
+          kind: "closure",
+          params: op.params.map((p) => w.variable(p)),
+          ops: toOps(op.ops, w),
+        };
       default:
         // unreachable for a well-typed Op; loud rather than `undefined`
         throw new Error(`unknown expression op kind ${(op as { kind: string }).kind}`);
@@ -158,6 +168,8 @@ export interface BlockContent {
   rules: Rule[];
   checks: Check[];
   scopes: Scope[];
+  /** variable id -> name; ids without a name are written as their decimal id */
+  varNames?: ReadonlyMap<number, string>;
 }
 
 export function buildBlockMsg(
@@ -166,7 +178,7 @@ export function buildBlockMsg(
   knownKeys: string[] = [],
   minVersion = 0,
 ): BlockMsg {
-  const w = new SymbolWriter(knownSymbols, knownKeys);
+  const w = new SymbolWriter(knownSymbols, knownKeys, content.varNames);
   const facts = content.facts.map((f) => toPredicate(f.predicate, w));
   const rules = content.rules.map((r) => toRule(r, w));
   const checks = content.checks.map((c) => ({
@@ -189,7 +201,13 @@ const contentFromCode = (code: string): BlockContent => {
   const parsed = parseAuthorizer(code);
   if (parsed.policies.length)
     throw new BuilderError("allow/deny policies belong to the authorizer, not to a block");
-  return { facts: parsed.facts, rules: parsed.rules, checks: parsed.checks, scopes: parsed.scopes };
+  return {
+    facts: parsed.facts,
+    rules: parsed.rules,
+    checks: parsed.checks,
+    scopes: parsed.scopes,
+    varNames: parsed.varNames,
+  };
 };
 
 /* ---------------------------------------------------- accumulated tables */
