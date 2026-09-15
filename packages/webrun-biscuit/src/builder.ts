@@ -30,6 +30,7 @@ import {
   type ScopeMsg,
   type TermMsg,
 } from "./proto.js";
+import type { Params } from "./parser.js";
 import { DATALOG_3_2, requiredVersion } from "./version.js";
 
 const SIGNATURE_VERSION = 1;
@@ -52,7 +53,13 @@ class SymbolWriter {
   constructor(
     private readonly known: string[] = [],
     private readonly knownKeys: string[] = [],
+    private readonly varNames: ReadonlyMap<number, string> = new Map(),
   ) {}
+
+  /** A variable's wire id is the symbol index of its NAME, not the parser's local id. */
+  variable(id: number): number {
+    return this.insert(this.varNames.get(id) ?? String(id));
+  }
 
   insert(s: string): number {
     const d = DEFAULT_SYMBOLS.indexOf(s);
@@ -85,7 +92,7 @@ const parseKeyString = (key: string): PublicKeyMsg => {
 function toTerm(t: Term, w: SymbolWriter): TermMsg {
   switch (t.t) {
     case "var":
-      return { kind: "variable", value: t.v };
+      return { kind: "variable", value: w.variable(t.v) };
     case "int":
       return { kind: "integer", value: t.v };
     case "str":
@@ -130,7 +137,11 @@ const toOps = (ops: Op[], w: SymbolWriter): OpMsg[] =>
       case "binary":
         return { kind: "binary", op: op.op, ffiName: op.ffi ? w.insert(op.ffi) : undefined };
       case "closure":
-        return { kind: "closure", params: op.params, ops: toOps(op.ops, w) };
+        return {
+          kind: "closure",
+          params: op.params.map((p) => w.variable(p)),
+          ops: toOps(op.ops, w),
+        };
       default:
         // unreachable for a well-typed Op; loud rather than `undefined`
         throw new Error(`unknown expression op kind ${(op as { kind: string }).kind}`);
@@ -158,6 +169,8 @@ export interface BlockContent {
   rules: Rule[];
   checks: Check[];
   scopes: Scope[];
+  /** variable id -> name; ids without a name are written as their decimal id */
+  varNames?: ReadonlyMap<number, string>;
 }
 
 export function buildBlockMsg(
@@ -166,7 +179,7 @@ export function buildBlockMsg(
   knownKeys: string[] = [],
   minVersion = 0,
 ): BlockMsg {
-  const w = new SymbolWriter(knownSymbols, knownKeys);
+  const w = new SymbolWriter(knownSymbols, knownKeys, content.varNames);
   const facts = content.facts.map((f) => toPredicate(f.predicate, w));
   const rules = content.rules.map((r) => toRule(r, w));
   const checks = content.checks.map((c) => ({
@@ -185,11 +198,17 @@ export function buildBlockMsg(
   };
 }
 
-const contentFromCode = (code: string): BlockContent => {
-  const parsed = parseAuthorizer(code);
+const contentFromCode = (code: string, params?: Params): BlockContent => {
+  const parsed = parseAuthorizer(code, params);
   if (parsed.policies.length)
     throw new BuilderError("allow/deny policies belong to the authorizer, not to a block");
-  return { facts: parsed.facts, rules: parsed.rules, checks: parsed.checks, scopes: parsed.scopes };
+  return {
+    facts: parsed.facts,
+    rules: parsed.rules,
+    checks: parsed.checks,
+    scopes: parsed.scopes,
+    varNames: parsed.varNames,
+  };
 };
 
 /* ---------------------------------------------------- accumulated tables */
@@ -216,6 +235,8 @@ export interface BuildOptions {
   /** supply a next keypair instead of generating one (tests, determinism) */
   nextKeypair?: Keypair;
   algorithm?: 0 | 1;
+  /** values for `{name}` parameters in the block code */
+  params?: Params;
 }
 
 /** Mint a new token whose authority block holds `code`. */
@@ -225,7 +246,7 @@ export function buildToken(
   options: BuildOptions = {},
 ): Uint8Array {
   const algorithm = options.algorithm ?? 0;
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, options.params) : code;
   const blockBytes = encodeBlock(buildBlockMsg(content));
   const next = options.nextKeypair ?? generateKeypair(algorithm);
   const nextKey: PublicKeyMsg = { algorithm, key: next.publicKey };
@@ -257,7 +278,7 @@ export function attenuate(
   const currentAlgorithm = previous.nextKey.algorithm;
 
   const tables = knownTables(token);
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, options.params) : code;
   const blockBytes = encodeBlock(buildBlockMsg(content, tables.symbols, tables.keys));
 
   const next = options.nextKeypair ?? generateKeypair(algorithm);
@@ -312,8 +333,9 @@ export function thirdPartyBlock(
   externalSecret: Uint8Array,
   code: string | BlockContent,
   algorithm: 0 | 1 = 0,
+  params?: Params,
 ): ThirdPartyResponse {
-  const content = typeof code === "string" ? contentFromCode(code) : code;
+  const content = typeof code === "string" ? contentFromCode(code, params) : code;
   // a third-party block carries its own symbol table, so it starts from empty,
   // and third-party blocks themselves require datalog v3.2+
   const blockBytes = encodeBlock(buildBlockMsg(content, [], [], DATALOG_3_2));

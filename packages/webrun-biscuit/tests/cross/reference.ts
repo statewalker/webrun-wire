@@ -141,7 +141,7 @@ const strip = (s: string): string =>
 export interface Outcome {
   kind: "ok" | "unauthorized" | "noMatchingPolicy" | "format" | "other";
   policy?: number;
-  checks?: { source: "authorizer" | "block"; blockId?: number; checkId: number }[];
+  checks?: { source: "authorizer" | "block"; blockId?: number; checkId: number; rule: string }[];
   detail?: string;
 }
 
@@ -197,6 +197,15 @@ export function normalizeError(thrown: unknown): Outcome {
 const normalizeChecks = (checks: any[]): Outcome["checks"] =>
   checks.map((c) =>
     "Block" in c
-      ? { source: "block" as const, blockId: c.Block.block_id, checkId: c.Block.check_id }
-      : { source: "authorizer" as const, checkId: c.Authorizer.check_id },
+      ? {
+          source: "block" as const,
+          blockId: c.Block.block_id,
+          checkId: c.Block.check_id,
+          rule: c.Block.rule,
+        }
+      : { source: "authorizer" as const, checkId: c.Authorizer.check_id, rule: c.Authorizer.rule },
   );
+
+/** Failed checks of either implementation's result, for a field-by-field comparison. */
+export const checksOf = (outcome: { kind: string; checks?: unknown }): unknown =>
+  outcome.kind === "unauthorized" || outcome.kind === "noMatchingPolicy" ? outcome.checks : undefined;

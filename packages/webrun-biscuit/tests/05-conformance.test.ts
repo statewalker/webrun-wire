@@ -63,8 +63,13 @@ function expected(result: any): {
 function normalizeChecks(checks: any[]): FailedCheck[] {
   return checks.map((c) =>
     "Block" in c
-      ? { source: "block" as const, blockId: c.Block.block_id, checkId: c.Block.check_id }
-      : { source: "authorizer" as const, checkId: c.Authorizer.check_id },
+      ? {
+          source: "block" as const,
+          blockId: c.Block.block_id,
+          checkId: c.Block.check_id,
+          rule: c.Block.rule,
+        }
+      : { source: "authorizer" as const, checkId: c.Authorizer.check_id, rule: c.Authorizer.rule },
   );
 }
 

@@ -33,9 +33,16 @@ const MUTATIONS = [
   {
     name: "crypto/seal-unchecked",
     file: "src/crypto.ts",
-    find: '    if (!verifySignature(currentKey, sealPayloadV0(last), token.proof.value))\n      throw new SignatureError("invalid seal signature");',
-    replace: "    void last;",
+    find: '  checks.push({\n    key: currentKey,\n    payload: sealPayloadV0(last),\n    signature: token.proof.value,\n    error: "invalid seal signature",\n  });',
+    replace: "  void last;",
     note: "accepts any seal signature on a sealed token",
+  },
+  {
+    name: "crypto/async-ignores-verdicts",
+    file: "src/crypto.ts",
+    find: "    if (!ok) throw new SignatureError(checks[i].error);",
+    replace: "    void ok;",
+    note: "verifyAsync accepts a token whose signatures WebCrypto rejected",
   },
   {
     name: "datalog/overflow-wraps",
@@ -79,6 +86,20 @@ const MUTATIONS = [
     find: '        : "allow" in policyResult && errors.length === 0',
     replace: '        : "allow" in policyResult',
     note: "a matching allow policy wins even when checks failed",
+  },
+  {
+    name: "authorizer/query-sees-every-block",
+    file: "src/authorizer.ts",
+    find: "      const trusted = trustedOriginsFromScopes(rule.scopes, authorizerTrusted, AUTHORIZER, keys);",
+    replace: "      const trusted = new TrustedOrigins([AUTHORIZER, ...token.blocks.keys()]);",
+    note: "a query reads facts an attenuation block asserted — claims can be forged by appending",
+  },
+  {
+    name: "authorizer/unused-parameters-accepted",
+    file: "src/authorizer.ts",
+    find: "  if (unused.length > 0)\n    throw new ParseError(",
+    replace: "  if (false)\n    throw new ParseError(",
+    note: "a parameter the code never names is silently ignored — a typo binds nothing",
   },
   {
     name: "version/no-bounds",

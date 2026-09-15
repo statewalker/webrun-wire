@@ -15,7 +15,13 @@ import { authorize, loadToken } from "../../src/authorizer.js";
 import { toBase64 } from "../../src/base64.js";
 import { attenuate, buildToken, generateKeypair, sealToken } from "../../src/builder.js";
 import { describeProgram, type Program, randomProgram, rng } from "./generator.js";
-import { addCode, loadReference, type Reference, referenceOutcome } from "./reference.js";
+import {
+  addCode,
+  checksOf,
+  loadReference,
+  type Reference,
+  referenceOutcome,
+} from "./reference.js";
 
 const ref: Reference | null = await loadReference();
 const noReference = !ref;
@@ -105,6 +111,11 @@ for (const algorithm of ALGORITHMS) {
             theirs.policy,
             `policy index\n${describeProgram(program, seed, algorithm.name)}`,
           );
+        assert.deepStrictEqual(
+          checksOf(ours),
+          checksOf(theirs),
+          `failed checks, rule text included\n${describeProgram(program, seed, algorithm.name)}`,
+        );
 
         assert.deepStrictEqual(
           loadToken(bytes, rootPublic, algorithm.id).revocationIds,
@@ -142,6 +153,11 @@ for (const algorithm of ALGORITHMS) {
             theirs.policy,
             `policy index\n${describeProgram(program, seed, algorithm.name)}`,
           );
+        assert.deepStrictEqual(
+          checksOf(ours),
+          checksOf(theirs),
+          `failed checks, rule text included\n${describeProgram(program, seed, algorithm.name)}`,
+        );
       }
     },
   );
@@ -179,6 +195,11 @@ for (const algorithm of ALGORITHMS) {
           ours.kind,
           theirs.kind,
           `verdict mismatch on a mixed chain — ours ${JSON.stringify(ours)}, reference ${JSON.stringify(theirs)}\n${describeProgram(program, seed, algorithm.name)}`,
+        );
+        assert.deepStrictEqual(
+          checksOf(ours),
+          checksOf(theirs),
+          `failed checks on a mixed chain\n${describeProgram(program, seed, algorithm.name)}`,
         );
       }
     },

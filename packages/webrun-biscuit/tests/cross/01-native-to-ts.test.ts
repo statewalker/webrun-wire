@@ -8,7 +8,13 @@
 import assert from "node:assert";
 import { authorize, loadToken } from "../../src/authorizer.js";
 import { CASES } from "./cases.js";
-import { addCode, loadReference, type Reference, referenceOutcome } from "./reference.js";
+import {
+  addCode,
+  checksOf,
+  loadReference,
+  type Reference,
+  referenceOutcome,
+} from "./reference.js";
 
 const ref: Reference | null = await loadReference();
 const skipped: string[] = [];
@@ -74,6 +80,7 @@ for (const c of CASES) {
     );
     if (result.kind === "ok" && theirResult.kind === "ok")
       assert.equal(result.policy, theirResult.policy, "matched policy index");
+    assert.deepStrictEqual(checksOf(result), checksOf(theirResult), `${c.name}: failed checks`);
     assert.equal(
       result.kind,
       c.expect,
