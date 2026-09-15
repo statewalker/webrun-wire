@@ -76,8 +76,13 @@ export type Statement =
   | { k: "policy"; kind: "allow" | "deny"; queries: Rule[] }
   | { k: "blockScope"; scopes: Scope[] };
 
-const NAME_START = /[\p{L}]/u;
-const NAME_CHAR = /[\p{L}\p{N}_:]/u;
+/**
+ * A predicate or variable name is one or more of `[A-Za-z0-9_:]`, and any of them
+ * may come first — ASCII only. That is what the reference parser accepts, measured
+ * rather than read from the specification (`tests/grammar-cases.ts`): `_m`, `1a`
+ * and `::` are names, `ärger` is not.
+ */
+const NAME_CHAR = /[A-Za-z0-9_:]/;
 
 export class Parser {
   private i = 0;
@@ -155,9 +160,8 @@ export class Parser {
     this.i += k.length;
     return true;
   }
-  /** variable names, unlike predicate names, may start with a digit ($0) */
+  /** the name directly after `$` — `$ x` is not a variable, as in the reference */
   private variableName(): string {
-    this.ws();
     const start = this.i;
     while (this.i < this.src.length && NAME_CHAR.test(this.src[this.i])) this.i++;
     if (this.i === start) throw new ParseError(`expected a variable name at offset ${this.i}`);
@@ -167,10 +171,8 @@ export class Parser {
   private name(): string {
     this.ws();
     const start = this.i;
-    if (this.i >= this.src.length || !NAME_START.test(this.src[this.i]))
-      throw new ParseError(`expected a name at offset ${this.i}`);
-    this.i++;
     while (this.i < this.src.length && NAME_CHAR.test(this.src[this.i])) this.i++;
+    if (this.i === start) throw new ParseError(`expected a name at offset ${this.i}`);
     return this.src.slice(start, this.i);
   }
 
@@ -316,12 +318,12 @@ export class Parser {
   predicate(allowVariables = true): Predicate {
     const name = this.name();
     this.expect("(");
+    // at least one term, as in the reference: `f()` is not a predicate
+    if (this.peek(")")) throw new ParseError(`predicate ${name} takes at least one term`);
     const terms: Term[] = [];
-    if (!this.peek(")")) {
-      do {
-        terms.push(this.term(allowVariables));
-      } while (this.eat(","));
-    }
+    do {
+      terms.push(this.term(allowVariables));
+    } while (this.eat(","));
     this.expect(")");
     return { name, terms };
   }
@@ -602,7 +604,7 @@ export class Parser {
     const save = this.i;
     try {
       this.ws();
-      if (!NAME_START.test(this.src[this.i] ?? "")) return null;
+      if (!NAME_CHAR.test(this.src[this.i] ?? "")) return null;
       const p = this.predicate();
       this.ws();
       const rest = this.src.slice(this.i);

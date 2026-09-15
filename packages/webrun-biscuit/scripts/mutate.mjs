@@ -102,6 +102,20 @@ const MUTATIONS = [
     note: "a parameter the code never names is silently ignored — a typo binds nothing",
   },
   {
+    name: "parser/zero-term-predicates",
+    file: "src/parser.ts",
+    find: "    if (this.peek(\")\")) throw new ParseError(`predicate ${name} takes at least one term`);",
+    replace: "    if (this.eat(\")\")) return { name, terms: [] };",
+    note: "`f()` parses — source the reference rejects, and a check that can never mean anything",
+  },
+  {
+    name: "parser/unicode-names",
+    file: "src/parser.ts",
+    find: "const NAME_CHAR = /[A-Za-z0-9_:]/;",
+    replace: "const NAME_CHAR = /[\\p{L}\\p{N}_:]/u;",
+    note: "non-ASCII names parse, so a program we accept is one the reference cannot read back",
+  },
+  {
     name: "version/no-bounds",
     file: "src/version.ts",
     find: "  if (version < MIN_SCHEMA_VERSION || version > MAX_SCHEMA_VERSION)",

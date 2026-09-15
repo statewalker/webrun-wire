@@ -122,3 +122,31 @@ test("predicates and expressions are told apart in a rule body", () => {
 test("rejects variables in facts", () => {
   assert.throws(() => parse("f($x);"), /variables/);
 });
+
+test("names and arity follow the reference parser", async () => {
+  const { GRAMMAR_CASES } = await import("./grammar-cases.js");
+  const wrong: string[] = [];
+  for (const c of GRAMMAR_CASES) {
+    let accepted = true;
+    try {
+      parse(`${c.source};`);
+    } catch {
+      accepted = false;
+    }
+    if (accepted !== c.accepted)
+      wrong.push(`${JSON.stringify(c.source)}: reference ${c.accepted ? "accepts" : "rejects"}`);
+  }
+  assert.deepStrictEqual(wrong, []);
+});
+
+test("a name that begins with a digit does not swallow a number in an expression", () => {
+  const [st] = parse("check if n($x), $x < 10, 10a(1);");
+  assert.equal(st.k, "check");
+  const q = (st as { check: { queries: { body: { name: string }[]; expressions: unknown[] }[] } })
+    .check.queries[0];
+  assert.deepStrictEqual(
+    q.body.map((p) => p.name),
+    ["n", "10a"],
+  );
+  assert.equal(q.expressions.length, 1);
+});
