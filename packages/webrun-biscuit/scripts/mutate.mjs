@@ -52,6 +52,20 @@ const MUTATIONS = [
     note: "i64 arithmetic wraps instead of failing",
   },
   {
+    name: "datalog/budget-between-iterations",
+    file: "src/datalog.ts",
+    find: '    if ((++this.steps & 1023) === 0 && Date.now() >= this.deadline)\n      throw new ExecutionError("Timeout");',
+    replace: "    this.steps++;",
+    note: "the clock is only read between iterations — one exploding rule or check ignores maxTimeMs",
+  },
+  {
+    name: "datalog/budget-leaks-into-queries",
+    file: "src/authorizer.ts",
+    find: "    world.endBudget();\n",
+    replace: "",
+    note: "a query made after the evaluation is charged against its expired budget and times out",
+  },
+  {
     name: "datalog/check-all-is-any",
     file: "src/datalog.ts",
     find: "        if (!res.v) return false;\n      }\n    }\n    return found;",

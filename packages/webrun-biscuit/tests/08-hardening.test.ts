@@ -139,3 +139,70 @@ test("the run limits are enforced", () => {
     /TooManyFacts/,
   );
 });
+
+/* The budget holds INSIDE an iteration, not only between iterations. A rule
+ * whose join is combinatorial enumerates its whole product in one iteration;
+ * checking the limits only afterwards let a token pin a verifier for seconds
+ * whatever `maxTimeMs` said (measured: 4.8 s against a 50 ms budget). */
+
+const EXPLOSION = (() => {
+  let src = "";
+  for (let i = 0; i < 60; i++) src += `s(${i});`;
+  return `${src}\np($x, $y) <- s($x), s($y);\nq($x, $y) <- p($x, $z), p($z, $y);\nr($x, $y) <- q($x, $z), q($z, $y);`;
+})();
+
+const timed = <T>(run: () => T): [T, number] => {
+  const started = performance.now();
+  const result = run();
+  return [result, performance.now() - started];
+};
+
+test("an exploding rule set stops on its budget, inside the iteration", () => {
+  const root = generateKeypair();
+  const token = loadToken(attenuate(buildToken(root.secretKey, "user(1);"), EXPLOSION), root.publicKey);
+
+  // The fact limit counts DISTINCT facts as they are derived, so it fires as
+  // soon as the world would exceed it rather than after the whole product. Only
+  // the verdict is asserted: how soon depends on how fast the join enumerates,
+  // and the bound a caller relies on is the clock, asserted next.
+  const byFacts = authorize(token, "allow if true;", {
+    limits: { maxFacts: 5_000, maxIterations: 200, maxTimeMs: 60_000 },
+  });
+  assert.deepStrictEqual(byFacts, { kind: "execution", error: "TooManyFacts" });
+
+  // The time limit is honoured mid-iteration too.
+  const [byTime, timeMs] = timed(() =>
+    authorize(token, "allow if true;", {
+      limits: { maxFacts: 10_000_000, maxIterations: 200, maxTimeMs: 50 },
+    }),
+  );
+  assert.deepStrictEqual(byTime, { kind: "execution", error: "Timeout" });
+  assert.ok(timeMs < 1_000, `a 50 ms budget took ${timeMs.toFixed(0)} ms`);
+});
+
+test("an exploding check stops on the time budget, though it derives no facts", () => {
+  let facts = "";
+  for (let i = 0; i < 200; i++) facts += `s(${i});`;
+  // 8 million bindings, none of which is a fact: only the clock can stop it.
+  const code = `${facts}\ncheck if s($a), s($b), s($c), $a + $b + $c < 0;\nallow if true;`;
+  const [result, ms] = timed(() =>
+    authorize(null, code, { limits: { maxFacts: 1_000, maxIterations: 100, maxTimeMs: 50 } }),
+  );
+  assert.deepStrictEqual(result, { kind: "execution", error: "Timeout" });
+  assert.ok(ms < 1_000, `a 50 ms budget took ${ms.toFixed(0)} ms`);
+});
+
+test("a query made after the evaluation is not charged against its expired budget", async () => {
+  const { evaluate } = await import("../src/authorizer.js");
+  // Enough facts that the query walks past the clock's polling interval
+  // (every 1024 candidates): with one fact, a leaked deadline is never read.
+  let facts = "";
+  for (let i = 0; i < 3_000; i++) facts += `role(${i});`;
+  const ev = evaluate(null, facts, { limits: { maxFacts: 10_000, maxIterations: 10, maxTimeMs: 1 } });
+  assert.equal(ev.result.kind, "noMatchingPolicy");
+  const until = Date.now() + 5;
+  while (Date.now() < until) {
+    /* let the evaluation's 1 ms budget lapse */
+  }
+  assert.equal(ev.query("x($r) <- role($r)").length, 3_000);
+});

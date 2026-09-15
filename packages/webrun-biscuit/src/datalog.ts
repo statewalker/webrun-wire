@@ -570,6 +570,8 @@ function* combine(
   facts: FactIndex,
   bindings: Bindings,
   variables: Set<number>,
+  /** called once per candidate fact: the join is where a budget has to bite */
+  tick: () => void,
 ): Generator<[Origin, Bindings]> {
   if (predicates.length === 0) {
     for (const v of variables) if (!bindings.has(v)) return;
@@ -578,6 +580,7 @@ function* combine(
   }
   const [head, ...rest] = predicates;
   for (const [origin, fact] of facts.get(`${head.name}/${head.terms.length}`) ?? []) {
+    tick();
     if (!matchPredicate(head, fact.predicate)) continue;
     const next = new Map(bindings);
     let ok = true;
@@ -592,7 +595,7 @@ function* combine(
       }
     }
     if (!ok) continue;
-    for (const [subOrigin, result] of combine(rest, facts, next, variables))
+    for (const [subOrigin, result] of combine(rest, facts, next, variables, tick))
       yield [subOrigin.union(origin), result];
   }
 }
@@ -605,6 +608,25 @@ export class World {
   iterations = 0;
   private generation = 0;
   private indexCache = new Map<string, { generation: number; index: FactIndex }>();
+  /** wall-clock budget of the evaluation in progress; Infinity outside one */
+  private deadline = Number.POSITIVE_INFINITY;
+  private steps = 0;
+
+  /**
+   * The time limit, enforced where the work is. Checking only between
+   * iterations let one combinatorial rule — or one check that derives nothing —
+   * run for seconds whatever `maxTimeMs` said. Polled every 1024 candidate
+   * facts, so the clock costs nothing measurable.
+   */
+  private readonly tick = (): void => {
+    if ((++this.steps & 1023) === 0 && Date.now() >= this.deadline)
+      throw new ExecutionError("Timeout");
+  };
+
+  /** Close the budget: queries made after an evaluation are not charged against it. */
+  endBudget(): void {
+    this.deadline = Number.POSITIVE_INFINITY;
+  }
 
   addFact(origin: Origin, fact: Fact): void {
     let bucket = this.facts.get(origin.key);
@@ -649,13 +671,31 @@ export class World {
 
   /** naive fixpoint: apply every rule until no new fact appears */
   run(limits: RunLimits = DEFAULT_LIMITS): void {
+    // The budget stays open after `run` returns, so the checks and policies the
+    // authorizer evaluates next are bounded by it too; `endBudget` closes it.
     const deadline = Date.now() + limits.maxTimeMs;
+    this.deadline = deadline;
     let index = 0;
     for (;;) {
       const generated: [Origin, Fact][] = [];
+      // Distinct facts this iteration adds. Counted as they are derived, so
+      // `maxFacts` fires the moment the world WOULD exceed it — the verdict the
+      // end-of-iteration check reaches, without enumerating the rest of the
+      // product first. On the last permitted iteration the reference reports
+      // TooManyIterations ahead of TooManyFacts, so the early exit stands aside.
+      const fresh = new Set<string>();
+      const base = this.factCount();
+      const lastIteration = index + 1 === limits.maxIterations;
       for (const { origin, trusted, rule } of this.rules) {
         const facts = this.visible(trusted);
-        for (const [o, f] of this.apply(rule, facts, origin)) generated.push([o, f]);
+        for (const [o, f] of this.apply(rule, facts, origin)) {
+          generated.push([o, f]);
+          const key = factKey(f);
+          if (this.facts.get(o.key)?.items.has(key)) continue;
+          fresh.add(`${o.key}|${key}`);
+          if (!lastIteration && base + fresh.size >= limits.maxFacts)
+            throw new ExecutionError("TooManyFacts");
+        }
       }
       const before = this.factCount();
       for (const [o, f] of generated) this.addFact(o, f);
@@ -671,7 +711,7 @@ export class World {
 
   *apply(rule: Rule, facts: FactIndex, ruleOrigin: number): Generator<[Origin, Fact]> {
     const variables = variablesOf(rule);
-    for (const [origin, bindings] of combine(rule.body, facts, new Map(), variables)) {
+    for (const [origin, bindings] of combine(rule.body, facts, new Map(), variables, this.tick)) {
       let pass = true;
       for (const ops of rule.expressions) {
         const res = evaluateExpression(ops, bindings, this.externs);
@@ -719,7 +759,13 @@ export class World {
   queryMatchAll(rule: Rule, trusted: TrustedOrigins): boolean {
     const variables = variablesOf(rule);
     let found = false;
-    for (const [, bindings] of combine(rule.body, this.visible(trusted), new Map(), variables)) {
+    for (const [, bindings] of combine(
+      rule.body,
+      this.visible(trusted),
+      new Map(),
+      variables,
+      this.tick,
+    )) {
       found = true;
       for (const ops of rule.expressions) {
         const res = evaluateExpression(ops, bindings, this.externs);

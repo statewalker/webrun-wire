@@ -16,6 +16,16 @@
   - **`LICENSE` is in the package.** 0.2.0 was published without it, because the file
     lived only at the repository root.
 
+- The run budget holds inside an evaluation, not only between fixpoint iterations.
+
+  Limits were checked after each iteration, so one combinatorial rule enumerated its
+  whole product first — and a check or policy, which derives no facts, was not bounded at
+  all. A token could hold a verifier for seconds whatever `maxTimeMs` said: measured,
+  4.8 s against a 50 ms budget, and 12 s for an exploding check. Now the clock is polled
+  inside the join (rules, checks and policies), and `maxFacts` counts distinct facts as
+  they are derived — the same verdicts, reached without enumerating the rest. A `query`
+  made after an evaluation is not charged against that evaluation's expired budget.
+
 ## 0.2.0
 
 ### Minor Changes
