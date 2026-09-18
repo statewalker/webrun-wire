@@ -136,6 +136,21 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
     expect(msgpackCodec.read(event(cut))).toBeUndefined();
   });
 
+  it("drops every truncation of a frame carrying bytes, never a shortened payload", () => {
+    // Before the decoder checked bounds, a frame cut inside its `bin` payload decoded to a
+    // valid-looking envelope whose payload was merely shorter.
+    const port = recordingPort();
+    msgpackCodec.post(port, {
+      type: "message",
+      id: 3,
+      payload: new Uint8Array(40).fill(7),
+    });
+    const whole = port.sent[0] as Uint8Array;
+    for (let length = 1; length < whole.byteLength; length++) {
+      expect(msgpackCodec.read(event(whole.slice(0, length))), `cut at ${length}`).toBeUndefined();
+    }
+  });
+
   it("ignores well-formed msgpack that is not an envelope", () => {
     const port = recordingPort();
     // Valid msgpack, wrong shape — a shared transport's own traffic.
@@ -144,8 +159,8 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
   });
 
   it("accepts an ArrayBuffer and an offset view, not only a tight Uint8Array", () => {
-    // A transport pump may hand over either. Measured: @ygoe/msgpack decodes
-    // an offset subarray correctly, so no defensive copy is needed — but the
+    // A transport pump may hand over either. The decoder reads an offset
+    // subarray correctly, so no defensive copy is needed — but the
     // codec must still accept the shapes.
     const port = recordingPort();
     msgpackCodec.post(port, { type: "message", id: 8, payload: { a: 1 } });

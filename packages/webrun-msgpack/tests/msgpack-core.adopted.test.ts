@@ -14,7 +14,7 @@
  * behaviour and says so.
  */
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { deserialize, serialize } from "../src/msgpack-core.js";
 
 function roundTrip(data: unknown): unknown {
@@ -414,6 +414,67 @@ describe("msgpackr test.js: basic tests", () => {
 
   it("unpackMultiple", () => {
     expect(deserialize(bytes(1, 2, 3, 4), { multiple: true })).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("msgpack-javascript edge-cases.test.ts: insufficient data", () => {
+  it("throws a RangeError for an array missing an element", () => {
+    expect(() =>
+      deserialize(
+        bytes(
+          0x92, // fixarray size=2
+          0xc0, // nil
+        ),
+      ),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("msgpackr test-incomplete.js: encode and decode tests with partial values", () => {
+  // msgpackr asserts an error flagged `incomplete`; the equivalent here is a RangeError for every
+  // proper prefix of the encoding, where upstream msgpack.js returned NaN for a cut integer, a
+  // short view for a cut bin, and threw assorted TypeErrors elsewhere.
+  const tests: Record<string, unknown> = {
+    string: "interesting string",
+    number: 12345,
+    float: 1.5,
+    buffer: new TextEncoder().encode("hello world"),
+    date: new Date(1556636810389),
+    array: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "many-strings": Array.from({ length: 100 }, (_, i) => `test-data-${i}`),
+    object: { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 },
+    "multibyte string": "ᾐᾑᾒ 🐀",
+    "large int": 2 ** 40,
+  };
+  for (const [label, testData] of Object.entries(tests)) {
+    it(label, () => {
+      const encoded = serialize(testData);
+      expect(deserialize(encoded)).toEqual(testData);
+      for (let length = 1; length < encoded.length; length++) {
+        // A fresh copy, so nothing past the cut is reachable through the underlying buffer.
+        const prefix = encoded.slice(0, length);
+        expect(() => deserialize(prefix), `prefix of ${length}/${encoded.length}`).toThrow(
+          RangeError,
+        );
+      }
+    });
+  }
+
+  it("does not read past the end of a view into a larger buffer", () => {
+    // The view ends mid-float; the bytes after it in the buffer must not be read.
+    const backing = Uint8Array.from([0xcb, 0x40, 0x09, 0x1e, 0xb8, 0x51, 0xeb, 0x85, 0x1f]);
+    expect(() => deserialize(backing.subarray(0, 5))).toThrow(RangeError);
+  });
+
+  it("writes nothing to the console on malformed input", () => {
+    // Upstream called console.debug with the whole input before throwing.
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    try {
+      expect(() => deserialize(bytes(0x92, 0xc0))).toThrow();
+      expect(debug).not.toHaveBeenCalled();
+    } finally {
+      debug.mockRestore();
+    }
   });
 });
 

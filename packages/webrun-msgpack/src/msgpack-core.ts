@@ -360,7 +360,20 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
   }
   return data;
 
+  // Modified from upstream, which read past the end of the input without noticing: a cut integer
+  // came back as NaN, a cut bin as a shorter view, and other cuts threw assorted TypeErrors after
+  // logging the whole input with console.debug. Every read now checks that its bytes are present
+  // and throws a RangeError when they are not, and nothing is logged.
+  function need(size: number): void {
+    if (pos + size > array.length) {
+      throw new RangeError(
+        `Insufficient data: ${size} byte(s) needed at index ${pos} in the MessagePack binary data (length ${array.length}).`,
+      );
+    }
+  }
+
   function read(): unknown {
+    need(1);
     const byte = array[pos++] as number;
     if (byte >= 0x00 && byte <= 0x7f) return byte; // positive fixint
     if (byte >= 0x80 && byte <= 0x8f) return readMap(byte - 0x80); // fixmap
@@ -399,13 +412,13 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
     if (byte === 0xde) return readMap(-1, 2); // map 16
     if (byte === 0xdf) return readMap(-1, 4); // map 32
     if (byte >= 0xe0 && byte <= 0xff) return byte - 256; // negative fixint
-    console.debug("msgpack array:", array);
     throw new Error(
       `Invalid byte value '${byte}' at index ${pos - 1} in the MessagePack binary data (length ${array.length}): Expecting a range of 0 to 255. This is not a byte array.`,
     );
   }
 
   function readInt(size: number): number {
+    need(size);
     let value = 0;
     let first = true;
     while (size-- > 0) {
@@ -425,6 +438,7 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
   }
 
   function readUInt(size: number): number {
+    need(size);
     let value = 0;
     while (size-- > 0) {
       value *= 256;
@@ -434,6 +448,7 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
   }
 
   function readFloat(size: 4 | 8): number {
+    need(size);
     const view = new DataView(array.buffer, pos + array.byteOffset, size);
     pos += size;
     return size === 4 ? view.getFloat32(0, false) : view.getFloat64(0, false);
@@ -441,6 +456,7 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
 
   function readBin(size: number, lengthSize?: number): Uint8Array {
     if (size < 0) size = readUInt(lengthSize as number);
+    need(size);
     const data = array.subarray(pos, pos + size);
     pos += size;
     return data;
@@ -467,6 +483,7 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
 
   function readStr(size: number, lengthSize?: number): string {
     if (size < 0) size = readUInt(lengthSize as number);
+    need(size);
     const start = pos;
     pos += size;
     return decodeUtf8(array, start, size);
