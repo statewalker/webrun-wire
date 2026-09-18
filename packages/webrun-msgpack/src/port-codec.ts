@@ -1,7 +1,5 @@
 import type { PortCodec, PortEnvelope } from "@statewalker/webrun-rpc";
-import msgpack from "@ygoe/msgpack";
-
-const { serialize, deserialize } = msgpack;
+import { deserialize, serialize } from "./msgpack-core.js";
 
 /**
  * Same shape check as `structuredCodec`'s, applied after decoding. A shared

@@ -1,6 +1,4 @@
-import msgpack from "@ygoe/msgpack";
-
-const { serialize, deserialize } = msgpack;
+import { deserialize, serialize } from "./msgpack-core.js";
 
 /**
  * Encode each value as a length-prefixed msgpack frame.

@@ -38,8 +38,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-rpc": "workspace:*",
-    "@ygoe/msgpack": "catalog:"
+    "@statewalker/webrun-rpc": "workspace:*"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
