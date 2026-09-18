@@ -21,6 +21,7 @@ catalog:
   marked: ^18.0.9
   react: ^19.2.8
   react-dom: ^19.2.8
+  hono: ^4.13.2
   http-server: ^14.1.1
   idb-keyval: ^6.3.0
   "lodash.debounce": ^4.0.8
