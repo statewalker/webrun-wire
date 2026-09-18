@@ -183,6 +183,26 @@ describe("encodeMsgpack / decodeMsgpack over synchronous iterables", () => {
   });
 });
 
+describe("encodeFloat32Arrays / decodeFloat32Arrays over synchronous iterables", () => {
+  it("encodes a plain array and decodes a plain array of chunks", async () => {
+    const frames = await collect(
+      encodeFloat32Arrays([new Float32Array([0.5, 1.5]), new Float32Array([-2])]),
+    );
+    expect(frames).toHaveLength(2);
+    const chunks = splitInto(await collectBytes(from(frames)), 3);
+    const decoded = await collect(decodeFloat32Arrays(chunks));
+    expect(decoded.map((a) => Array.from(a))).toEqual([[0.5, 1.5], [-2]]);
+  });
+
+  it("encodes from a synchronous generator", async () => {
+    function* arrays(): Generator<Float32Array> {
+      yield new Float32Array([1, 2, 3]);
+    }
+    const decoded = await collect(decodeFloat32Arrays(encodeFloat32Arrays(arrays())));
+    expect(decoded.map((a) => Array.from(a))).toEqual([[1, 2, 3]]);
+  });
+});
+
 describe("encodeFloat32Arrays", () => {
   it("emits one frame per Float32Array", async () => {
     const frames = await collect(

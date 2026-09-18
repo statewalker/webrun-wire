@@ -27,6 +27,8 @@ msgpack-javascript or msgpackr:
   own enumerable keys are written. `msgpackCodec` refuses an envelope whose fields arrive only
   through a prototype.
 
-`encodeMsgpack` and `decodeMsgpack` also accept synchronous iterables:
+The four stream functions also accept synchronous iterables:
 `encodeMsgpack<T>(input: Iterable<T> | AsyncIterable<T>)`,
-`decodeMsgpack<T>(input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>)`.
+`decodeMsgpack<T>(input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>)`,
+`encodeFloat32Arrays(input: Iterable<Float32Array> | AsyncIterable<Float32Array>)`,
+`decodeFloat32Arrays(input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>)`.

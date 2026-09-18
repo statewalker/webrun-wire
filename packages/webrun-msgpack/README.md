@@ -72,8 +72,8 @@ The runtime needs `TextDecoder`, which every current browser, Node, Deno and Bun
 | --- | --- | --- |
 | `encodeMsgpack<T>(src: Iterable<T> \| AsyncIterable<T>)` | values → frames | generic JSON-ish values |
 | `decodeMsgpack<T>(src: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → values | inverse of `encodeMsgpack` |
-| `encodeFloat32Arrays(src: AsyncIterable<Float32Array>)` | arrays → frames | float streaming, no per-element conversion |
-| `decodeFloat32Arrays(src: AsyncIterable<Uint8Array>)` | frames → arrays | inverse of `encodeFloat32Arrays` |
+| `encodeFloat32Arrays(src: Iterable<Float32Array> \| AsyncIterable<Float32Array>)` | arrays → frames | float streaming, no per-element conversion |
+| `decodeFloat32Arrays(src: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → arrays | inverse of `encodeFloat32Arrays` |
 | `msgpackCodec: PortCodec` | envelope ⇄ one framed message | `multiplexPort` over a byte transport |
 | `serialize(value, options?)` | one value → one MessagePack document | the format itself, no framing |
 | `deserialize(bytes, options?)` | one document → one value | inverse of `serialize` |
@@ -82,8 +82,8 @@ Types: `SerializeOptions`, `DeserializeOptions`, `MsgpackInput` (what `deseriali
 `Uint8Array`, `ArrayBuffer` or an array of byte values) and `MsgpackExtension` (an extension value
 other than a timestamp: `{ type, data }`).
 
-`encodeMsgpack` and `decodeMsgpack` take synchronous iterables too — an array, a generator — so a
-fixed list needs no async wrapper. The `Float32Array` pair still takes async iterables only.
+All four stream functions take synchronous iterables too — an array, a generator — so a fixed
+list needs no async wrapper.
 
 ## Examples
 
@@ -412,7 +412,7 @@ conformance run.
 ## Scripts
 
 ```sh
-pnpm test              # vitest run (404 tests / 7 files)
+pnpm test              # vitest run (406 tests / 7 files)
 pnpm run build         # rolldown + tsc --emitDeclarationOnly
 pnpm lint              # biome check src tests
 pnpm typecheck         # tsc --noEmit (src)
