@@ -311,6 +311,37 @@ describe("msgpackr test.js: basic tests", () => {
     expect(roundTrip(data)).toBe(data);
   });
 
+  it("overlong UTF-8 string", () => {
+    // msgpack fixstr of 2 bytes holding an overlong "/"; upstream decoded it to "/"
+    expect(deserialize(bytes(0xa2, 0xc0, 0xaf))).not.toBe("/");
+  });
+
+  it("invalid UTF-8 continuation bytes", () => {
+    const replacement = "\uFFFD";
+    const strings: [number[], string][] = [
+      [[0xc2, 0x41], `${replacement}A`],
+      [[0xe1, 0x41, 0x42], `${replacement}AB`],
+      [[0xe1, 0x80, 0x41], `${replacement}A`],
+      [[0xf1, 0x41, 0x42, 0x43], `${replacement}ABC`],
+      [[0xf1, 0x80, 0x41, 0x42], `${replacement}AB`],
+      [[0xf1, 0x80, 0x80, 0x41], `${replacement}A`],
+    ];
+    for (const [data, expected] of strings) {
+      expect(deserialize(bytes(0xa0 + data.length, ...data))).toBe(expected);
+    }
+  });
+
+  it("truncated UTF-8 sequences do not consume following values", () => {
+    expect(deserialize(bytes(0x92, 0xa1, 0xc2, 0x01))).toEqual(["\uFFFD", 1]);
+    expect(deserialize(bytes(0x92, 0xa2, 0xe1, 0x80, 0x01))).toEqual(["\uFFFD", 1]);
+    expect(deserialize(bytes(0x92, 0xa3, 0xf1, 0x80, 0x80, 0x01))).toEqual(["\uFFFD", 1]);
+    expect(deserialize(bytes(0x93, 0xa1, 0xe0, 0xa4, 0x6e, 0x65, 0x78, 0x74, 0x07))).toEqual([
+      "\uFFFD",
+      "next",
+      7,
+    ]);
+  });
+
   it("use ArrayBuffer", () => {
     const data = { prop: "a test" };
     const serialized = serialize(data);
@@ -474,6 +505,65 @@ describe("msgpackr test-incomplete.js: encode and decode tests with partial valu
       expect(debug).not.toHaveBeenCalled();
     } finally {
       debug.mockRestore();
+    }
+  });
+});
+
+describe("strings follow the WHATWG Encoding standard (TextEncoder / TextDecoder)", () => {
+  // Not from another suite: the property the three msgpackr UTF-8 cases above are instances of.
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+  function strPayload(encoded: Uint8Array): Uint8Array {
+    const head = encoded[0] as number;
+    if (head >= 0xa0 && head <= 0xbf) return encoded.subarray(1);
+    if (head === 0xd9) return encoded.subarray(2);
+    if (head === 0xda) return encoded.subarray(3);
+    return encoded.subarray(5);
+  }
+
+  let seed = 42;
+  function random(): number {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  }
+
+  it("writes a lone surrogate as U+FFFD instead of throwing or writing invalid UTF-8", () => {
+    // Upstream threw on a lone high surrogate and wrote a lone low one as the invalid ED B0 80.
+    expect(roundTrip("a\ud800")).toBe("a\ufffd");
+    expect(roundTrip("\ud800b")).toBe("\ufffdb");
+    expect(roundTrip("\udc00")).toBe("\ufffd");
+    expect(roundTrip("\ud800\ud800\udc00")).toBe("\ufffd\u{10000}");
+    expect(strPayload(serialize("\udc00"))).toEqual(bytes(0xef, 0xbf, 0xbd));
+  });
+
+  it("keeps a leading byte order mark", () => {
+    expect(roundTrip("\ufeffabc")).toBe("\ufeffabc");
+  });
+
+  it("encodes any string to the bytes TextEncoder produces", () => {
+    for (let n = 0; n < 2000; n++) {
+      const units = Array.from({ length: Math.floor(random() * 40) }, () => {
+        const pick = random();
+        if (pick < 0.3) return Math.floor(random() * 0x80);
+        if (pick < 0.5) return 0xd800 + Math.floor(random() * 0x800); // surrogates, paired or not
+        return Math.floor(random() * 0x10000);
+      });
+      const str = String.fromCharCode(...units);
+      expect(strPayload(serialize(str))).toEqual(encoder.encode(str));
+      expect(roundTrip(str)).toBe(decoder.decode(encoder.encode(str)));
+    }
+  });
+
+  it("decodes any bytes in a str the way TextDecoder does", () => {
+    for (let n = 0; n < 2000; n++) {
+      const payload = Uint8Array.from({ length: Math.floor(random() * 31) }, () => {
+        const pick = random();
+        if (pick < 0.3) return Math.floor(random() * 0x80);
+        if (pick < 0.6) return 0x80 + Math.floor(random() * 0x40); // continuation bytes
+        return Math.floor(random() * 0x100);
+      });
+      expect(deserialize(bytes(0xa0 + payload.length, ...payload))).toBe(decoder.decode(payload));
     }
   });
 });

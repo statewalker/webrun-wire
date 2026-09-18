@@ -554,17 +554,19 @@ function encodeUtf8(str: string): Uint8Array {
     if (c < 2048) {
       bytes[i++] = (c >> 6) | 192;
     } else {
-      if (c > 0xd7ff && c < 0xdc00) {
-        if (++ci >= length) throw new Error("UTF-8 encode: incomplete surrogate pair");
-        const c2 = str.charCodeAt(ci);
-        if (c2 < 0xdc00 || c2 > 0xdfff)
-          throw new Error(
-            `UTF-8 encode: second surrogate character 0x${c2.toString(16)} at index ${ci} out of range`,
-          );
+      // Modified from upstream, which threw on a lone high surrogate and wrote a lone low one as
+      // three bytes that are not valid UTF-8. A surrogate without its partner is written as
+      // U+FFFD, as TextEncoder does, so the output is always valid UTF-8.
+      const c2 = c > 0xd7ff && c < 0xdc00 && ci + 1 < length ? str.charCodeAt(ci + 1) : 0;
+      if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+        ci++;
         c = 0x10000 + ((c & 0x03ff) << 10) + (c2 & 0x03ff);
         bytes[i++] = (c >> 18) | 240;
         bytes[i++] = ((c >> 12) & 63) | 128;
-      } else bytes[i++] = (c >> 12) | 224;
+      } else {
+        if (c > 0xd7ff && c < 0xe000) c = 0xfffd;
+        bytes[i++] = (c >> 12) | 224;
+      }
       bytes[i++] = ((c >> 6) & 63) | 128;
     }
     bytes[i++] = (c & 63) | 128;
@@ -572,36 +574,27 @@ function encodeUtf8(str: string): Uint8Array {
   return ascii ? bytes : bytes.subarray(0, i);
 }
 
+// Modified from upstream, whose hand-written decoder did not validate: it accepted overlong forms
+// (C0 AF read as "/"), took any byte for a continuation byte, and threw on a sequence cut short
+// by the end of the string. Anything that is not plain ASCII now goes through TextDecoder, which
+// replaces each malformed sequence with U+FFFD per the WHATWG Encoding standard. `ignoreBOM`
+// keeps a leading U+FEFF, which TextDecoder would otherwise strip from the string's content.
+const utf8Decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
 /** Decodes a string from UTF-8 bytes. */
 function decodeUtf8(bytes: Uint8Array, start: number, length: number): string {
-  // Based on: https://gist.github.com/pascaldekloe/62546103a1576803dade9269ccf76330
-  const b = (index: number) => bytes[index] as number;
-  let i = start;
-  let str = "";
-  length += start;
-  while (i < length) {
-    let c = b(i++);
-    if (c > 127) {
-      if (c > 191 && c < 224) {
-        if (i >= length) throw new Error("UTF-8 decode: incomplete 2-byte sequence");
-        c = ((c & 31) << 6) | (b(i++) & 63);
-      } else if (c > 223 && c < 240) {
-        if (i + 1 >= length) throw new Error("UTF-8 decode: incomplete 3-byte sequence");
-        c = ((c & 15) << 12) | ((b(i++) & 63) << 6) | (b(i++) & 63);
-      } else if (c > 239 && c < 248) {
-        if (i + 2 >= length) throw new Error("UTF-8 decode: incomplete 4-byte sequence");
-        c = ((c & 7) << 18) | ((b(i++) & 63) << 12) | ((b(i++) & 63) << 6) | (b(i++) & 63);
-      } else
-        throw new Error(
-          `UTF-8 decode: unknown multibyte start 0x${c.toString(16)} at index ${i - 1}`,
-        );
+  const end = start + length;
+  // A very short ASCII string — a typical map key — is cheaper to build here than to hand to
+  // TextDecoder. Measured on Node 24, 2M decodes: 4 bytes 51 ms here vs 234 ms, break-even near
+  // 12 bytes, 32 bytes 422 ms vs 197 ms.
+  if (length <= 12) {
+    let str = "";
+    for (let i = start; i < end; i++) {
+      const c = bytes[i] as number;
+      if (c > 127) return utf8Decoder.decode(bytes.subarray(start, end));
+      str += String.fromCharCode(c);
     }
-    if (c <= 0xffff) str += String.fromCharCode(c);
-    else if (c <= 0x10ffff) {
-      c -= 0x10000;
-      str += String.fromCharCode((c >> 10) | 0xd800);
-      str += String.fromCharCode((c & 0x3ff) | 0xdc00);
-    } else throw new Error(`UTF-8 decode: code point 0x${c.toString(16)} exceeds UTF-16 reach`);
+    return str;
   }
-  return str;
+  return utf8Decoder.decode(bytes.subarray(start, end));
 }
