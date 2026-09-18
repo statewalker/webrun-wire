@@ -245,13 +245,21 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
   }
 
   function appendDate(data: Date): void {
-    const sec = data.getTime() / 1000;
-    if (data.getMilliseconds() === 0 && sec >= 0 && sec < 0x100000000) {
+    // Modified from upstream, which took `getTime() / 1000` unfloored and `getMilliseconds()`:
+    // before 1970 that wrote the wrong second (-1002 ms became second -1 plus 998 ms). The
+    // second is floored and the nanoseconds are what remains, so both are right on either side
+    // of the epoch. An invalid Date is refused instead of being written as second -1.
+    const time = data.getTime();
+    if (Number.isNaN(time)) {
+      throw new Error("Invalid argument: an invalid Date cannot be serialized.");
+    }
+    const sec = Math.floor(time / 1000);
+    const ns = (time - sec * 1000) * 1000000;
+    if (ns === 0 && sec >= 0 && sec < 0x100000000) {
       // 32 bit seconds
       appendBytes([0xd6, 0xff, sec >>> 24, sec >>> 16, sec >>> 8, sec]);
     } else if (sec >= 0 && sec < 0x400000000) {
       // 30 bit nanoseconds, 34 bit seconds
-      const ns = data.getMilliseconds() * 1000000;
       appendBytes([
         0xd7,
         0xff,
@@ -266,7 +274,6 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
       ]);
     } else {
       // 32 bit nanoseconds, 64 bit seconds, negative values allowed
-      const ns = data.getMilliseconds() * 1000000;
       appendBytes([0xc7, 12, 0xff, ns >>> 24, ns >>> 16, ns >>> 8, ns]);
       appendInt64(sec);
     }
@@ -476,6 +483,10 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
     return { type: type, data: data };
   }
 
+  // Modified from upstream, which built the Date from `sec * 1000 + ns / 1000000`. That sum is a
+  // double: it rounds 2038-01-19T03:14:07.999999999Z up to the next second, and before 1970 the
+  // Date constructor truncates it toward zero. Flooring the nanoseconds to whole milliseconds
+  // first keeps the arithmetic exact and gives the millisecond the instant falls in.
   function readExtDate(data: Uint8Array): Date {
     const b = (i: number) => data[i] as number;
     if (data.length === 4) {
@@ -490,13 +501,13 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
         ((b(5) << 16) >>> 0) +
         ((b(6) << 8) >>> 0) +
         b(7);
-      return new Date(sec * 1000 + ns / 1000000);
+      return new Date(sec * 1000 + Math.floor(ns / 1000000));
     }
     if (data.length === 12) {
       const ns = ((b(0) << 24) >>> 0) + ((b(1) << 16) >>> 0) + ((b(2) << 8) >>> 0) + b(3);
       pos -= 8;
       const sec = readInt(8);
-      return new Date(sec * 1000 + ns / 1000000);
+      return new Date(sec * 1000 + Math.floor(ns / 1000000));
     }
     throw new Error("Invalid data length for a date value.");
   }

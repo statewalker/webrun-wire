@@ -134,6 +134,7 @@ describe("msgpack-javascript codec-timestamp.test.ts: timestamp 32/64/96", () =>
     ZERO: new Date(0),
     TIME_BEFORE_EPOCH_NS: new Date(-1),
     TIME_BEFORE_EPOCH_SEC: new Date(-1000),
+    TIME_BEFORE_EPOCH_SEC_AND_NS: new Date(-1002),
     TIMESTAMP32: new Date(Math.floor(TIME / 1000) * 1000),
     TIMESTAMP64: new Date(TIME),
     TIMESTAMP64_OVER_INT32: new Date(Date.UTC(2200, 0)),
@@ -146,6 +147,21 @@ describe("msgpack-javascript codec-timestamp.test.ts: timestamp 32/64/96", () =>
       expect(roundTrip(value)).toEqual(value);
     });
   }
+
+  it("writes a pre-1970 instant with its second floored, not truncated", () => {
+    // -1002 ms is second -2 plus 998 ms. Upstream divided without flooring and wrote second -1,
+    // which read back as -2 ms.
+    const encoded = serialize(new Date(-1002));
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+    expect(encoded[0]).toBe(0xc7); // timestamp 96
+    expect(view.getUint32(3, false)).toBe(998_000_000);
+    expect(view.getBigInt64(7, false)).toBe(-2n);
+  });
+
+  it("refuses an invalid Date rather than writing some other instant", () => {
+    // Upstream wrote an invalid Date as second -1, which reads back as 1969-12-31T23:59:59Z.
+    expect(() => serialize(new Date(Number.NaN))).toThrow(/invalid Date/);
+  });
 
   it("rejects a timestamp extension of an unrecognised size", () => {
     // fixext 1, type -1, one byte of payload
