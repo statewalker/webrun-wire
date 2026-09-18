@@ -3,12 +3,17 @@
 MessagePack on the wire, in **two distinct shapes**:
 
 - a **stream codec** — `encodeMsgpack` / `decodeMsgpack`, length-prefixed, for a transport with no
-  message boundaries (plus zero-copy specialisations for `Float32Array`);
+  message boundaries (plus specialisations for `Float32Array`);
 - a **message codec** — `msgpackCodec`, a `PortCodec` for `@statewalker/webrun-rpc`'s
   `multiplexPort`, with no length prefix, for a transport that already frames.
 
-They are not interchangeable, and reaching for the wrong one is easy. The table below is the whole
-decision.
+Both sit on the package's own MessagePack implementation, `serialize` / `deserialize`, which is
+exported too. It is a TypeScript port of Yves Goergen's
+[msgpack.js](https://github.com/ygoe/msgpack.js) with a handful of fixes — see
+[Provenance and credits](#provenance-and-credits). The package has no runtime dependencies.
+
+The two codecs are not interchangeable, and reaching for the wrong one is easy. The table below is
+the whole decision.
 
 ## Which codec
 
@@ -19,7 +24,7 @@ decision.
 | Framing | **4-byte big-endian length prefix**, added by this package | **none** — the transport's own message boundaries are the framing |
 | Use it when | the transport is a byte *stream*: a TCP-like socket, a `ReadableStream`, a file, anything where chunk boundaries are arbitrary | the transport preserves *message* boundaries: a WebSocket, an `RTCDataChannel`, a LiveKit data packet |
 | Malformed input | a truncated trailing frame is never emitted; the consumer ends without yielding a partial value | dropped, never thrown — a bad frame from a peer cannot take the multiplexer down |
-| Depends on | `@ygoe/msgpack` only | `@ygoe/msgpack`, plus **type-only** `@statewalker/webrun-rpc` |
+| Depends on | nothing | **type-only** `@statewalker/webrun-rpc` |
 
 Adding a length prefix on a transport that already frames is redundant framing; relying on message
 boundaries where there are none is the truncation bug the stream codec exists to prevent. Pick by
@@ -31,7 +36,7 @@ Consumers that pipe values across transports (scanners writing chunks to a store
 
 A raw MessagePack stream has no frame boundaries: a decoder can only succeed if the chunk boundaries happen to line up with the payload boundaries. Length-prefix framing fixes this — the decoder buffers incoming bytes and only yields when a complete `[length][payload]` pair is available. Partial trailing frames are NEVER emitted, so callers can detect truncation by comparing observed count to expected.
 
-Previously the codec lived inside `@repo/streams` (private, unpublished). It's been extracted here so (a) consumers that only need framing don't pull in the broader `webrun-streams` surface, and (b) the `@ygoe/msgpack` dependency lives in exactly one place.
+Previously the codec lived inside `@repo/streams` (private, unpublished). It's been extracted here so (a) consumers that only need framing don't pull in the broader `webrun-streams` surface, and (b) MessagePack lives in exactly one place.
 
 ## Why the port codec exists
 
@@ -47,16 +52,17 @@ iframe. `msgpackCodec` is the byte-transport sibling: one envelope becomes one m
 npm install @statewalker/webrun-msgpack
 ```
 
-One runtime dependency **in the emitted bundle**
-([`@ygoe/msgpack`](https://www.npmjs.com/package/@ygoe/msgpack)), no peer dependencies. ESM only
-(`"type": "module"`). That is not the same as the install cost: `@statewalker/webrun-rpc` is a
-declared `dependency`, so `npm install` also pulls it and, transitively, `@statewalker/webrun-streams`
-into `node_modules` — even for a consumer who uses only the stream codec.
+No runtime dependencies **in the emitted bundle** — `dist/index.js` imports nothing — and no peer
+dependencies. ESM only (`"type": "module"`). That is not the same as the install cost:
+`@statewalker/webrun-rpc` is a declared `dependency`, so `npm install` also pulls it and,
+transitively, `@statewalker/webrun-streams` into `node_modules` — even for a consumer who uses only
+the stream codec or `serialize` / `deserialize`.
 
 `@statewalker/webrun-rpc` is declared as a dependency but is **type-only**: `msgpackCodec` imports
 the `PortCodec` interface from it and no runtime code, so nothing of `webrun-rpc` is in the built
-bundle (`dist/index.js` imports `@ygoe/msgpack` and nothing else) and `webrun-rpc` gains no msgpack
-dependency in either direction.
+bundle and `webrun-rpc` gains no msgpack dependency in either direction.
+
+The runtime needs `TextDecoder`, which every current browser, Node, Deno and Bun provide.
 
 ## How to use
 
@@ -64,13 +70,35 @@ dependency in either direction.
 
 | Export | Direction | Use case |
 | --- | --- | --- |
-| `encodeMsgpack<T>(src: AsyncIterable<T>)` | values → bytes | generic JSON-ish values |
-| `decodeMsgpack<T>(src: AsyncIterable<Uint8Array>)` | bytes → values | inverse of `encodeMsgpack` |
-| `encodeFloat32Arrays(src: AsyncIterable<Float32Array>)` | arrays → bytes | zero-copy float streaming |
-| `decodeFloat32Arrays(src: AsyncIterable<Uint8Array>)` | bytes → arrays | inverse of `encodeFloat32Arrays` |
+| `encodeMsgpack<T>(src: Iterable<T> \| AsyncIterable<T>)` | values → frames | generic JSON-ish values |
+| `decodeMsgpack<T>(src: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → values | inverse of `encodeMsgpack` |
+| `encodeFloat32Arrays(src: Iterable<Float32Array> \| AsyncIterable<Float32Array>)` | arrays → frames | float streaming, no per-element conversion |
+| `decodeFloat32Arrays(src: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → arrays | inverse of `encodeFloat32Arrays` |
 | `msgpackCodec: PortCodec` | envelope ⇄ one framed message | `multiplexPort` over a byte transport |
+| `serialize(value, options?)` | one value → one MessagePack document | the format itself, no framing |
+| `deserialize(bytes, options?)` | one document → one value | inverse of `serialize` |
+
+Types: `SerializeOptions`, `DeserializeOptions`, `MsgpackInput` (what `deserialize` accepts:
+`Uint8Array`, `ArrayBuffer` or an array of byte values) and `MsgpackExtension` (an extension value
+other than a timestamp: `{ type, data }`).
+
+All four stream functions take synchronous iterables too — an array, a generator — so a fixed
+list needs no async wrapper.
 
 ## Examples
+
+### One value, no framing
+
+```ts
+import { deserialize, serialize } from "@statewalker/webrun-msgpack";
+
+const bytes = serialize({ id: 7, tags: ["a", "b"], at: new Date(0), raw: new Uint8Array([1, 2]) });
+const value = deserialize(bytes); // same shape; `at` is a Date, `raw` a Uint8Array
+
+// Several documents back to back:
+const three = serialize([1, "two", { three: 3 }], { multiple: true });
+deserialize(three, { multiple: true }); // [1, "two", { three: 3 }]
+```
 
 ### Stream of values
 
@@ -115,8 +143,8 @@ for await (const arr of pipe) console.log(arr.length); // 4, 4
 ```ts
 import { decodeMsgpack, encodeMsgpack } from "@statewalker/webrun-msgpack";
 
-// Produce one frame, then split the bytes any way you like:
-const bytes = [];
+// Produce one frame (a plain array is a valid input), then split the bytes any way you like:
+const bytes: Uint8Array[] = [];
 for await (const f of encodeMsgpack([{ a: 1, b: "hi" }])) bytes.push(f);
 // Hand the decoder arbitrarily small slices — it buffers until complete:
 async function* byOne() {
@@ -258,17 +286,47 @@ wire. Whether the resulting `error` payload is msgpack-expressible therefore dep
 code throws — a `cause` holding a `Map` or a class instance collapses to `{}`, and a circular
 reference makes `serialize` throw.
 
-## A `@ygoe/msgpack` wart, so nobody debugs it twice
+## What `deserialize` refuses, and how
 
-On some truncated input `@ygoe/msgpack`'s `deserialize` calls **`console.debug("msgpack array:", …)`
-with the whole offending buffer** before it throws. `msgpackCodec` catches the throw and drops the
-frame, but it cannot suppress the log — the call is inside the library.
+`deserialize` throws on input that is not MessagePack; it never logs. Specifically:
 
-Precisely: the log fires when the decode runs off the end of the buffer *where a byte code is
-expected* (`Invalid byte value 'undefined' at index N`). A truncation that lands mid-string throws
-`Cannot read properties of undefined (reading 'toString')` with no log, and `0xc1` garbage or empty
-input throws silently. So the noise is real but intermittent — a peer that half-writes a frame will
-print a buffer dump on your console and nothing will be wrong with your code.
+- **Truncated input** — any read that would run past the end — throws a `RangeError`
+  (`Insufficient data: …`). Every proper prefix of a valid encoding is refused this way, so a cut
+  integer can no longer come back as `NaN`, nor a cut `bin` as a shorter array.
+- **The never-used type byte `0xc1`**, an empty input, a timestamp extension of an unknown size,
+  and a non-byte argument throw an `Error`.
+- **Malformed UTF-8 inside a string is not an error**: each malformed sequence decodes to U+FFFD,
+  exactly as `TextDecoder` does, and the values after the string are read normally. Overlong
+  forms are malformed — `C0 AF` does not decode to `/`.
+- **Bytes after the first document are ignored** unless `{ multiple: true }` asks for all of them.
+
+`msgpackCodec` turns every one of these throws into a dropped message. (Before this package
+carried its own implementation, `@ygoe/msgpack` printed the whole buffer with `console.debug` on
+some truncated input before throwing. That is gone.)
+
+## The value model
+
+What each JavaScript value becomes on the wire, and what comes back:
+
+| Written | As | Read back as |
+| --- | --- | --- |
+| `null`, `undefined` | nil | `null` — but an object key whose value is `undefined` is **dropped** |
+| `boolean` | bool | `boolean` |
+| safe integer | the narrowest int / uint | `number`; `-0` is written as `0` and loses its sign |
+| any other number (fraction, beyond ±2⁵³, `NaN`, `±Infinity`) | float 64 | `number` |
+| `string` | str, UTF-8; a lone surrogate is written as U+FFFD, as `TextEncoder` does | `string` |
+| `Uint8Array`, `Uint8ClampedArray` | bin | `Uint8Array` — a **view into the input**, not a copy |
+| other typed arrays (`Float32Array`, `Int16Array`, …) | array of numbers | `number[]` |
+| `Array` | array | `unknown[]` |
+| `Date` | timestamp extension (type -1), 32/64/96-bit as the instant needs | `Date`, floored to the millisecond; an invalid `Date` throws |
+| any other object | map of its **own** enumerable string keys | plain object; every key, `__proto__` included, is an own property |
+| `bigint`, `function`, `symbol` | — throws, unless `invalidTypeReplacement` supplies a stand-in | |
+
+Reading also accepts what other encoders write: float 32, int 64 / uint 64 (as the nearest
+`number` — precision beyond 2⁵³ is lost), maps with non-string keys (the key is converted with
+`String()`), and extension types other than timestamps, which come back as
+`{ type, data }` with `type` as the unsigned byte (so type `-2` reads as `254`). A `Map` or `Set`
+has no own enumerable keys and is written as an empty map.
 
 ## Internals
 
@@ -293,7 +351,7 @@ The decoder keeps a rolling `Uint8Array` buffer. Each incoming chunk is appended
 1. If buffer is shorter than 4 bytes — wait for more.
 2. Read the 32-bit BE length.
 3. If buffer doesn't hold `4 + length` bytes — wait for more.
-4. Slice the payload, deserialise with `@ygoe/msgpack`, yield.
+4. Copy the payload out, `deserialize` it, yield.
 5. Advance the buffer past this frame; repeat step 1.
 
 Zero-length chunks are tolerated and simply no-op through the loop. Truncated trailing frames are silently dropped — the buffer retains them but the consuming `for await` ends without yielding a partial value.
@@ -317,9 +375,15 @@ a throwing `getPrototypeOf`. None is producible by a remote peer sending bytes �
 same-process JavaScript already holding the backing memory — so the guarantee is "cannot throw for
 anything that arrives over a wire", not "cannot throw for any JavaScript value".
 
-### Float32Array zero-copy
+### Float32Array: no per-element conversion
 
-`encodeFloat32Arrays` constructs a `Uint8Array` view over the `Float32Array`'s underlying buffer and serialises it as a msgpack `bin` payload — no float-by-float conversion. `decodeFloat32Arrays` reinterprets the decoded `Uint8Array` as a `Float32Array`. When the decoded buffer's `byteOffset` is not 4-byte aligned (can happen if `@ygoe/msgpack` returns a view into a larger buffer), we copy into a fresh aligned `Uint8Array` before constructing the `Float32Array`; otherwise the operation is view-only.
+`encodeFloat32Arrays` constructs a `Uint8Array` view over the `Float32Array`'s underlying buffer and serialises it as a msgpack `bin` payload — no float-by-float conversion. `decodeFloat32Arrays` reinterprets the decoded `Uint8Array` as a `Float32Array`, copying it first when its `byteOffset` is not 4-byte aligned.
+
+**In practice that copy always happens**, and the bytes are copied on the way out as well:
+`serialize` copies the view into its output, and the frame is assembled by another copy. The
+decoded `bin` is a view into the payload, starting just after its 2-, 3- or 5-byte header, and
+none of those offsets is a multiple of 4. So "no per-element conversion" is the whole claim, not
+"zero-copy".
 
 ### A trap when writing a transport pump
 
@@ -330,8 +394,8 @@ wire per message.
 
 ### Dependencies
 
-- [`@ygoe/msgpack`](https://github.com/ygoe/msgpack.js) — single-file msgpack implementation (≈7 kB gzipped), no transitive deps.
 - [`@statewalker/webrun-rpc`](../webrun-rpc) — **types only** (`PortCodec`, `PortEnvelope`); no runtime import is emitted.
+- MessagePack itself is `src/msgpack-core.ts`, in this package — see below.
 
 Dev: TypeScript, vitest, rolldown, rimraf (catalog versions from the monorepo root).
 `@statewalker/webrun-streams` and `@statewalker/webrun-streams-conformance` are dev-only, for the
@@ -348,13 +412,68 @@ conformance run.
 ## Scripts
 
 ```sh
-pnpm test              # vitest run (84 tests / 4 files)
+pnpm test              # vitest run (406 tests / 7 files)
 pnpm run build         # rolldown + tsc --emitDeclarationOnly
 pnpm lint              # biome check src tests
 pnpm typecheck         # tsc --noEmit (src)
 pnpm typecheck:tests   # tsc -p tsconfig.tests.json — needs the sibling packages built
 ```
 
+## Provenance and credits
+
+`src/msgpack-core.ts` is a TypeScript port of **[msgpack.js](https://github.com/ygoe/msgpack.js)**
+by **Yves Goergen**, © 2019, MIT license — the library this package depended on, as
+[`@ygoe/msgpack`](https://www.npmjs.com/package/@ygoe/msgpack), until 0.3.0. Thank you.
+
+It is ported from commit
+[`05733cf`](https://github.com/ygoe/msgpack.js/tree/05733cfb43a2974cf669f0eb8693f43b548bdcd4)
+(2024-04-16) on `master`, not from the npm release 1.0.3. `master` carries three fixes that 1.0.3
+lacks, and they change what goes on the wire:
+
+- [#34](https://github.com/ygoe/msgpack.js/pull/34): an integer beyond the safe range is written
+  as a float 64. 1.0.3 wrote `2 ** 100` as the maximal uint 64, which reads back as ~1.8e19.
+- [#32](https://github.com/ygoe/msgpack.js/issues/32): a positive integer above uint 32 is written
+  with the uint 64 prefix `0xcf`, not int 64's `0xd3`.
+- [#33](https://github.com/ygoe/msgpack.js/issues/33): a 16–255-byte `bin` gets the one-byte bin 8
+  header, not bin 16's two bytes.
+
+The port keeps upstream's structure, comments and error messages. Before any change it was checked
+against upstream `msgpack.js` itself: byte-identical output for 3,000 randomised values (226 MB
+encoded), and the same value or the same error message for 20,000 random garbage inputs.
+
+**Changes from upstream**, each marked `Modified from upstream` in the source and made where a
+test adopted from another implementation failed:
+
+1. **Truncated input throws a `RangeError`** instead of decoding to `NaN` or a short `bin`, and
+   nothing is logged — upstream called `console.debug` with the whole input.
+2. **Timestamps are floored to the millisecond**, both ways. Upstream rounded
+   `…:07.999999999Z` up to the next second, read pre-1970 instants toward zero, and wrote
+   `new Date(-1002)` as second -1. An invalid `Date` throws instead of being written as second -1.
+3. **Strings follow the WHATWG Encoding standard.** Decoding goes through `TextDecoder`: malformed
+   sequences, overlong forms included, become U+FFFD, where upstream decoded `C0 AF` to `/` and
+   threw on a sequence cut by the end of the string. Encoding writes a lone surrogate as U+FFFD,
+   where upstream threw on a high one and wrote a low one as invalid UTF-8.
+4. **Object keys**: a `__proto__` map key is decoded as an own property — upstream's assignment
+   replaced the decoded object's prototype — and only own enumerable keys are written, where
+   upstream's `for…in` also wrote inherited ones.
+5. TypeScript types, `unknown` in place of `any`, and the bounds `0xffffffffffffffff` /
+   `0x7fffffffffffffff` spelled `2 ** 64` / `2 ** 63` (the same doubles).
+
+**Tests.** Besides this package's own, the suite runs:
+
+- upstream's test page, ported to vitest — `tests/msgpack-core.upstream.test.ts`;
+- [kawanet/msgpack-test-suite](https://github.com/kawanet/msgpack-test-suite) (MIT, © Yusuke
+  Kawasaki), vendored — `tests/msgpack-core.test-suite.test.ts`;
+- cases adopted from [msgpack/msgpack-javascript](https://github.com/msgpack/msgpack-javascript)
+  (ISC, © The MessagePack Community) and [kriszyp/msgpackr](https://github.com/kriszyp/msgpackr)
+  (MIT, © Kris Zyp), with msgpackr's sample documents vendored —
+  `tests/msgpack-core.adopted.test.ts`.
+
+Sources, commits and licenses of everything vendored are in
+[`tests/fixtures/README.md`](./tests/fixtures/README.md). Outside the suite, the final
+implementation was checked for interoperability with `@msgpack/msgpack` 3.1.3 and `msgpackr` 2.1.0:
+2,000 random values encoded by each side decode identically on the other, in both directions.
+
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT © statewalker — see [LICENSE](./LICENSE), which also carries msgpack.js's MIT notice.

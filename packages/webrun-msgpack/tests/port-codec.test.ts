@@ -1,6 +1,6 @@
 import type { MessageTarget, PortEnvelope } from "@statewalker/webrun-rpc";
 import { describe, expect, it } from "vitest";
-import { msgpackCodec } from "../src/index.js";
+import { msgpackCodec, serialize } from "../src/index.js";
 
 /** A one-shot sink that records what was posted, plus the transfer list. */
 function recordingPort(): MessageTarget & {
@@ -136,6 +136,29 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
     expect(msgpackCodec.read(event(cut))).toBeUndefined();
   });
 
+  it("drops every truncation of a frame carrying bytes, never a shortened payload", () => {
+    // Before the decoder checked bounds, a frame cut inside its `bin` payload decoded to a
+    // valid-looking envelope whose payload was merely shorter.
+    const port = recordingPort();
+    msgpackCodec.post(port, {
+      type: "message",
+      id: 3,
+      payload: new Uint8Array(40).fill(7),
+    });
+    const whole = port.sent[0] as Uint8Array;
+    for (let length = 1; length < whole.byteLength; length++) {
+      expect(msgpackCodec.read(event(whole.slice(0, length))), `cut at ${length}`).toBeUndefined();
+    }
+  });
+
+  it("refuses an envelope whose fields arrive only through a __proto__ key", () => {
+    // { "__proto__": { type: "open", id: 0 } } — when a decoder assigns map keys, this sets the
+    // prototype and the envelope check reads the inherited `type` and `id`.
+    const inner = serialize({ type: "open", id: 0 });
+    const frame = new Uint8Array([0x81, 0xa9, ...new TextEncoder().encode("__proto__"), ...inner]);
+    expect(msgpackCodec.read(event(frame))).toBeUndefined();
+  });
+
   it("ignores well-formed msgpack that is not an envelope", () => {
     const port = recordingPort();
     // Valid msgpack, wrong shape — a shared transport's own traffic.
@@ -144,8 +167,8 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
   });
 
   it("accepts an ArrayBuffer and an offset view, not only a tight Uint8Array", () => {
-    // A transport pump may hand over either. Measured: @ygoe/msgpack decodes
-    // an offset subarray correctly, so no defensive copy is needed — but the
+    // A transport pump may hand over either. The decoder reads an offset
+    // subarray correctly, so no defensive copy is needed — but the
     // codec must still accept the shapes.
     const port = recordingPort();
     msgpackCodec.post(port, { type: "message", id: 8, payload: { a: 1 } });

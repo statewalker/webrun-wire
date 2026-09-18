@@ -161,6 +161,48 @@ describe("decodeMsgpack", () => {
   });
 });
 
+describe("encodeMsgpack / decodeMsgpack over synchronous iterables", () => {
+  it("encodes a plain array", async () => {
+    const frames = await collect(encodeMsgpack([{ a: 1 }, "two", 3]));
+    expect(frames).toHaveLength(3);
+    expect(await collect(decodeMsgpack(frames))).toEqual([{ a: 1 }, "two", 3]);
+  });
+
+  it("encodes from a synchronous generator", async () => {
+    function* values(): Generator<number> {
+      yield 1;
+      yield 2;
+    }
+    expect(await collect(decodeMsgpack<number>(encodeMsgpack(values())))).toEqual([1, 2]);
+  });
+
+  it("decodes a plain array of chunks split at arbitrary boundaries", async () => {
+    const whole = await collectBytes(encodeMsgpack(from([{ a: 1, b: "hi" }, [1, 2, 3]])));
+    const chunks = splitInto(whole, 3);
+    expect(await collect(decodeMsgpack(chunks))).toEqual([{ a: 1, b: "hi" }, [1, 2, 3]]);
+  });
+});
+
+describe("encodeFloat32Arrays / decodeFloat32Arrays over synchronous iterables", () => {
+  it("encodes a plain array and decodes a plain array of chunks", async () => {
+    const frames = await collect(
+      encodeFloat32Arrays([new Float32Array([0.5, 1.5]), new Float32Array([-2])]),
+    );
+    expect(frames).toHaveLength(2);
+    const chunks = splitInto(await collectBytes(from(frames)), 3);
+    const decoded = await collect(decodeFloat32Arrays(chunks));
+    expect(decoded.map((a) => Array.from(a))).toEqual([[0.5, 1.5], [-2]]);
+  });
+
+  it("encodes from a synchronous generator", async () => {
+    function* arrays(): Generator<Float32Array> {
+      yield new Float32Array([1, 2, 3]);
+    }
+    const decoded = await collect(decodeFloat32Arrays(encodeFloat32Arrays(arrays())));
+    expect(decoded.map((a) => Array.from(a))).toEqual([[1, 2, 3]]);
+  });
+});
+
 describe("encodeFloat32Arrays", () => {
   it("emits one frame per Float32Array", async () => {
     const frames = await collect(

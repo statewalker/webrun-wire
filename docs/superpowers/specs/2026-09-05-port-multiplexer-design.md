@@ -829,7 +829,9 @@ exists, so the codec is layer 3's true first step rather than a footnote of it. 
 `webrun-msgpack`'s existing `encodeMsgpack`/`decodeMsgpack` are *stream* transforms
 (`AsyncIterable` in, `AsyncGenerator` out); `PortCodec` needs synchronous single-envelope
 encode/decode, so the codec builds on `@ygoe/msgpack`'s own serialize/deserialize rather than on
-those two.
+those two. *(2026-09-18: `webrun-msgpack` now carries its own TypeScript port of msgpack.js,
+`src/msgpack-core.ts`, and the codec uses its `serialize`/`deserialize`; `@ygoe/msgpack` is no
+longer a dependency. See the package README, "Provenance and credits".)*
 
 **C1 — the byte codec.** `msgpackCodec` implementing `PortCodec` over bytes, with the conformance
 suite run against `multiplexPort` + `duplexOverPort` over an **in-process byte pipe**. Touches no
