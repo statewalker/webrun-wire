@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>same-origin fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for SwHttpAdapter (see tests/browser/).
+      // Query: sw=<worker script, default ./sw-worker.js>, timeout=<ms>, reload (flag).
+      import { SwHttpAdapter } from "/dist/sw.js";
+
+      const params = new URLSearchParams(location.search);
+      window.initiallyControlled = !!navigator.serviceWorker.controller;
+      window.result = (async () => {
+        const started = performance.now();
+        const elapsed = () => Math.round(performance.now() - started);
+        try {
+          const options = {
+            key: "t",
+            serviceWorkerUrl: params.get("sw") ?? "./sw-worker.js",
+            reloadIfUncontrolled: params.has("reload"),
+          };
+          if (params.has("timeout")) options.timeout = Number(params.get("timeout"));
+          const adapter = new SwHttpAdapter(options);
+          await adapter.start();
+          await adapter.register("t/", async (request) => {
+            return new Response(`hello ${new URL(request.url).pathname}`);
+          });
+          const response = await fetch("./t/x");
+          return {
+            ok: true,
+            status: response.status,
+            body: await response.text(),
+            controlled: !!navigator.serviceWorker.controller,
+            ms: elapsed(),
+          };
+        } catch (error) {
+          return { ok: false, name: error.name, reason: error.reason, message: error.message, ms: elapsed() };
+        }
+      })();
+    </script>
+  </body>
+</html>

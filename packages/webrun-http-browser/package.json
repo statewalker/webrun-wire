@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-browser",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": false,
   "type": "module",
   "description": "ServiceWorker-based HTTP server for browsers, with relay and same-origin dispatch modes",
@@ -43,6 +43,7 @@
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "test": "vitest run",
+    "test:browser": "pnpm run build && vitest run --config vitest.browser.config.ts",
     "lint": "biome check src tests",
     "serve": "http-server -p 5173 -c-1 -s .",
     "example:same-origin": "pnpm run build && http-server -p 5173 -c-1 -o /public/index.html .",
@@ -60,9 +61,11 @@
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "http-server": "catalog:",
+    "playwright": "^1.62.1",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
   },
   "sideEffects": false,
