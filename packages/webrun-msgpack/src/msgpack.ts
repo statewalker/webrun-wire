@@ -3,8 +3,12 @@ import { deserialize, serialize } from "./msgpack-core.js";
 /**
  * Encode each value as a length-prefixed msgpack frame.
  * Frame format: [4-byte big-endian length][msgpack bytes]
+ *
+ * The input may be synchronous (an array, a generator) or asynchronous.
  */
-export async function* encodeMsgpack<T>(input: AsyncIterable<T>): AsyncGenerator<Uint8Array> {
+export async function* encodeMsgpack<T>(
+  input: Iterable<T> | AsyncIterable<T>,
+): AsyncGenerator<Uint8Array> {
   for await (const item of input) {
     const payload = serialize(item);
     const frame = new Uint8Array(4 + payload.length);
@@ -17,8 +21,12 @@ export async function* encodeMsgpack<T>(input: AsyncIterable<T>): AsyncGenerator
 
 /**
  * Decode length-prefixed msgpack frames, reassembling across chunk boundaries.
+ *
+ * The input may be synchronous (an array of chunks) or asynchronous.
  */
-export async function* decodeMsgpack<T>(input: AsyncIterable<Uint8Array>): AsyncGenerator<T> {
+export async function* decodeMsgpack<T>(
+  input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+): AsyncGenerator<T> {
   let buffer: Uint8Array = new Uint8Array(0);
 
   for await (const chunk of input) {
