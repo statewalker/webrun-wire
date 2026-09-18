@@ -3,7 +3,7 @@
   "version": "0.2.2",
   "private": false,
   "type": "module",
-  "description": "MessagePack codecs for the wire: a length-prefixed stream codec for async iterables (values and Float32Arrays), and msgpackCodec, a PortCodec that carries webrun-rpc port envelopes over a byte transport.",
+  "description": "MessagePack for the wire, with no runtime dependencies: serialize/deserialize (a TypeScript port of msgpack.js), a length-prefixed stream codec for iterables (values and Float32Arrays), and msgpackCodec, a PortCodec that carries webrun-rpc port envelopes over a byte transport.",
   "homepage": "https://github.com/statewalker/webrun-wire",
   "author": {
     "name": "Mikhail Kotelnikov",

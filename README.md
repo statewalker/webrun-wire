@@ -94,7 +94,7 @@ skip `emulateMux` entirely.
 
 ```
 webrun-streams        (foundation — the Duplex seam, emulateMux, iterator/stream/error/text/jsonl primitives)
-webrun-msgpack        (foundation — length-prefixed MessagePack frame codec)
+webrun-msgpack        (foundation — MessagePack: serialize/deserialize, stream and port codecs)
     ▲
     ├── transport adapters — each supplies a Duplex over a concrete transport
     │     webrun-rpc                 (ports + RPC: MessagePort, workers, iframes)
@@ -127,7 +127,7 @@ are rare and listed per package below.
 | Package | Version | Summary |
 | --- | --- | --- |
 | [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.1.1 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
-| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | Two MessagePack codecs: a length-prefixed **stream** codec for async iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
+| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | MessagePack with no runtime dependencies: `serialize` / `deserialize`, a length-prefixed **stream** codec for iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
 
 #### [`@statewalker/webrun-streams`](./packages/webrun-streams)
 
@@ -153,8 +153,16 @@ that make it usable:
 Streams-safe MessagePack framing: `encodeMsgpack` / `decodeMsgpack` move
 arbitrary values as `[4-byte BE length][msgpack payload]` frames, with a decoder
 that buffers across chunk boundaries and never yields a partial trailing frame.
-`encodeFloat32Arrays` / `decodeFloat32Arrays` are a zero-copy specialisation for
-embedding pipelines. One runtime dependency, `@ygoe/msgpack`.
+`encodeFloat32Arrays` / `decodeFloat32Arrays` specialise it for embedding
+pipelines, and `msgpackCodec` carries `webrun-rpc` port envelopes over a byte
+transport. Underneath is `serialize` / `deserialize`, exported too: a TypeScript
+port of Yves Goergen's [msgpack.js](https://github.com/ygoe/msgpack.js) (MIT),
+with fixes for truncated input, timestamps, UTF-8 and `__proto__` keys found by
+running the conformance cases of
+[msgpack-test-suite](https://github.com/kawanet/msgpack-test-suite),
+[msgpack-javascript](https://github.com/msgpack/msgpack-javascript) and
+[msgpackr](https://github.com/kriszyp/msgpackr) against it — credits and the
+full list of changes are in the package README. No runtime dependencies.
 
 ### HTTP
 
