@@ -2,6 +2,7 @@ import { HttpError } from "@statewalker/webrun-http-streams";
 import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls } from "../core/data-calls.js";
 import { newRegistry } from "../core/registry.js";
+import { handleClaimRequests } from "../core/service-worker-control.js";
 import { sendHttpRequest } from "../http/http-send-recieve.js";
 import { splitServiceUrl } from "./split-service-url.js";
 
@@ -26,6 +27,10 @@ export function startRelayServiceWorker(self: ServiceWorkerGlobalScope): () => v
   }
 
   const clientsRegistry = newClientsRegistry({ self });
+
+  // Pages bridge to `registration.active` when uncontrolled, so they do not
+  // need this; it is here so any page of this origin can ask for control.
+  register(handleClaimRequests(self));
 
   register(
     handleChannelCalls(self, "REGISTER", async (event, data) => {

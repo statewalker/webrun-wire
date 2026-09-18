@@ -48,7 +48,7 @@ npm install @statewalker/webrun-http-browser
 | Subpath | Purpose |
 | --- | --- |
 | `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs), `@statewalker/webrun-streams` (stream and error helpers) and the `MessageTarget` family from `@statewalker/webrun-rpc` |
-| `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap |
+| `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap; `start()` options `timeout` and `reloadIfUncontrolled` |
 | `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin |
 | `@statewalker/webrun-http-browser/sw-worker` | IIFE bundle of the same-origin SW runtime — ditto, for same-origin apps |
 
@@ -123,6 +123,45 @@ const { baseUrl } = await adapter.register(`${KEY}/api/`, async (request) => {
 
 // fetch(`${baseUrl}anything`) is intercepted by the SW.
 ```
+
+`start()` resolves once the worker is activated **and controls the page** —
+only a controlled page's `fetch()` reaches the worker. Two options bound it:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `timeout` | `30_000` | Upper bound, in ms, for the wait for the worker to activate, take control and answer the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError` (see `reason`) instead of waiting forever. |
+| `reloadIfUncontrolled` | `false` | If the page is still uncontrolled once the worker is active, reload it once instead of rejecting (see below). |
+
+#### When the page is not controlled
+
+A page can load **uncontrolled although its worker is active**: a hard reload
+(Ctrl+Shift+R / Cmd+Shift+R) bypasses ServiceWorkers for that load, and the
+worker's `clients.claim()` already ran when it activated, so nothing ever
+hands the page to it. (Firefox has also been seen leaving a second page of a
+running worker uncontrolled.) `start()` then asks the worker to claim the page
+again — a `CLAIM` call this package's workers answer with `clients.claim()` —
+and waits for `controllerchange`. That takes the page over in Chromium and
+Firefox, both verified by the browser tests.
+
+If it still is not controlled (a worker that does not answer `CLAIM`, a page
+outside the worker's scope), `start()` rejects with a
+`ServiceWorkerControlError` whose `reason` is `"uncontrolled"` and whose message
+says what happened and what to do. With `reloadIfUncontrolled: true` it reloads
+the page instead — a normal reload is a controlled navigation — at most once:
+a `sessionStorage` marker makes a second uncontrolled load reject rather than
+loop. After a failure, calling `start()` again retries.
+
+```ts
+try {
+  await adapter.start();
+} catch (error) {
+  if ((error as Error).name === "ServiceWorkerControlError") showReloadPrompt();
+  else throw error;
+}
+```
+
+Check `name` or `reason`, not `instanceof`: each bundle of this package carries
+its own copy of the class.
 
 The SW script itself ships as a pre-built IIFE bundle. Put a tiny loader
 next to your app pages so the SW's default scope covers them:
@@ -250,9 +289,14 @@ imports keep working after those extractions. Its own surface is below.
 
 | Export | Kind | Purpose |
 | --- | --- | --- |
-| `initServiceWorker(opts)` | function | Registers a SW and resolves once it is activated **and controlling the page**. |
-| `InitServiceWorkerOptions` | interface | `{ swUrl, scopeUrl?, type? }`. |
-| `newServiceWorkerPort()` | function | A `MessagePort` that transparently bridges to the controlling SW. |
+| `initServiceWorker(opts)` | function | Registers a SW and resolves with it once it is activated: the controller, or the registration's active worker when the page is not controlled (the relay only needs to message it). Rejects with a `ServiceWorkerControlError` past `timeout`. |
+| `InitServiceWorkerOptions` | interface | `{ swUrl, scopeUrl?, type?, timeout? }`. |
+| `newServiceWorkerPort(registration?)` | function | A `MessagePort` that transparently bridges to the controlling SW, or to `registration.active` while the page is not controlled. |
+| `awaitActiveServiceWorker(registration, opts?)` | function | Resolves with the registration's worker once `activated`; rejects (`reason: "activation-timeout"`) past `timeout`. |
+| `awaitServiceWorkerControl(registration, opts?)` | function | Resolves with the controller once the page is controlled, asking the worker to claim an uncontrolled page; bounded by `timeout`, optional `reloadIfUncontrolled`. What `SwHttpAdapter.start()` uses. |
+| `handleClaimRequests(self)` | function | Worker side: answers the page's `CLAIM` call with `clients.claim()`. Both of this package's workers install it; use it in a worker of your own. |
+| `ServiceWorkerControlError` | class | `name: "ServiceWorkerControlError"`, `reason`: `"activation-timeout"` (worker did not activate in time), `"uncontrolled"` (active, but the page is not controlled), `"unresponsive"` (controls the page, did not answer `SwHttpAdapter`'s handshake). |
+| `DEFAULT_SERVICE_WORKER_TIMEOUT` / `CLAIM_CALL` | const | `30_000` ms / `"CLAIM"`. |
 
 ### Connection registry
 
@@ -310,10 +354,14 @@ src/
 │   ├── data-calls.ts              │  Transport primitives over a
 │   ├── data-channels.ts           │  `MessageTarget`: one-shot
 │   ├── message-target.ts          │  `callChannel` / `handleChannelCalls`,
-│   └── registry.ts                │  the request/response
+│   ├── registry.ts                │  the request/response
 │                                  │  `newInvokationChannel`, streaming
-│                                  │  `sendStream` / `handleStreams` with
+│   └── service-worker-control.ts  │  `sendStream` / `handleStreams` with
 │                                  │  backpressure, and `newRegistry`.
+│                                  │  Bounded waits for a worker to
+│                                  │  activate / take control, and the
+│                                  │  `CLAIM` request that takes over an
+│                                  │  uncontrolled page.
 │                                  │  Also re-exports
 │                                  │  `@statewalker/webrun-streams`.
 │                                  ┘
@@ -378,6 +426,17 @@ src/
   backpressure — each `next(value)` returns a `Promise<boolean>` that resolves
   once the consumer has dequeued — and drains in-flight producers on consumer
   exit.
+- **No literal `new URL("…", import.meta.url)` in page-side code**.
+  Bundlers (Vite among them) turn that pattern into an emitted asset at build
+  time, before tree-shaking; the relay defaults resolved `"../"` that way,
+  which is the package itself, so every Vite consumer shipped a dead copy of
+  `dist/index.js`. They resolve against a `moduleUrl` variable instead, and
+  `tests/dist/vite-consumer.dist.ts` builds a Vite app to prove nothing is
+  emitted.
+- **Uncontrolled pages are handled per mode**. Same-origin mode needs
+  control — an uncontrolled page's `fetch()` never reaches the worker — so it
+  asks the worker to claim the page. Relay mode needs only a worker to message,
+  so an uncontrolled relay page bridges to `registration.active`.
 - **SW client registry is IndexedDB-persisted**. Both `SwPortDispatcher`
   (same-origin) and `relay/index-sw.ts` keep their client-lookup tables in
   IndexedDB so a SW wake-up after idle doesn't lose its bindings.
@@ -398,6 +457,11 @@ src/
   only controls pages and fetches under `/public/`. If you need a broader
   scope, the SW script must be served with the
   `Service-Worker-Allowed` HTTP header, *or* live higher in the origin.
+- **A hard reload loads the page without its worker.** Handled — see
+  [When the page is not controlled](#when-the-page-is-not-controlled) — as long
+  as the worker answers `CLAIM`. A worker script of your own that
+  `importScripts` this package's `sw-worker.js` or `relay-sw.js` does; one
+  that does not should call `handleClaimRequests(self)`.
 - **`http://localhost` or HTTPS only.** Browsers refuse to register SWs
   on other `http://` origins.
 - **Relay mode needs an iframe-capable sandbox.** Pages with strict CSP
@@ -421,7 +485,16 @@ Runtime:
 
 Dev: TypeScript, vitest, rolldown, rimraf, `http-server` (for the
 `example:*` scripts), `@types/node` (catalog versions from the monorepo
-root).
+root), `playwright` and `vite` (for `test:browser`).
+
+## Tests
+
+- `pnpm test` — unit tests under Node, against the source.
+- `pnpm test:browser` — builds, then runs `tests/browser/` in real Chromium and
+  Firefox through Playwright against the built bundles (first visit, normal
+  reload, hard reload, second tab, the relay page, and the timeout and
+  uncontrolled errors), plus `tests/dist/`, which builds a Vite consumer of
+  the bundles. Needs the browsers: `npx playwright install chromium firefox`.
 
 ## License
 

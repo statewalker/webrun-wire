@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>relay fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for relay mode (see tests/browser/): embeds the
+      // shipped public-relay/relay.html and round-trips one request through
+      // the relay ServiceWorker. Query: key=<service key>.
+      import { callHttpService, initHttpService, newRemoteRelayChannel } from "/dist/index.js";
+
+      const key = new URLSearchParams(location.search).get("key") ?? "K";
+      window.result = (async () => {
+        const started = performance.now();
+        const elapsed = () => Math.round(performance.now() - started);
+        try {
+          const connection = await newRemoteRelayChannel({
+            url: new URL("/public-relay/relay.html", location.href),
+          });
+          await initHttpService(async (request) => new Response(`relayed ${new URL(request.url).pathname}`), {
+            key,
+            port: connection.port,
+          });
+          const response = await callHttpService(new Request(`${connection.baseUrl}~${key}/x`), {
+            key,
+            port: connection.port,
+          });
+          const frame = document.querySelector("iframe").contentWindow;
+          return {
+            ok: true,
+            status: response.status,
+            body: await response.text(),
+            relayControlled: !!frame.navigator.serviceWorker.controller,
+            ms: elapsed(),
+          };
+        } catch (error) {
+          return { ok: false, name: error.name, message: error.message, ms: elapsed() };
+        }
+      })();
+    </script>
+  </body>
+</html>
