@@ -224,8 +224,12 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
   }
 
   function appendObject(data: Record<string, unknown>): void {
+    // Modified from upstream, which walked the keys with for...in and so also wrote enumerable
+    // properties inherited from the prototype. Only own enumerable string keys are written, as
+    // JSON.stringify and structured clone do.
+    const keys = Object.keys(data);
     let length = 0;
-    for (const key in data) {
+    for (const key of keys) {
       if (data[key] !== undefined) {
         length++;
       }
@@ -235,7 +239,7 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
     else if (length <= 0xffff) appendBytes([0xde, length >>> 8, length]);
     else appendBytes([0xdf, length >>> 24, length >>> 16, length >>> 8, length]);
 
-    for (const key in data) {
+    for (const key of keys) {
       const value = data[key];
       if (value !== undefined) {
         append(key);
@@ -466,8 +470,21 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
     if (size < 0) size = readUInt(lengthSize as number);
     const data: Record<string, unknown> = {};
     while (size-- > 0) {
-      const key = read();
-      data[String(key)] = read();
+      const key = String(read());
+      const value = read();
+      // Modified from upstream, which assigned every key: `data["__proto__"] = value` replaces the
+      // object's prototype instead of adding a key (or does nothing, for a primitive value). That
+      // one key is defined as an own data property, as JSON.parse does.
+      if (key === "__proto__") {
+        Object.defineProperty(data, key, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+      } else {
+        data[key] = value;
+      }
     }
     return data;
   }

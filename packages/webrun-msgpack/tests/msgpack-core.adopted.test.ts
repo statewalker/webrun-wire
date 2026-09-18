@@ -210,6 +210,29 @@ describe("msgpack-javascript edge-cases.test.ts", () => {
   });
 });
 
+describe("msgpack-javascript prototype-pollution.test.ts", () => {
+  // The source rejects these keys with a DecodeError. Here a map key is always an own data
+  // property, whatever its name — what JSON.parse does — so nothing is lost and no prototype
+  // changes. Upstream assigned the key, and `obj["__proto__"] = value` replaced the prototype.
+  for (const key of ["__proto__", "constructor", "prototype"]) {
+    it(`decodes ${key} as an own property, not as the prototype`, () => {
+      const o = { foo: "bar" };
+      Object.defineProperty(o, key, { value: new Date(0), enumerable: true });
+      const decoded = deserialize(serialize(o)) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+      expect(Object.keys(decoded)).toEqual(["foo", key]);
+      expect(Object.getOwnPropertyDescriptor(decoded, key)?.value).toEqual(new Date(0));
+      expect(decoded).not.toBeInstanceOf(Date);
+    });
+  }
+
+  it("keeps a __proto__ key whose value is not an object", () => {
+    // Upstream dropped it silently: assigning a primitive to __proto__ is a no-op.
+    const decoded = deserialize(bytes(0x81, 0xa9, ...new TextEncoder().encode("__proto__"), 0x01));
+    expect(Object.getOwnPropertyDescriptor(decoded, "__proto__")?.value).toBe(1);
+  });
+});
+
 describe("msgpack-javascript decodeMulti.test.ts", () => {
   it("decodes multiple objects in a single binary", () => {
     const items = ["foo", 10, { name: "bar" }, [1, 2, 3]];
@@ -354,6 +377,13 @@ describe("msgpackr test.js: basic tests", () => {
     const data = Object.create(null) as Record<string, unknown>;
     data.test = 3;
     expect(roundTrip(data)).toEqual({ test: 3 });
+  });
+
+  it("object with __proto__", () => {
+    // Only own properties are written; upstream's for...in wrote the inherited isAdmin too.
+    const data = { foo: "bar", __proto__: { isAdmin: true } };
+    expect(roundTrip(data)).toEqual({ foo: "bar" });
+    expect(roundTrip(Object.create({ inherited: 1 }))).toEqual({});
   });
 
   it("random strings", () => {

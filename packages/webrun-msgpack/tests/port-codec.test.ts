@@ -1,6 +1,6 @@
 import type { MessageTarget, PortEnvelope } from "@statewalker/webrun-rpc";
 import { describe, expect, it } from "vitest";
-import { msgpackCodec } from "../src/index.js";
+import { msgpackCodec, serialize } from "../src/index.js";
 
 /** A one-shot sink that records what was posted, plus the transfer list. */
 function recordingPort(): MessageTarget & {
@@ -149,6 +149,14 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
     for (let length = 1; length < whole.byteLength; length++) {
       expect(msgpackCodec.read(event(whole.slice(0, length))), `cut at ${length}`).toBeUndefined();
     }
+  });
+
+  it("refuses an envelope whose fields arrive only through a __proto__ key", () => {
+    // { "__proto__": { type: "open", id: 0 } } — when a decoder assigns map keys, this sets the
+    // prototype and the envelope check reads the inherited `type` and `id`.
+    const inner = serialize({ type: "open", id: 0 });
+    const frame = new Uint8Array([0x81, 0xa9, ...new TextEncoder().encode("__proto__"), ...inner]);
+    expect(msgpackCodec.read(event(frame))).toBeUndefined();
   });
 
   it("ignores well-formed msgpack that is not an envelope", () => {
