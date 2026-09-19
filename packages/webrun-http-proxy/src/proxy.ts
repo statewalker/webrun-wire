@@ -10,7 +10,7 @@
  * Everything except the upstream kind is lifted from `services/proxy.ts` and
  * `services/proxy-routes.ts`, which already run in the mesh: longest-prefix
  * matching on segment boundaries, the listing at the mount root, the marker
- * header, the `authorization` rule, route headers applied last, and the body
+ * header, the credential-stripping rule, route headers applied last, and the body
  * handed on unread.
  *
  * TWO DEFECTS OF THE PROVEN CODE ARE FIXED HERE, both measured in the tests:
@@ -42,11 +42,12 @@ export type Upstream = FetchHandler;
 
 export interface UrlUpstreamInit {
   /**
-   * Request headers to drop before re-issuing upstream, beyond the ones this
-   * proxy always drops (`authorization` and the hop-by-hop set).
+   * Request headers to drop before re-issuing upstream, beyond the hop-by-hop
+   * set this proxy always drops.
    *
-   * For anything the surrounding system treats as proven identity and that a
-   * third-party origin has no business seeing.
+   * For the surrounding system's own credential and anything it treats as
+   * proven identity -- what a third-party origin has no business seeing.
+   * `authorization` is forwarded unless it is named here.
    */
   stripRequestHeaders?: readonly string[];
 
@@ -77,17 +78,19 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
     const target = new URL(`.${from.pathname}${from.search}`, ensureSlash(init.base));
 
     const headers = new Headers(request.headers);
-    // The mesh's own credential is consumed by this hop, the way
-    // `Proxy-Authorization` is consumed by the proxy it names. Forwarding it
-    // handed mesh tokens to third parties (an upstream echoed one back) and
-    // turned every call into a preflighted one.
-    headers.delete("authorization");
-    // WHATEVER ELSE THE CALLER'S SYSTEM TREATS AS IDENTITY. This proxy knows
-    // nothing about the caller's trust model, so the names are configuration:
-    // httpeers passes its proven-peer header here, because re-issuing to a
-    // third party must not tell an outside origin which mesh peer called.
-    // Without this a caller would have to post-process the request, by which
-    // point it has already gone.
+    // WHATEVER THE CALLER'S SYSTEM TREATS AS ITS OWN CREDENTIAL OR IDENTITY
+    // is consumed by this hop, the way `Proxy-Authorization` is consumed by the
+    // proxy it names. This proxy knows nothing about the caller's trust model,
+    // so the names are configuration: httpeers passes its membership-token and
+    // proven-peer headers here, because re-issuing to a third party must hand
+    // it neither a mesh token (an upstream once echoed one back) nor which
+    // mesh peer called. Without this a caller would have to post-process the
+    // request, by which point it has already gone.
+    //
+    // `authorization` is NOT on any built-in list. It belongs to the
+    // application talking to the upstream -- a page calling an API with that
+    // API's own key -- and dropping it made such a call impossible through the
+    // proxy. A system that does put its credential there names it here.
     for (const name of init.stripRequestHeaders ?? []) headers.delete(name);
     // Hop-by-hop headers (RFC 9110 §7.6.1) are not the upstream's business.
     for (const hop of HOP_BY_HOP) headers.delete(hop);
