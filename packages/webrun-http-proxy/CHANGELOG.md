@@ -1,5 +1,12 @@
 # @statewalker/webrun-http-proxy
 
+## 0.2.0
+
+### Minor Changes
+
+- The package is `urlUpstream` (with `MARKER` and its types) and nothing else. The route table that 0.1.0 shipped (prefix matching, the listing, the marker on unmatched paths, the route store and the `node`/`browser` entry points) is removed: every caller already has a router, and the twelve scenarios that established the proxy's behaviour pass unchanged against a plain Hono router. Breaking for a caller that used the route table: mount `urlUpstream` in your own router.
+- c7dc018: `urlUpstream` no longer drops `authorization`. That header belongs to the application calling the upstream, and dropping it made calling an API with its own key through the proxy impossible. A system that keeps its own credential in a request header names that header in `stripRequestHeaders`, which is consumed at this hop as before. Breaking for a caller that relied on the implicit drop: add `"authorization"` to `stripRequestHeaders` to keep the old behaviour.
+
 ## 0.1.0
 
 ### Minor Changes

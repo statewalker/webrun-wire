@@ -56,6 +56,7 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
       describe: `${origin}/echo`,
       upstream: urlUpstream({
         base: `${origin}/echo`,
+        stripRequestHeaders: ["x-mesh-token"],
         headers: { "x-route-header": "from-route" },
         credential: () => ({ "x-upstream-credential": "secret-value" }),
         via: "1.1 webrun",
@@ -126,13 +127,23 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
     );
   }
 
-  // 3 — HYGIENE: the mesh credential is consumed, not forwarded.
+  // 3 — HYGIENE: what the caller's system names as its own credential is
+  // consumed at this hop, and nothing else is. `authorization` belongs to the
+  // application talking to the upstream -- a page calling an API through the
+  // proxy with that API's key -- so it is forwarded like any other header.
   {
-    const res = await call("/proxy/echo/x", { headers: { authorization: "Bearer MESH-TOKEN" } });
+    const res = await call("/proxy/echo/x", {
+      headers: { "x-mesh-token": "MESH-TOKEN", authorization: "Bearer APP-KEY" },
+    });
     const body = (await res.json()) as { headers: Record<string, string> };
     check(
-      "url upstream: the mesh authorization is NOT forwarded",
-      body.headers.authorization === undefined,
+      "url upstream: a header named in stripRequestHeaders is NOT forwarded",
+      body.headers["x-mesh-token"] === undefined,
+      JSON.stringify(body.headers),
+    );
+    check(
+      "url upstream: the caller's authorization IS forwarded",
+      body.headers.authorization === "Bearer APP-KEY",
       JSON.stringify(body.headers),
     );
   }
@@ -165,8 +176,8 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
     );
   }
 
-  // 5 — a LOCAL upstream keeps the caller's authorization: identity must not
-  // be stripped on the way to a handler inside the mesh.
+  // 5 — a LOCAL upstream keeps the caller's headers: identity must not be
+  // stripped on the way to a handler inside the mesh.
   {
     const res = await call("/proxy/local/x", { headers: { authorization: "Bearer MESH-TOKEN" } });
     const text = await res.text();

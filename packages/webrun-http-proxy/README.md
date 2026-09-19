@@ -44,11 +44,14 @@ have written bearer keys into `localStorage`.)
 
 None of this is obvious, and all of it was found by measurement:
 
-- The caller's `authorization` is **consumed by this hop**, the way
-  `Proxy-Authorization` is consumed by the proxy it names. Forwarding it handed
-  a bearer token to an upstream that echoed it straight back.
-- `stripRequestHeaders` drops whatever else the caller's system treats as
-  proven identity. A third-party origin has no business seeing it.
+- Whatever `stripRequestHeaders` names — the caller's own credential and
+  whatever else its system treats as proven identity — is **consumed by this
+  hop**, the way `Proxy-Authorization` is consumed by the proxy it names. A
+  third-party origin has no business seeing it: forwarding a mesh token once
+  handed it to an upstream that echoed it straight back.
+- `authorization` is **not** special. It belongs to the application calling
+  the upstream (a page calling an API with that API's key) and is forwarded
+  unless you name it in `stripRequestHeaders`. `credential` still wins over it.
 - Hop-by-hop headers (RFC 9110 §7.6.1) are dropped.
 - `credential` is read at **request** time, so a key can be typed while traffic
   flows.
@@ -60,7 +63,7 @@ None of this is obvious, and all of it was found by measurement:
 
 A **local** handler is just a `FetchHandler` you route to directly: do not put
 it behind this. Calling a handler on this side of the proxy must **not** strip
-`authorization`, because it still needs to know who is calling.
+the caller's credential, because it still needs to know who is calling.
 
 ## One row a browser cannot pass
 
@@ -81,7 +84,7 @@ to exempt, and the dependency list is **empty**.
 Extracted from `@statewalker/httpeers-expose`, where it was a mesh concept by
 accident of where it was written. Nothing in it is about peers. The one place
 the old package knew about meshes is now `stripRequestHeaders`: httpeers passes
-its proven-peer header there.
+its membership-token and proven-peer headers there.
 
 **9 tests**, and the twelve scenarios run inside two of them — the suite
 asserts that every scenario ran (guarding against an empty list) and that none

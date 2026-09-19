@@ -11,11 +11,12 @@
  * What is genuinely this package's own is `urlUpstream`, and it is not
  * obvious:
  *
- *   - the caller's `authorization` is CONSUMED by this hop, the way
- *     `Proxy-Authorization` is consumed by the proxy it names. Forwarding it
- *     handed bearer tokens to an upstream that echoed them back;
- *   - `stripRequestHeaders` removes whatever else the caller's system treats
- *     as identity, because a third-party origin has no business seeing it;
+ *   - `stripRequestHeaders` names the caller's own credential and whatever
+ *     else its system treats as identity; those are CONSUMED by this hop, the
+ *     way `Proxy-Authorization` is consumed by the proxy it names, because a
+ *     third-party origin has no business seeing them. `authorization` is not
+ *     special: it belongs to the application calling the upstream and is
+ *     forwarded unless named;
  *   - hop-by-hop headers (RFC 9110 §7.6.1) are dropped;
  *   - the credential is read at REQUEST time, so it can be typed while traffic
  *     flows;
