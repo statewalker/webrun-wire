@@ -45,4 +45,27 @@ describe("splitServiceUrl", () => {
       path: "q/r",
     });
   });
+
+  // THE DEFECT: the separator was found with `indexOf` on the whole URL
+  // string, so anything containing `~` looked like a service URL.
+  it("does not treat a query string as a service", () => {
+    const res = splitServiceUrl("https://host.com/index.html?q=~foo");
+    expect(res.key).toBe("");
+    expect(res.baseUrl).toBe("");
+    expect(res.path).toBe("");
+  });
+
+  it("does not treat a `~` inside a path segment as a service", () => {
+    expect(splitServiceUrl("https://host.com/files/a~b/c").key).toBe("");
+  });
+
+  it("does not treat a `~` in the fragment as a service", () => {
+    expect(splitServiceUrl("https://host.com/page#~FS").key).toBe("");
+  });
+
+  it("still splits a service URL that carries a query", () => {
+    const res = splitServiceUrl("https://host.com/~FS/a/b.txt?x=1");
+    expect(res.key).toBe("FS");
+    expect(res.path).toBe("a/b.txt");
+  });
 });

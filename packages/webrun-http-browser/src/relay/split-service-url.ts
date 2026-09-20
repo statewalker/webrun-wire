@@ -12,19 +12,30 @@ export interface SplitServiceUrl {
  */
 export function splitServiceUrl(url: URL | string, separator = "~"): SplitServiceUrl {
   const str = `${url}`;
-  const idx = str.indexOf(separator);
-  let baseUrl = "";
-  let key = "";
-  let path = "";
-  if (idx >= 0) {
-    baseUrl = str.substring(0, idx + separator.length);
-    str.substring(idx + separator.length).replace(/^([^/]+)/, (match, $1) => {
-      baseUrl += match;
-      if (baseUrl.length < str.length) baseUrl += "/";
-      key = $1;
-      path = str.substring(baseUrl.length);
-      return "";
-    });
+  const empty = { url: str, key: "", baseUrl: "", path: "" };
+
+  // ANCHORED TO THE PATHNAME, AND TO A SEGMENT BOUNDARY. This used to be
+  // `str.indexOf(separator)` over the whole URL, so `/index.html?q=~foo` named
+  // a service `foo` and a file called `a~b` named a service `b`. Harmless
+  // while every service lived under `/~key/`; wrong the moment a host mounts a
+  // service at the origin root and owns ordinary paths.
+  let pathname: string;
+  let origin: string;
+  try {
+    const parsed = new URL(str, "http://relay.invalid");
+    pathname = parsed.pathname;
+    origin = str.startsWith(parsed.origin) ? parsed.origin : "";
+  } catch {
+    return empty;
   }
+
+  if (!pathname.startsWith(`/${separator}`)) return empty;
+  const rest = pathname.slice(separator.length + 1);
+  const slash = rest.indexOf("/");
+  const key = slash < 0 ? rest : rest.slice(0, slash);
+  if (key === "") return empty;
+
+  const baseUrl = `${origin}/${separator}${key}${slash < 0 ? "" : "/"}`;
+  const path = slash < 0 ? "" : rest.slice(slash + 1);
   return { url: str, key, baseUrl, path };
 }
