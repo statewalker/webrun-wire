@@ -100,6 +100,8 @@ export interface RelayServiceWorkerOptions {
   canRegister?: (client: Client, key: string) => boolean | Promise<boolean>;
   /** Default `"last-wins"`, the behaviour before this option existed. */
   takeover?: "first-wins" | "last-wins";
+  /** Stamp headers on responses the relay makes. Not applied to network fetches. */
+  decorateResponse?: (response: Response, request: Request) => Response;
 }
 
 /**
@@ -218,15 +220,17 @@ export function startRelayServiceWorker(
           const data = { type: "http", key };
           const accepted = await callChannel<boolean>(client, "CONNECT", data, channel.port2);
           if (!accepted) throw HttpError.errorForbidden(params);
-          return await sendHttpRequest(channel.port1, request);
+          const response = await sendHttpRequest(channel.port1, request);
+          return options.decorateResponse?.(response, request) ?? response;
         } catch (error) {
           const httpError = HttpError.fromError(error);
-          const options = httpError.getResponseOptions(params);
-          return new Response(JSON.stringify(options), {
+          const errorOptions = httpError.getResponseOptions(params);
+          const errorResponse = new Response(JSON.stringify(errorOptions), {
             status: httpError.status ?? 500,
             statusText: httpError.statusText ?? "Internal Error",
             headers: { "Content-Type": "application/json" },
           });
+          return options.decorateResponse?.(errorResponse, request) ?? errorResponse;
         }
       })(),
     );

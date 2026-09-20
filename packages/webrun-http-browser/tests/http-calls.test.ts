@@ -1,8 +1,10 @@
 import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
+import { handleChannelCalls } from "../src/core/data-calls.js";
 import type { MessageTarget } from "../src/core/message-target.js";
 import { newRegistry } from "../src/core/registry.js";
 import { handleHttpRequests, sendHttpRequest } from "../src/http/http-send-recieve.js";
+import { initHttpService } from "../src/relay/index.js";
 
 function asTarget(port: MessagePort): MessageTarget {
   return port as unknown as MessageTarget;
@@ -94,5 +96,43 @@ describe("HTTP send/receive over a MessageChannel", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe("a service registers where it is mounted", () => {
+  it("passes its path to REGISTER", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    // A stand-in for the worker end of the channel: record what REGISTER got.
+    const { port1, port2 } = new MessageChannel();
+    handleChannelCalls(port2, "REGISTER", async (_event, data) => {
+      seen.push(data as Record<string, unknown>);
+      return true;
+    });
+    handleChannelCalls(port2, "UNREGISTER", async () => true);
+
+    const stop = await initHttpService(async () => new Response("ok"), {
+      key: "app",
+      path: "/",
+      port: port1,
+    });
+    expect(seen).toEqual([{ key: "app", path: "/" }]);
+    await stop();
+  });
+
+  it("omits the path when the service did not ask for one", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { port1, port2 } = new MessageChannel();
+    handleChannelCalls(port2, "REGISTER", async (_event, data) => {
+      seen.push(data as Record<string, unknown>);
+      return true;
+    });
+    handleChannelCalls(port2, "UNREGISTER", async () => true);
+
+    const stop = await initHttpService(async () => new Response("ok"), {
+      key: "FS",
+      port: port1,
+    });
+    expect(seen).toEqual([{ key: "FS" }]);
+    await stop();
   });
 });

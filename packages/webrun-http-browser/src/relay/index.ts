@@ -80,6 +80,11 @@ async function registerServiceWorker({
 
 export interface ServiceOptions {
   key: string;
+  /**
+   * Where this service is mounted on the relay origin, e.g. `/` or `/peers/`.
+   * Omitted, the service stays reachable at `/~<key>/`, as before mounts.
+   */
+  path?: string;
   port: MessageTarget;
 }
 
@@ -89,10 +94,11 @@ export interface ServiceOptions {
  */
 export async function initHttpService(
   handler: HttpHandler,
-  { key, port }: ServiceOptions,
+  { key, path, port }: ServiceOptions,
 ): Promise<() => void> {
   return await registerConnectionsHandler({
     key,
+    path,
     communicationPort: port,
     handler: async (_event, _data, callPort) => {
       handleHttpRequests(callPort, handler);
@@ -258,17 +264,22 @@ export async function initializeConnection({
 
 export interface RegisterConnectionsHandlerOptions {
   key: string;
+  /** Where this service is mounted; see `ServiceOptions.path`. */
+  path?: string;
   handler: (event: MessageEvent, data: unknown, port: MessagePort) => boolean | Promise<boolean>;
   communicationPort: MessageTarget;
 }
 
 export async function registerConnectionsHandler({
   key,
+  path,
   handler,
   communicationPort,
 }: RegisterConnectionsHandlerOptions): Promise<() => void> {
   const [register, cleanup] = newRegistry();
-  await callChannel(communicationPort, "REGISTER", { key });
+  // `path` is omitted rather than sent as undefined: the worker distinguishes
+  // "mounted at /" from "not mounted", and a key with no path keeps /~<key>/.
+  await callChannel(communicationPort, "REGISTER", path == null ? { key } : { key, path });
   register(() => callChannel(communicationPort, "UNREGISTER", { key }));
   register(
     handleChannelCalls(communicationPort, "CONNECT", async (event, data, port) => {

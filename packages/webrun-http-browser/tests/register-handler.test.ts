@@ -148,3 +148,59 @@ describe('REGISTER: takeover "first-wins"', () => {
     }
   });
 });
+
+describe("decorateResponse", () => {
+  it("stamps the relay's own error response, but never a network fallthrough", async () => {
+    const { self } = makeSelf();
+    const decorateResponse = vi.fn((response: Response) => {
+      const headers = new Headers(response.headers);
+      headers.set("X-Decorated", "1");
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    });
+    // Mounted at "/app/" but no client ever registered: a request under it
+    // takes the catch branch, which is exactly what this test targets.
+    const stop = startRelayServiceWorker(self, {
+      mounts: [{ key: "app", path: "/app/" }],
+      decorateResponse,
+    });
+    try {
+      const errorResponse = await dispatchFetch(self, "https://relay.example/app/x");
+      expect(errorResponse.headers.get("X-Decorated")).toBe("1");
+      expect(decorateResponse).toHaveBeenCalledTimes(1);
+
+      // A path outside the mount table (and not `/~key/`) is nobody's, so it
+      // falls through to the network, whose response must come back exactly
+      // as `fetch` gave it -- undecorated.
+      const networkResponse = new Response("from the network");
+      const fetchSpy = vi.fn(async () => networkResponse);
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const passThrough = await dispatchFetch(self, "https://relay.example/other");
+      expect(passThrough).toBe(networkResponse);
+      expect(passThrough.headers.get("X-Decorated")).toBeNull();
+      expect(decorateResponse).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+});
+
+/** Dispatches a `fetch` event the way the browser would, and resolves with
+ * whatever `respondWith` was given. */
+function dispatchFetch(self: ServiceWorkerGlobalScope, url: string): Promise<Response> {
+  const request = new Request(url);
+  let captured: Promise<Response> | undefined;
+  const fetchEvent = Object.assign(new Event("fetch"), {
+    request,
+    respondWith: (p: Promise<Response>) => {
+      captured = p;
+    },
+  });
+  (self as unknown as EventTarget).dispatchEvent(fetchEvent);
+  if (!captured) throw new Error("fetch listener did not call respondWith");
+  return captured;
+}
