@@ -49,7 +49,8 @@ npm install @statewalker/webrun-http-browser
 | --- | --- |
 | `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs), `@statewalker/webrun-streams` (stream and error helpers) and the `MessageTarget` family from `@statewalker/webrun-rpc` |
 | `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap; `start()` options `timeout` and `reloadIfUncontrolled` |
-| `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin |
+| `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin. No declarations: it takes its options from `self.RELAY_OPTIONS` |
+| `@statewalker/webrun-http-browser/relay-worker` | The same runtime as a typed ES module, for a host that bundles its own relay worker: `startRelayServiceWorker(self, options)`, plus `RelayServiceWorkerOptions` and `MountSpec` to type them (including a hand-written `self.RELAY_OPTIONS`) |
 | `@statewalker/webrun-http-browser/sw-worker` | IIFE bundle of the same-origin SW runtime — ditto, for same-origin apps |
 
 ## Examples
@@ -122,17 +123,29 @@ whenever more than one service shared a port — fixed before this shipped.)
 
 The worker routes by the longest matching path prefix, so a catch-all at `/`
 does not shadow `/peers/`, and registration order does not matter. A service
-registered with no `path` is reachable at `/~<key>/`, exactly as before.
+registered with no `path` is reachable at `/~<key>/`, exactly as before —
+unless the host declared that key in `mounts`, in which case the host's mount
+stands and the page need not repeat it.
 
-**A request that matches no mount is not the relay's** — it goes to the
-network. That is what lets a host serve its own files from the same origin,
-and it is why a root mount needs `exclude`. These options are read by
-`startRelayServiceWorker`, the SW-side function a host building its own relay
-worker bundle from source calls directly (it is not re-exported from the
-package root — see the options table below for the shipped-bundle
-equivalent):
+**A request that matches no mount is not the relay's** — the worker does not
+answer it at all, so the browser performs it exactly as it would with no
+worker installed. That is what lets a host serve its own files from the same
+origin, and it is why a root mount needs `exclude`.
+
+**The matched prefix is NOT stripped.** A handler mounted at `/peers/`
+receives `/peers/12D3Koo/llm`, not `/12D3Koo/llm` — the request reaches it
+with the path the browser asked for, whichever mount matched. A handler that
+wants to route relative to its mount keeps its own `basePath` and strips the
+prefix itself.
+
+These options are read by `startRelayServiceWorker`, which a host that
+bundles its own relay worker imports from
+`@statewalker/webrun-http-browser/relay-worker` and calls directly (see the
+options table below for the prebuilt-bundle equivalent):
 
 ```ts
+import { startRelayServiceWorker } from "@statewalker/webrun-http-browser/relay-worker";
+
 startRelayServiceWorker(self, {
   exclude: (url) =>
     url.pathname === "/index.html" ||
@@ -143,6 +156,16 @@ startRelayServiceWorker(self, {
   decorateResponse: (response) => withMyHeaders(response),
 });
 ```
+
+> **Mounting at `/` — set `takeover: "first-wins"` and `canRegister`.**
+> The default is `takeover: "last-wins"` with no `canRegister`, which is what
+> the relay has always done: the last page to REGISTER a key gets it. Before
+> mounts the worst that bought a rogue or buggy same-origin page was
+> `/~<key>/`; with mounts it can claim the **origin root**, and the mount is
+> persisted in IndexedDB, so it outlives the page and every worker restart.
+> On an origin where more than the host's own page can reach the relay,
+> `takeover: "first-wins"` keeps a live holder's key and `canRegister` says
+> which client may ask for it — set both, together, for any mount at `/`.
 
 A root mount claims *every* path under the worker's scope, including the
 host's own navigation. If `exclude` only covers the relay page and its
@@ -171,12 +194,20 @@ importScripts("/path/to/node_modules/@statewalker/webrun-http-browser/dist/relay
 
 This is the only way a prebuilt-worker host reaches `exclude`, `takeover`,
 `canRegister` or `decorateResponse` — omit it and the worker boots with `{}`,
-exactly as it did before mounts.
+exactly as it did before mounts. The bundle ships no declarations, so to type
+that object (in a TypeScript loader script, or to check it before shipping)
+import the type from the runtime entry:
+
+```ts
+import type { RelayServiceWorkerOptions } from "@statewalker/webrun-http-browser/relay-worker";
+
+declare const self: ServiceWorkerGlobalScope & { RELAY_OPTIONS?: RelayServiceWorkerOptions };
+```
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `mounts` | none | A fixed table, for a host that knows its services at build time. Each entry is `{ key, path? , match? }`. |
-| `exclude` | none | Paths the relay never claims. Checked before the table. |
+| `mounts` | none | A fixed table, for a host that knows its services at build time. Each entry is `{ key, path? , match? }`. A key declared here is the host's: a page's REGISTER or UNREGISTER for the same key never replaces or removes it, so the page can register with no `path` of its own. |
+| `exclude` | none | Paths the relay never claims — neither through the table nor through the `/~<key>/` spelling. Checked first. |
 | `canRegister` | everyone | Refuse a registration from the wrong page. |
 | `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key. |
 | `decorateResponse` | none | Stamp headers on responses the relay makes; not applied to network fetches. |

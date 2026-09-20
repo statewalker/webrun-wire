@@ -8,7 +8,10 @@
 export default {
   test: {
     environment: "node",
-    include: ["tests/browser/**/*.browser.ts", "tests/dist/**/*.dist.ts"],
+    // `tests/dist/**` was here too, and could never have matched anything:
+    // `dist/` is gitignored repo-wide, so a test file under it is invisible to
+    // git. The packaging tests live in `tests/packaging/` instead.
+    include: ["tests/browser/**/*.browser.ts", "tests/packaging/**/*.dist.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
   },
