@@ -168,10 +168,16 @@ export function startRelayServiceWorker(
         throw new Error(`this client may not register "${key}"`);
       }
 
-      const current = await clientsRegistry.getMount(key);
-      const isCurrentLive = current != null && (await clientsRegistry.getClient(key)) != null;
-      if (!mayRegister({ current, candidateId: source.id, isCurrentLive, takeover })) {
-        throw new Error(`"${key}" is already served by another client`);
+      // `last-wins` -- the untouched default -- must cost exactly what it did
+      // before this option existed: no registry lookup beyond `addClient`'s
+      // own. Only `first-wins` needs to know who currently holds the key and
+      // whether they are still live, so only it pays for finding out.
+      if (takeover === "first-wins") {
+        const current = await clientsRegistry.getMount(key);
+        const isCurrentLive = current != null && (await clientsRegistry.getClient(key)) != null;
+        if (!mayRegister({ current, candidateId: source.id, isCurrentLive, takeover })) {
+          throw new Error(`"${key}" is already served by another client`);
+        }
       }
 
       const added = await clientsRegistry.addClient(key, source, path);
