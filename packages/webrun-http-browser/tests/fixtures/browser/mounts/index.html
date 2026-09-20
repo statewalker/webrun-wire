@@ -5,17 +5,15 @@
     <script type="module">
       // Browser-test fixture for mounts (see tests/browser/relay-mounts.browser.ts).
       //
-      // Registers two mounted services through the relay and then waits to be
-      // CONTROLLED by the relay worker -- without control the page's own
-      // `fetch()` never reaches the worker, and a mount could not be observed
-      // from here at all.
+      // TWO SERVICES, ONE RELAY CONNECTION, ONE IFRAME -- the shape mounts
+      // exist for: an app at the scope root and a mesh gateway one level down,
+      // in one session origin. `registerConnectionsHandler` routes a CONNECT
+      // by its key, so the two services share this port without answering each
+      // other's calls.
       //
-      // ONE RELAY CONNECTION PER SERVICE, deliberately. `registerConnectionsHandler`
-      // installs its CONNECT handler on the communication port with no key
-      // filter, so two services sharing one port would both answer every
-      // CONNECT and both write their response onto the same stream channel.
-      // Each service therefore gets its own relay iframe, which is also its own
-      // ServiceWorker client -- the shape a host with several mounts needs today.
+      // The page then waits to be CONTROLLED by the relay worker: without
+      // control its own `fetch()` never reaches the worker, and a mount could
+      // not be observed from here at all.
       import { initHttpService, newRemoteRelayChannel } from "/dist/index.js";
 
       const BASE = "/tests/fixtures/browser/mounts/";
@@ -29,11 +27,11 @@
         const started = performance.now();
         const elapsed = () => Math.round(performance.now() - started);
         try {
+          const connection = await newRemoteRelayChannel({
+            baseUrl: new URL("./", import.meta.url),
+            url: new URL("./relay.html", import.meta.url),
+          });
           for (const { key, path } of SERVICES) {
-            const connection = await newRemoteRelayChannel({
-              baseUrl: new URL("./", import.meta.url),
-              url: new URL("./relay.html", import.meta.url),
-            });
             await initHttpService(
               async (request) => new Response(`${key}:${new URL(request.url).pathname}`),
               { key, path, port: connection.port },
