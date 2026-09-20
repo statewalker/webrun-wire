@@ -68,4 +68,35 @@ describe("splitServiceUrl", () => {
     expect(res.key).toBe("FS");
     expect(res.path).toBe("a/b.txt");
   });
+
+  // FIX: preserve the origin from the input, not from the normalized URL
+  it("preserves protocol-relative URLs (//host)", () => {
+    const res = splitServiceUrl("//host.com/~FS/a");
+    expect(res).toEqual({
+      url: "//host.com/~FS/a",
+      key: "FS",
+      baseUrl: "//host.com/~FS/",
+      path: "a",
+    });
+  });
+
+  it("preserves mixed-case schemes", () => {
+    const res = splitServiceUrl("HTTPS://host.com/~FS/a");
+    expect(res).toEqual({
+      url: "HTTPS://host.com/~FS/a",
+      key: "FS",
+      baseUrl: "HTTPS://host.com/~FS/",
+      path: "a",
+    });
+  });
+
+  it("handles relative URLs without injecting a leading slash", () => {
+    const res = splitServiceUrl("~FS/a/b");
+    expect(res).toEqual({
+      url: "~FS/a/b",
+      key: "FS",
+      baseUrl: "~FS/",
+      path: "a/b",
+    });
+  });
 });

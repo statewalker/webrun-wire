@@ -14,28 +14,69 @@ export function splitServiceUrl(url: URL | string, separator = "~"): SplitServic
   const str = `${url}`;
   const empty = { url: str, key: "", baseUrl: "", path: "" };
 
-  // ANCHORED TO THE PATHNAME, AND TO A SEGMENT BOUNDARY. This used to be
-  // `str.indexOf(separator)` over the whole URL, so `/index.html?q=~foo` named
-  // a service `foo` and a file called `a~b` named a service `b`. Harmless
-  // while every service lived under `/~key/`; wrong the moment a host mounts a
-  // service at the origin root and owns ordinary paths.
-  let pathname: string;
-  let origin: string;
-  try {
-    const parsed = new URL(str, "http://relay.invalid");
-    pathname = parsed.pathname;
-    origin = str.startsWith(parsed.origin) ? parsed.origin : "";
-  } catch {
-    return empty;
+  // Strip query and fragment to prevent false positives on `?q=~foo` or `#~FS`.
+  // Extract the prefix (origin) and path from the input verbatim, preserving case
+  // and form (e.g., `//host` vs. `http://host`, `HTTPS://` vs. `https://`).
+  const hashIdx = str.indexOf("#");
+  const queryIdx = str.indexOf("?");
+  let strippedEnd = str.length;
+  if (hashIdx >= 0) strippedEnd = Math.min(strippedEnd, hashIdx);
+  if (queryIdx >= 0) strippedEnd = Math.min(strippedEnd, queryIdx);
+  const stripped = str.slice(0, strippedEnd);
+
+  // Identify where the path begins in the input. Three cases:
+  // 1. scheme://authority/path — prefix is scheme://authority
+  // 2. //authority/path — prefix is //authority
+  // 3. relative path — prefix is empty
+  let prefixEnd = 0;
+  const schemeMatch = stripped.match(/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//);
+  if (schemeMatch) {
+    // scheme://authority/path — find the next / after the scheme
+    prefixEnd = schemeMatch[0].length;
+    const slashIdx = stripped.indexOf("/", prefixEnd);
+    if (slashIdx >= 0) {
+      prefixEnd = slashIdx;
+    } else {
+      return empty; // No path
+    }
+  } else if (stripped.startsWith("//")) {
+    // //authority/path — find the next / after the //
+    prefixEnd = 2;
+    const slashIdx = stripped.indexOf("/", prefixEnd);
+    if (slashIdx >= 0) {
+      prefixEnd = slashIdx;
+    } else {
+      return empty; // No path
+    }
+  }
+  // else prefixEnd = 0: relative URL
+
+  const prefix = stripped.slice(0, prefixEnd);
+  const pathPart = stripped.slice(prefixEnd);
+
+  // Check if pathPart starts with the separator, anchored at the segment boundary.
+  // For absolute/protocol-relative URLs: must be `/<separator>`
+  // For relative URLs: must be `<separator>`
+  let keyStart: number;
+  if (prefix === "") {
+    // Relative URL (no authority)
+    if (!pathPart.startsWith(separator)) return empty;
+    keyStart = separator.length;
+  } else {
+    // Absolute or protocol-relative URL (has authority)
+    if (!pathPart.startsWith(`/${separator}`)) return empty;
+    keyStart = separator.length + 1;
   }
 
-  if (!pathname.startsWith(`/${separator}`)) return empty;
-  const rest = pathname.slice(separator.length + 1);
+  const rest = pathPart.slice(keyStart);
   const slash = rest.indexOf("/");
   const key = slash < 0 ? rest : rest.slice(0, slash);
   if (key === "") return empty;
 
-  const baseUrl = `${origin}/${separator}${key}${slash < 0 ? "" : "/"}`;
+  const baseUrl =
+    prefix === ""
+      ? `${separator}${key}${slash < 0 ? "" : "/"}`
+      : `${prefix}/${separator}${key}${slash < 0 ? "" : "/"}`;
   const path = slash < 0 ? "" : rest.slice(slash + 1);
   return { url: str, key, baseUrl, path };
 }
