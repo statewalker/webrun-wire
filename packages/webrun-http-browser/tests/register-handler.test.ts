@@ -15,6 +15,8 @@
  *    refused client's path must still miss the relay and reach the network.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { handleChannelCalls } from "../src/core/data-calls.js";
+import { handleHttpRequests } from "../src/http/http-send-recieve.js";
 import { startRelayServiceWorker } from "../src/relay/index-sw.js";
 
 const { idbStore, idbGet, idbSet } = vi.hoisted(() => {
@@ -42,6 +44,17 @@ class FakeClients {
     const client = { id };
     this.byId.set(id, client);
     return client;
+  }
+  /**
+   * A client backed by a real `MessagePort`, so the worker's own CONNECT call
+   * (`callChannel(client, "CONNECT", ...)`) actually reaches something.
+   * Returns the far end, for the test to answer on as the page side would.
+   */
+  addLive(id: string): MessagePort {
+    const { port1, port2 } = new MessageChannel();
+    const client = Object.assign(port1, { id }) as unknown as FakeClientRecord;
+    this.byId.set(id, client);
+    return port2;
   }
 }
 
@@ -185,6 +198,41 @@ describe("decorateResponse", () => {
       expect(decorateResponse).toHaveBeenCalledTimes(1);
     } finally {
       stop();
+    }
+  });
+
+  it("stamps a successful relayed response too", async () => {
+    const { self, clients } = makeSelf();
+    // A live client behind "app": answers CONNECT and then the HTTP request
+    // itself, so `sendHttpRequest` in the SW's success branch actually
+    // resolves with a response instead of throwing into the catch branch.
+    const farPort = clients.addLive("A");
+    const stopClient = handleChannelCalls(farPort, "CONNECT", async (_event, _data, callPort) => {
+      handleHttpRequests(callPort as unknown as MessagePort, async () => new Response("hi"));
+      return true;
+    });
+
+    const decorateResponse = vi.fn((response: Response) => {
+      const headers = new Headers(response.headers);
+      headers.set("X-Decorated", "1");
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    });
+    const stop = startRelayServiceWorker(self, { decorateResponse });
+    try {
+      const registered = await register(self, "A", "app", "/app/");
+      expect(registered).toEqual({ result: true });
+
+      const response = await dispatchFetch(self, "https://relay.example/app/x");
+      expect(await response.text()).toBe("hi");
+      expect(response.headers.get("X-Decorated")).toBe("1");
+      expect(decorateResponse).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+      stopClient();
     }
   });
 });

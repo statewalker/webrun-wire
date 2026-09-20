@@ -116,6 +116,9 @@ describe("a service registers where it is mounted", () => {
       port: port1,
     });
     expect(seen).toEqual([{ key: "app", path: "/" }]);
+    // toEqual alone would also pass a stray `path: undefined`; pin the
+    // property itself as present and correct, not just deep-equal.
+    expect(seen[0]).toHaveProperty("path", "/");
     await stop();
   });
 
@@ -132,7 +135,13 @@ describe("a service registers where it is mounted", () => {
       key: "FS",
       port: port1,
     });
+    // `toEqual` alone would also pass `{ key: "FS", path: undefined }` --
+    // vitest's toEqual (Jest-compatible) ignores undefined-valued properties.
+    // `path` must be genuinely OMITTED, not sent as `undefined`, so assert
+    // the property's absence directly.
     expect(seen).toEqual([{ key: "FS" }]);
+    expect(seen[0]).not.toHaveProperty("path");
+    expect(Object.keys(seen[0])).toEqual(["key"]);
     await stop();
   });
 });
