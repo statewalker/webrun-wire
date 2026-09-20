@@ -26,6 +26,7 @@ import { defineConfig } from "rolldown";
 const entries = [
   { name: "index", input: "src/index.ts", format: "esm" },
   { name: "sw", input: "src/sw.ts", format: "esm" },
+  { name: "relay-worker", input: "src/relay-worker.ts", format: "esm" },
   { name: "relay-sw", input: "src/relay-sw.ts", format: "iife" },
   { name: "sw-worker", input: "src/sw-worker.ts", format: "iife" },
 ];

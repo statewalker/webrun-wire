@@ -1,6 +1,6 @@
 import type { HttpHandler } from "@statewalker/webrun-http-streams";
 import { serializeError } from "@statewalker/webrun-streams";
-import { callChannel, handleChannelCalls } from "../core/data-calls.js";
+import { type ChannelCallHandler, callChannel } from "../core/data-calls.js";
 import type { MessageTarget } from "../core/message-target.js";
 import { newRegistry } from "../core/registry.js";
 import {
@@ -80,6 +80,11 @@ async function registerServiceWorker({
 
 export interface ServiceOptions {
   key: string;
+  /**
+   * Where this service is mounted on the relay origin, e.g. `/` or `/peers/`.
+   * Omitted, the service stays reachable at `/~<key>/`, as before mounts.
+   */
+  path?: string;
   port: MessageTarget;
 }
 
@@ -89,10 +94,11 @@ export interface ServiceOptions {
  */
 export async function initHttpService(
   handler: HttpHandler,
-  { key, port }: ServiceOptions,
+  { key, path, port }: ServiceOptions,
 ): Promise<() => void> {
   return await registerConnectionsHandler({
     key,
+    path,
     communicationPort: port,
     handler: async (_event, _data, callPort) => {
       handleHttpRequests(callPort, handler);
@@ -258,22 +264,72 @@ export async function initializeConnection({
 
 export interface RegisterConnectionsHandlerOptions {
   key: string;
+  /** Where this service is mounted; see `ServiceOptions.path`. */
+  path?: string;
   handler: (event: MessageEvent, data: unknown, port: MessagePort) => boolean | Promise<boolean>;
   communicationPort: MessageTarget;
 }
 
 export async function registerConnectionsHandler({
   key,
+  path,
   handler,
   communicationPort,
 }: RegisterConnectionsHandlerOptions): Promise<() => void> {
   const [register, cleanup] = newRegistry();
-  await callChannel(communicationPort, "REGISTER", { key });
+  // `path` is omitted rather than sent as undefined: the worker distinguishes
+  // "mounted at /" from "not mounted", and a key with no path keeps /~<key>/.
+  await callChannel(communicationPort, "REGISTER", path == null ? { key } : { key, path });
   register(() => callChannel(communicationPort, "UNREGISTER", { key }));
   register(
-    handleChannelCalls(communicationPort, "CONNECT", async (event, data, port) => {
+    handleKeyedChannelCalls(communicationPort, "CONNECT", key, async (event, data, port) => {
       return await handler(event, data, port);
     }),
   );
   return cleanup;
+}
+
+/**
+ * `handleChannelCalls`, but only for calls whose `params.key` is `key`.
+ *
+ * ONE CONNECTION CARRIES SEVERAL SERVICES — an app at `/` and a mesh gateway
+ * at `/peers/` over one relay iframe is the shape mounts exist for. Plain
+ * `handleChannelCalls` cannot do that: every listener it has for a call type
+ * runs on every message, and each is handed the SAME reply port and the SAME
+ * transferred stream port. Two services then both serve the one channel the
+ * worker is reading, and its response comes back with both bodies in it.
+ *
+ * WHY NOT A FILTER INSIDE THE HANDLER. Returning `false` for a foreign key
+ * does not help: `handleChannelCalls` still replies, `callChannel` resolves on
+ * the FIRST reply it receives, and the loser's `false` reaches the worker as
+ * "the client refused" — a 403, non-deterministically. A service that is not
+ * the addressee must stay SILENT and leave the transferred port untouched.
+ *
+ * Local to this module on purpose. `handleChannelCalls` is also used where a
+ * call carries no key (REGISTER/UNREGISTER, and the worker's own CONNECT in
+ * `index-sw.ts`, which is the other direction), so its semantics must not
+ * change.
+ */
+function handleKeyedChannelCalls(
+  target: MessageTarget,
+  callType: string,
+  key: string,
+  handler: ChannelCallHandler,
+): () => void {
+  const listener = async (event: MessageEvent) => {
+    const data = event.data as { type?: string; params?: { key?: unknown } } | null | undefined;
+    if (!data || data.type !== callType) return;
+    if (data.params?.key !== key) return;
+    const [port, ...transfers] = (event.ports ?? []) as MessagePort[];
+    const response: { result?: unknown; error?: unknown } = {};
+    try {
+      response.result = await handler(event, data.params, ...transfers);
+    } catch (error) {
+      response.error = serializeError(error);
+    }
+    port?.postMessage(response);
+  };
+  target.addEventListener("message", listener);
+  target.start?.();
+  return () => target.removeEventListener("message", listener);
 }

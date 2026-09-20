@@ -29,6 +29,10 @@
     "./relay-sw": {
       "default": "./dist/relay-sw.js"
     },
+    "./relay-worker": {
+      "types": "./dist/relay-worker.d.ts",
+      "import": "./dist/relay-worker.js"
+    },
     "./sw-worker": {
       "default": "./dist/sw-worker.js"
     }
