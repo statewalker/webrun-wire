@@ -203,15 +203,23 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
       const expected = { status: 200, body: `mesh:${target}` };
       expect(await fetched(page, target)).toEqual(expected);
 
-      // The registration outlives the page, so the reloaded page is controlled
-      // from its first byte and its own HTML goes through the worker too --
-      // which only works because the host page is excluded.
+      // The registration outlives the page, so the reload happens with the
+      // worker already running.
+      //
+      // THE RELOADED PAGE IS NOT NECESSARILY CONTROLLED, and that is the
+      // worker doing the right thing: this page is EXCLUDED, so the worker
+      // does not answer its navigation at all (it must not -- a page the host
+      // reserved has to come from the network). Chromium controls it anyway;
+      // Firefox does not, and nothing would ever claim it, which is exactly
+      // the case `awaitServiceWorkerControl` exists for -- the fixture calls
+      // it, and the mounts answer either way. A page SERVED by a mount is a
+      // navigation the worker answers, so it is controlled from its first
+      // byte and needs none of this.
       const registered = await page.evaluate(async () => {
         return !!(await navigator.serviceWorker.getRegistration());
       });
       expect(registered).toBe(true);
       await page.reload();
-      expect(await page.evaluate("window.initiallyControlled")).toBe(true);
       expect(await ready(page)).toMatchObject({ ok: true, controlled: true });
       expect(await fetched(page, target)).toEqual(expected);
     });

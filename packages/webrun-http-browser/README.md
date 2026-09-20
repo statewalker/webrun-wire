@@ -175,6 +175,15 @@ the origin cannot come back. `exclude` needs three things, always: the relay
 page, the worker script, and the host's own entry page. That third one is
 easy to miss because nothing fails until the first reload.
 
+An excluded page is one the worker does not answer, and in Firefox such a
+page can load **uncontrolled** even while the worker is running — then its
+own `fetch()` never reaches the worker and its mounts look dead. The remedy
+is the one this package already ships for that case: call
+`awaitServiceWorkerControl(registration)` (exported from the package root)
+before relying on `fetch()` from an excluded page. A page *served by* a mount
+is a navigation the worker answers, so it is controlled from its first byte
+and needs nothing.
+
 #### `self.RELAY_OPTIONS` — options for the prebuilt worker
 
 `dist/relay-sw.js` is an IIFE loaded via classic `importScripts`, so a host
