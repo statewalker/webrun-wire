@@ -50,6 +50,47 @@ export function resolveServiceKey(
   return key === "" ? undefined : key;
 }
 
+/**
+ * Waits for the mount table to be restored from the registry before routing
+ * `url` — but a restore failure must never wedge every fetch. `restored`
+ * rejecting (blocked storage, quota, private-mode edge cases) would otherwise
+ * propagate straight to `respondWith` on every request, including ones that
+ * should reach the network, which breaks the one rule this file exists to
+ * uphold. So: log the failure and route with whatever the in-memory table
+ * already holds — possibly empty, never fatal.
+ */
+export async function resolveAfterRestore(
+  restored: Promise<void>,
+  url: URL,
+  table: MountTable,
+  selfOrigin: string,
+): Promise<string | undefined> {
+  try {
+    await restored;
+  } catch (error) {
+    console.error("[relay] failed to restore mounts from the registry", error);
+  }
+  return resolveServiceKey(url, table, selfOrigin);
+}
+
+/**
+ * What REGISTER does to the mount table: set it when `path` is given, or
+ * remove any earlier mount when it is not. A path-less re-registration
+ * reverts a service to `/~<key>/` addressing, and a stale prefix left behind
+ * would keep routing requests to a mount that no longer exists.
+ */
+export function applyRegisteredMount(
+  table: MountTable,
+  key: string,
+  path: string | undefined,
+): void {
+  if (path != null) {
+    table.set(key, { path });
+  } else {
+    table.remove(key);
+  }
+}
+
 export interface RelayServiceWorkerOptions {
   /** A fixed table, for a host that knows its services at build time. */
   mounts?: Array<{ key: string } & MountSpec>;
@@ -99,7 +140,7 @@ export function startRelayServiceWorker(
       if (!source) return false;
       const { key, path } = data as { key: string; path?: string };
       const added = await clientsRegistry.addClient(key, source, path);
-      if (path != null) mounts.set(key, { path });
+      applyRegisteredMount(mounts, key, path);
       return added;
     }),
   );
@@ -125,8 +166,7 @@ export function startRelayServiceWorker(
 
     event.respondWith(
       (async (): Promise<Response> => {
-        await restored;
-        const key = resolveServiceKey(url, mounts, self.location.origin);
+        const key = await resolveAfterRestore(restored, url, mounts, self.location.origin);
         if (key == null) return await fetch(request);
 
         const params = splitServiceUrl(url);

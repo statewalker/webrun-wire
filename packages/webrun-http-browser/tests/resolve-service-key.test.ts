@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { resolveServiceKey } from "../src/relay/index-sw.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  applyRegisteredMount,
+  resolveAfterRestore,
+  resolveServiceKey,
+} from "../src/relay/index-sw.js";
 import { newMountTable } from "../src/relay/mount-table.js";
 
 const ORIGIN = "https://session.example";
@@ -44,5 +48,62 @@ describe("what the relay worker answers", () => {
     const table = newMountTable({ exclude: (url) => url.pathname === "/relay.html" });
     table.set("app", { path: "/" });
     expect(resolveServiceKey(at("/relay.html"), table, ORIGIN)).toBeUndefined();
+  });
+});
+
+describe("restoring the mount table before routing", () => {
+  // THE OTHER RULE THIS DESIGN RESTS ON: a restore failure must not turn every
+  // fetch into a network error. If it did, a page's own assets -- which route
+  // by falling through resolveServiceKey to undefined -- would break exactly
+  // when the registry is least available.
+  it("a rejected restore still routes; an unmounted path still reaches the network", async () => {
+    const table = newMountTable();
+    const restored = Promise.reject(new Error("indexeddb blocked"));
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const key = await resolveAfterRestore(restored, at("/index.html"), table, ORIGIN);
+      expect(key).toBeUndefined();
+      expect(logSpy).toHaveBeenCalled();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("a rejected restore still routes an already-mounted path", async () => {
+    const table = newMountTable();
+    table.set("mesh", { path: "/peers/" });
+    const restored = Promise.reject(new Error("indexeddb blocked"));
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const key = await resolveAfterRestore(restored, at("/peers/x"), table, ORIGIN);
+      expect(key).toBe("mesh");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("a successful restore routes normally", async () => {
+    const table = newMountTable();
+    table.set("mesh", { path: "/peers/" });
+    const key = await resolveAfterRestore(Promise.resolve(), at("/peers/x"), table, ORIGIN);
+    expect(key).toBe("mesh");
+  });
+});
+
+describe("what REGISTER does to the mount table", () => {
+  it("re-registering without a path drops the earlier mount and falls back to /~key/", () => {
+    const table = newMountTable();
+    applyRegisteredMount(table, "mesh", "/peers/");
+    expect(resolveServiceKey(at("/peers/x"), table, ORIGIN)).toBe("mesh");
+
+    applyRegisteredMount(table, "mesh", undefined);
+    expect(resolveServiceKey(at("/peers/x"), table, ORIGIN)).toBeUndefined();
+    expect(resolveServiceKey(at("/~mesh/a.txt"), table, ORIGIN)).toBe("mesh");
+  });
+
+  it("registering with a path mounts it", () => {
+    const table = newMountTable();
+    applyRegisteredMount(table, "mesh", "/peers/");
+    expect(resolveServiceKey(at("/peers/x"), table, ORIGIN)).toBe("mesh");
   });
 });
