@@ -90,6 +90,36 @@ describe("splitServiceUrl", () => {
     });
   });
 
+  // ROOT-RELATIVE INPUT IS THE COMMON CASE for a consumer that passes
+  // `location.pathname` or a root-absolute href, and anchoring the separator
+  // check to the segment boundary had made it return nothing at all.
+  it("splits a root-relative path", () => {
+    expect(splitServiceUrl("/~FS/a/b")).toEqual({
+      url: "/~FS/a/b",
+      key: "FS",
+      baseUrl: "/~FS/",
+      path: "a/b",
+    });
+  });
+
+  it("splits a root-relative path with the key only", () => {
+    expect(splitServiceUrl("/~FS")).toEqual({
+      url: "/~FS",
+      key: "FS",
+      baseUrl: "/~FS",
+      path: "",
+    });
+  });
+
+  it("a root-relative path with no service is nobody's", () => {
+    expect(splitServiceUrl("/index.html")).toEqual({
+      url: "/index.html",
+      key: "",
+      baseUrl: "",
+      path: "",
+    });
+  });
+
   it("handles relative URLs without injecting a leading slash", () => {
     const res = splitServiceUrl("~FS/a/b");
     expect(res).toEqual({

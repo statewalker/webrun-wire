@@ -55,15 +55,23 @@ export function splitServiceUrl(url: URL | string, separator = "~"): SplitServic
   const pathPart = stripped.slice(prefixEnd);
 
   // Check if pathPart starts with the separator, anchored at the segment boundary.
-  // For absolute/protocol-relative URLs: must be `/<separator>`
-  // For relative URLs: must be `<separator>`
+  // With an authority the path always begins with `/`, so the separator must be
+  // at `/<separator>`. Without one the input is either ROOT-RELATIVE
+  // (`/~FS/a/b` -- `location.pathname`, or any root-absolute href) or plain
+  // relative (`~FS/a/b`), and both are accepted: treating "no authority" as
+  // "relative" made every root-relative caller get nothing back.
   let keyStart: number;
+  let rooted = false;
   if (prefix === "") {
-    // Relative URL (no authority)
-    if (!pathPart.startsWith(separator)) return empty;
-    keyStart = separator.length;
+    if (pathPart.startsWith(`/${separator}`)) {
+      rooted = true;
+      keyStart = separator.length + 1;
+    } else if (pathPart.startsWith(separator)) {
+      keyStart = separator.length;
+    } else {
+      return empty;
+    }
   } else {
-    // Absolute or protocol-relative URL (has authority)
     if (!pathPart.startsWith(`/${separator}`)) return empty;
     keyStart = separator.length + 1;
   }
@@ -73,10 +81,10 @@ export function splitServiceUrl(url: URL | string, separator = "~"): SplitServic
   const key = slash < 0 ? rest : rest.slice(0, slash);
   if (key === "") return empty;
 
-  const baseUrl =
-    prefix === ""
-      ? `${separator}${key}${slash < 0 ? "" : "/"}`
-      : `${prefix}/${separator}${key}${slash < 0 ? "" : "/"}`;
+  // The base keeps the input's own form: `https://host/~FS/`, `//host/~FS/`,
+  // `/~FS/` and `~FS/` each round-trip as written.
+  const base = prefix === "" ? (rooted ? "/" : "") : `${prefix}/`;
+  const baseUrl = `${base}${separator}${key}${slash < 0 ? "" : "/"}`;
   const path = slash < 0 ? "" : rest.slice(slash + 1);
   return { url: str, key, baseUrl, path };
 }
