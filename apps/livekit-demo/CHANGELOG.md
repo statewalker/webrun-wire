@@ -1,5 +1,11 @@
 # @statewalker/livekit-demo
 
+## 0.0.7
+
+### Patch Changes
+
+- @statewalker/webrun-site-host@0.1.7
+
 ## 0.0.6
 
 ### Patch Changes
