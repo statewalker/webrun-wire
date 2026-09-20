@@ -137,25 +137,10 @@ describe('REGISTER: takeover "first-wins"', () => {
       expect(idbSet).not.toHaveBeenCalled();
       expect(idbStore.get("clientsIds")).toEqual([["svc", { clientId: "A", path: "/prefix-a/" }]]);
 
-      // No mount set: a request under B's would-be prefix is not the
-      // relay's, and reaches the network fetch was told to make -- the same
-      // outcome as if B had never called REGISTER at all.
-      const networkResponse = new Response("from the network");
-      const fetchSpy = vi.fn(async () => networkResponse);
-      vi.stubGlobal("fetch", fetchSpy);
-
-      const request = new Request("https://relay.example/prefix-b/x");
-      let captured: Promise<Response> | undefined;
-      const fetchEvent = Object.assign(new Event("fetch"), {
-        request,
-        respondWith: (p: Promise<Response>) => {
-          captured = p;
-        },
-      });
-      (self as unknown as EventTarget).dispatchEvent(fetchEvent);
-
-      expect(await captured).toBe(networkResponse);
-      expect(fetchSpy).toHaveBeenCalledWith(request);
+      // No mount set: a request under B's would-be prefix is not the relay's
+      // and is left to the network -- the same outcome as if B had never
+      // called REGISTER at all.
+      await expectNotTheRelays(self, "https://relay.example/prefix-b/x");
     } finally {
       stop();
     }
@@ -239,6 +224,84 @@ describe("a static mount is the host's, not a registration's", () => {
   });
 });
 
+describe("a request that is nobody's", () => {
+  // THE RULE THE DESIGN RESTS ON: a request matching no mount is not the
+  // relay's, and the worker must not call `respondWith` for it at all.
+  // Answering it with `fetch(request)` instead looks equivalent and is not:
+  // it defeats navigation preload, and a request with `cache: "only-if-cached"`
+  // makes `fetch()` throw, turning a perfectly good cached response into a
+  // network error. Every consumer with no mounts takes this path for every
+  // subresource and every navigation.
+  it("is left alone once the restore has settled", async () => {
+    const { self } = makeSelf();
+    const stop = startRelayServiceWorker(self);
+    try {
+      await settled();
+      await expectNotTheRelays(self, "https://relay.example/index.html");
+      await expectNotTheRelays(self, "https://relay.example/assets/app.css");
+    } finally {
+      stop();
+    }
+  });
+
+  // A restore that REJECTS (blocked storage, quota, private mode) must not
+  // wedge routing, and its rejection must be observed at creation: until a
+  // fetch awaited it, nothing did, and it surfaced as an `unhandledrejection`
+  // in the worker.
+  it("is left alone after a FAILED restore, whose rejection is observed", async () => {
+    idbGet.mockRejectedValueOnce(new Error("indexeddb blocked"));
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { self } = makeSelf();
+    const stop = startRelayServiceWorker(self);
+    try {
+      await settled();
+      await settled();
+      expect(rejections).toEqual([]);
+      await expectNotTheRelays(self, "https://relay.example/index.html");
+    } finally {
+      stop();
+      logSpy.mockRestore();
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  // Before the restore settles the table cannot be consulted synchronously,
+  // and `respondWith` cannot be called later -- so those requests, and only
+  // those, still take the async path and are re-issued.
+  it("is answered from the network while the restore is still pending", async () => {
+    let release: (value: Array<[string, unknown]>) => void = () => {};
+    const pending = new Promise<Array<[string, unknown]>>((resolve) => {
+      release = resolve;
+    });
+    idbGet.mockImplementationOnce(() => pending);
+
+    const { self } = makeSelf();
+    const stop = startRelayServiceWorker(self);
+    try {
+      const networkResponse = new Response("from the network");
+      const fetchSpy = vi.fn(async () => networkResponse);
+      vi.stubGlobal("fetch", fetchSpy);
+
+      // Dispatched before the restore can possibly have settled.
+      const responded = tryDispatchFetch(self, "https://relay.example/index.html");
+      expect(responded).toBeDefined();
+
+      release([]);
+      expect(await responded).toBe(networkResponse);
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      stop();
+    }
+  });
+});
+
 describe("decorateResponse", () => {
   it("stamps the relay's own error response, but never a network fallthrough", async () => {
     const { self } = makeSelf();
@@ -262,16 +325,9 @@ describe("decorateResponse", () => {
       expect(errorResponse.headers.get("X-Decorated")).toBe("1");
       expect(decorateResponse).toHaveBeenCalledTimes(1);
 
-      // A path outside the mount table (and not `/~key/`) is nobody's, so it
-      // falls through to the network, whose response must come back exactly
-      // as `fetch` gave it -- undecorated.
-      const networkResponse = new Response("from the network");
-      const fetchSpy = vi.fn(async () => networkResponse);
-      vi.stubGlobal("fetch", fetchSpy);
-
-      const passThrough = await dispatchFetch(self, "https://relay.example/other");
-      expect(passThrough).toBe(networkResponse);
-      expect(passThrough.headers.get("X-Decorated")).toBeNull();
+      // A path outside the mount table (and not `/~key/`) is nobody's: the
+      // worker does not answer it at all, so there is nothing to decorate.
+      await expectNotTheRelays(self, "https://relay.example/other");
       expect(decorateResponse).toHaveBeenCalledTimes(1);
     } finally {
       stop();
@@ -319,14 +375,13 @@ describe("decorateResponse", () => {
  * it alone entirely -- no `respondWith` -- so the browser performs it itself.
  */
 async function expectNotTheRelays(self: ServiceWorkerGlobalScope, url: string): Promise<void> {
-  const networkResponse = new Response("from the network");
-  const fetchSpy = vi.fn(async () => networkResponse);
+  const fetchSpy = vi.fn(async () => new Response("from the network"));
   vi.stubGlobal("fetch", fetchSpy);
   try {
-    const responded = tryDispatchFetch(self, url);
-    expect(responded).toBeDefined();
-    expect(await responded).toBe(networkResponse);
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(tryDispatchFetch(self, url)).toBeUndefined();
+    // Not re-issued either: the browser performs the request itself, which is
+    // what keeps navigation preload and `cache: "only-if-cached"` working.
+    expect(fetchSpy).not.toHaveBeenCalled();
   } finally {
     vi.unstubAllGlobals();
   }
@@ -355,6 +410,11 @@ function dispatchFetch(self: ServiceWorkerGlobalScope, url: string): Promise<Res
   const captured = tryDispatchFetch(self, url);
   if (!captured) throw new Error("fetch listener did not call respondWith");
   return captured;
+}
+
+/** Lets every pending microtask -- the registry restore among them -- run. */
+async function settled(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /** Dispatches a `fetch` event and returns what `respondWith` was given, or

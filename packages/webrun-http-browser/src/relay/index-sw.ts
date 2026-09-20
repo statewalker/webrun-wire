@@ -188,6 +188,25 @@ export function startRelayServiceWorker(
   // or the first fetch after a restart finds nothing mounted.
   const restored = clientsRegistry.restoreMounts(mounts, hostKeys);
 
+  // ONCE THE RESTORE HAS SETTLED THE TABLE CAN BE READ SYNCHRONOUSLY, and the
+  // fetch listener needs that: `respondWith` must be called synchronously, so
+  // a listener that can only decide after an `await` has to call it for EVERY
+  // request and re-issue the ones that are nobody's. That is not the same as
+  // leaving them alone -- it defeats navigation preload and makes a request
+  // with `cache: "only-if-cached"` throw. This latch keeps the async path for
+  // the handful of requests that arrive before the restore settles, and only
+  // those.
+  //
+  // The handler is attached here, at creation, rather than at the first fetch:
+  // a rejection with nothing listening surfaces as an `unhandledrejection` in
+  // the worker. `resolveAfterRestore` still does its own logging for the
+  // requests that await `restored` directly.
+  let restoreSettled = false;
+  const latch = () => {
+    restoreSettled = true;
+  };
+  restored.then(latch, latch);
+
   // Pages bridge to `registration.active` when uncontrolled, so they do not
   // need this; it is here so any page of this origin can ask for control.
   register(handleClaimRequests(self));
@@ -235,35 +254,52 @@ export function startRelayServiceWorker(
     }),
   );
 
+  /** Answers `request` as the service registered under `key`. */
+  async function serve(key: string, request: Request, url: URL): Promise<Response> {
+    const params = splitServiceUrl(url);
+    try {
+      const channel = new MessageChannel();
+      const client = await clientsRegistry.getClient(key);
+      if (!client) throw HttpError.errorResourceGone(params);
+      const data = { type: "http", key };
+      const accepted = await callChannel<boolean>(client, "CONNECT", data, channel.port2);
+      if (!accepted) throw HttpError.errorForbidden(params);
+      const response = await sendHttpRequest(channel.port1, request);
+      return options.decorateResponse?.(response, request) ?? response;
+    } catch (error) {
+      const httpError = HttpError.fromError(error);
+      const errorOptions = httpError.getResponseOptions(params);
+      const errorResponse = new Response(JSON.stringify(errorOptions), {
+        status: httpError.status ?? 500,
+        statusText: httpError.statusText ?? "Internal Error",
+        headers: { "Content-Type": "application/json" },
+      });
+      return options.decorateResponse?.(errorResponse, request) ?? errorResponse;
+    }
+  }
+
   const fetchListener = (event: FetchEvent) => {
     const request = event.request;
     const url = new URL(request.url);
 
+    // THE ORDINARY CASE: decide synchronously and, when the request is
+    // nobody's, RETURN WITHOUT `respondWith` -- the browser then performs it
+    // exactly as it would with no worker installed.
+    if (restoreSettled) {
+      const key = resolveServiceKey(url, mounts, self.location.origin);
+      if (key == null) return;
+      event.respondWith(serve(key, request, url));
+      return;
+    }
+
+    // Before the restore settles there is nothing to decide on synchronously,
+    // and `respondWith` cannot be called after an await. Such a request is
+    // claimed and, if it turns out to be nobody's, re-issued.
     event.respondWith(
       (async (): Promise<Response> => {
         const key = await resolveAfterRestore(restored, url, mounts, self.location.origin);
         if (key == null) return await fetch(request);
-
-        const params = splitServiceUrl(url);
-        try {
-          const channel = new MessageChannel();
-          const client = await clientsRegistry.getClient(key);
-          if (!client) throw HttpError.errorResourceGone(params);
-          const data = { type: "http", key };
-          const accepted = await callChannel<boolean>(client, "CONNECT", data, channel.port2);
-          if (!accepted) throw HttpError.errorForbidden(params);
-          const response = await sendHttpRequest(channel.port1, request);
-          return options.decorateResponse?.(response, request) ?? response;
-        } catch (error) {
-          const httpError = HttpError.fromError(error);
-          const errorOptions = httpError.getResponseOptions(params);
-          const errorResponse = new Response(JSON.stringify(errorOptions), {
-            status: httpError.status ?? 500,
-            statusText: httpError.statusText ?? "Internal Error",
-            headers: { "Content-Type": "application/json" },
-          });
-          return options.decorateResponse?.(errorResponse, request) ?? errorResponse;
-        }
+        return await serve(key, request, url);
       })(),
     );
   };
