@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>mounts fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for mounts (see tests/browser/relay-mounts.browser.ts).
+      //
+      // Registers two mounted services through the relay and then waits to be
+      // CONTROLLED by the relay worker -- without control the page's own
+      // `fetch()` never reaches the worker, and a mount could not be observed
+      // from here at all.
+      //
+      // ONE RELAY CONNECTION PER SERVICE, deliberately. `registerConnectionsHandler`
+      // installs its CONNECT handler on the communication port with no key
+      // filter, so two services sharing one port would both answer every
+      // CONNECT and both write their response onto the same stream channel.
+      // Each service therefore gets its own relay iframe, which is also its own
+      // ServiceWorker client -- the shape a host with several mounts needs today.
+      import { initHttpService, newRemoteRelayChannel } from "/dist/index.js";
+
+      const BASE = "/tests/fixtures/browser/mounts/";
+      const SERVICES = [
+        { key: "app", path: BASE },
+        { key: "mesh", path: `${BASE}peers/` },
+      ];
+
+      window.initiallyControlled = !!navigator.serviceWorker.controller;
+      window.ready = (async () => {
+        const started = performance.now();
+        const elapsed = () => Math.round(performance.now() - started);
+        try {
+          for (const { key, path } of SERVICES) {
+            const connection = await newRemoteRelayChannel({
+              baseUrl: new URL("./", import.meta.url),
+              url: new URL("./relay.html", import.meta.url),
+            });
+            await initHttpService(
+              async (request) => new Response(`${key}:${new URL(request.url).pathname}`),
+              { key, path, port: connection.port },
+            );
+          }
+          await awaitControl(10_000);
+          return { ok: true, controlled: true, ms: elapsed() };
+        } catch (error) {
+          return { ok: false, name: error.name, message: error.message, ms: elapsed() };
+        }
+      })();
+
+      // `clients.claim()` in the worker takes an in-scope page that loaded
+      // before the worker existed; on a reload the page is controlled from the
+      // start. Both cases end here.
+      async function awaitControl(timeoutMs) {
+        if (navigator.serviceWorker.controller) return;
+        await new Promise((resolve, reject) => {
+          const done = () => {
+            clearTimeout(timer);
+            navigator.serviceWorker.removeEventListener("controllerchange", done);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            navigator.serviceWorker.removeEventListener("controllerchange", done);
+            reject(new Error(`the relay worker did not claim this page within ${timeoutMs} ms`));
+          }, timeoutMs);
+          navigator.serviceWorker.addEventListener("controllerchange", done);
+          if (navigator.serviceWorker.controller) done();
+        });
+      }
+    </script>
+  </body>
+</html>
