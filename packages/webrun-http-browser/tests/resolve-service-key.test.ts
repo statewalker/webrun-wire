@@ -45,6 +45,16 @@ describe("what the relay worker answers", () => {
     ).toBeUndefined();
   });
 
+  // "AN EXCLUDED PATH IS NEVER CLAIMED" has to hold for BOTH routes. `exclude`
+  // was consulted only inside the table lookup, so a path shaped `/~<key>/`
+  // that the host had excluded was still claimed through the fallback.
+  it("an excluded path is nobody's, even when it is spelled /~key/", () => {
+    const table = newMountTable({ exclude: (url) => url.pathname.startsWith("/~admin/") });
+    expect(resolveServiceKey(at("/~admin/secret"), table, ORIGIN)).toBeUndefined();
+    // Another key is untouched: only what `exclude` names is reserved.
+    expect(resolveServiceKey(at("/~FS/a.txt"), table, ORIGIN)).toBe("FS");
+  });
+
   it("an excluded path is nobody's, even under a root mount", () => {
     const table = newMountTable({ exclude: (url) => url.pathname === "/relay.html" });
     table.set("app", { path: "/" });

@@ -44,6 +44,9 @@ export function resolveServiceKey(
 ): string | undefined {
   // Another origin's resource is the network's business, as in any page.
   if (url.origin !== selfOrigin) return undefined;
+  // Checked before EITHER route: an excluded path is never claimed, and the
+  // `/~<key>/` fallback below does not consult the table.
+  if (table.excludes(url)) return undefined;
   const mounted = table.find(url);
   if (mounted != null) return mounted;
   const { key } = splitServiceUrl(url);

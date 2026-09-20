@@ -30,6 +30,13 @@ export interface MountTable {
   remove(key: string): void;
   /** The key that owns `url`, or `undefined` — meaning "not the relay's". */
   find(url: URL): string | undefined;
+  /**
+   * Is `url` reserved by `exclude`? `find` already applies it, but the relay
+   * has a SECOND route — the `/~<key>/` spelling, which does not go through
+   * the table at all — and "an excluded path is never claimed" has to hold
+   * for both. The predicate lives here so there is one copy of it.
+   */
+  excludes(url: URL): boolean;
 }
 
 export interface MountTableOptions {
@@ -80,6 +87,10 @@ export function newMountTable(options: MountTableOptions = {}): MountTable {
 
     remove(key) {
       entries.delete(key);
+    },
+
+    excludes(url) {
+      return options.exclude?.(url) === true;
     },
 
     find(url) {
