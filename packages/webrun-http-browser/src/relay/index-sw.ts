@@ -96,6 +96,29 @@ export interface RelayServiceWorkerOptions {
   mounts?: Array<{ key: string } & MountSpec>;
   /** Paths the relay never claims. Checked before the table. */
   exclude?: (url: URL) => boolean;
+  /** Refuse a registration from the wrong client. Default: everyone may. */
+  canRegister?: (client: Client, key: string) => boolean | Promise<boolean>;
+  /** Default `"last-wins"`, the behaviour before this option existed. */
+  takeover?: "first-wins" | "last-wins";
+}
+
+/**
+ * May `candidateId` take the key?
+ *
+ * `last-wins` is what the relay has always done and stays the default. With
+ * `first-wins`, a LIVE holder keeps its key: on an origin whose name is
+ * guessable, a second page proves nothing by existing. A holder that reloaded
+ * is no longer live, so a host's own re-registration is never blocked.
+ */
+export function mayRegister(args: {
+  current?: RegisteredClient;
+  candidateId: string;
+  isCurrentLive: boolean;
+  takeover: "first-wins" | "last-wins";
+}): boolean {
+  if (args.takeover === "last-wins") return true;
+  if (args.current == null || !args.isCurrentLive) return true;
+  return args.current.clientId === args.candidateId;
 }
 
 /**
@@ -110,6 +133,7 @@ export function startRelayServiceWorker(
   const [register, clear] = newRegistry();
   const mounts = newMountTable({ exclude: options.exclude });
   for (const { key, ...spec } of options.mounts ?? []) mounts.set(key, spec);
+  const takeover = options.takeover ?? "last-wins";
 
   if (typeof self.skipWaiting === "function") {
     self.addEventListener("install", (e: ExtendableEvent) => {
@@ -139,6 +163,17 @@ export function startRelayServiceWorker(
       const source = event.source as Client | null;
       if (!source) return false;
       const { key, path } = data as { key: string; path?: string };
+
+      if (options.canRegister != null && !(await options.canRegister(source, key))) {
+        throw new Error(`this client may not register "${key}"`);
+      }
+
+      const current = await clientsRegistry.getMount(key);
+      const isCurrentLive = current != null && (await clientsRegistry.getClient(key)) != null;
+      if (!mayRegister({ current, candidateId: source.id, isCurrentLive, takeover })) {
+        throw new Error(`"${key}" is already served by another client`);
+      }
+
       const added = await clientsRegistry.addClient(key, source, path);
       applyRegisteredMount(mounts, key, path);
       return added;
