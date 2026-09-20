@@ -224,6 +224,62 @@ describe("a static mount is the host's, not a registration's", () => {
   });
 });
 
+describe("a registry written by an earlier worker", () => {
+  /** A live client that answers whatever it is asked with `body`. */
+  function serveFrom(clients: FakeClients, id: string, body: string): () => void {
+    const farPort = clients.addLive(id);
+    return handleChannelCalls(farPort, "CONNECT", async (_event, _data, callPort) => {
+      handleHttpRequests(callPort as unknown as MessagePort, async () => new Response(body));
+      return true;
+    });
+  }
+
+  // THE PATH THAT SILENTLY UNREGISTERS EVERYTHING IF IT BREAKS. Before mounts
+  // the stored value was a BARE CLIENT ID; a returning visitor's browser still
+  // holds that shape. Reading it as an object drops the id, `getClient` finds
+  // nothing, and every service the visitor had is gone with no error anywhere.
+  it("boots from the old bare-client-id shape and still routes /~key/", async () => {
+    idbStore.set("clientsIds", [["FS", "A"]]);
+    const { self, clients } = makeSelf();
+    const stopClient = serveFrom(clients, "A", "from the old registry");
+    const stop = startRelayServiceWorker(self);
+    try {
+      const response = await dispatchFetch(self, "https://relay.example/~FS/a.txt");
+      expect(await response.text()).toBe("from the old registry");
+    } finally {
+      stop();
+      stopClient();
+    }
+  });
+
+  // The other half of the migration: a new-shape entry carries a path, and a
+  // restarted worker has to read it back or the mount is gone until the page
+  // registers again.
+  it("boots from the new shape and restores the mount", async () => {
+    idbStore.set("clientsIds", [
+      ["FS", "A"],
+      ["app", { clientId: "B", path: "/app/" }],
+    ]);
+    const { self, clients } = makeSelf();
+    const stopOld = serveFrom(clients, "A", "from the old registry");
+    const stopNew = serveFrom(clients, "B", "from the mounted app");
+    const stop = startRelayServiceWorker(self);
+    try {
+      const mounted = await dispatchFetch(self, "https://relay.example/app/x");
+      expect(await mounted.text()).toBe("from the mounted app");
+      // …and the old-shape neighbour in the same record is untouched by it.
+      const legacy = await dispatchFetch(self, "https://relay.example/~FS/a.txt");
+      expect(await legacy.text()).toBe("from the old registry");
+      // Nothing outside either service is claimed.
+      await expectNotTheRelays(self, "https://relay.example/index.html");
+    } finally {
+      stop();
+      stopOld();
+      stopNew();
+    }
+  });
+});
+
 describe("a request that is nobody's", () => {
   // THE RULE THE DESIGN RESTS ON: a request matching no mount is not the
   // relay's, and the worker must not call `respondWith` for it at all.
