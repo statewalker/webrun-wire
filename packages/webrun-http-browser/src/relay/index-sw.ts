@@ -297,7 +297,9 @@ export function startRelayServiceWorker(
 
     // Before the restore settles there is nothing to decide on synchronously,
     // and `respondWith` cannot be called after an await. Such a request is
-    // claimed and, if it turns out to be nobody's, re-issued.
+    // claimed and, if it turns out to be nobody's, re-issued -- the one
+    // window in which the worker still stands in for the network, and it
+    // lasts only until the registry read completes.
     event.respondWith(
       (async (): Promise<Response> => {
         const key = await resolveAfterRestore(restored, url, mounts, self.location.origin);
