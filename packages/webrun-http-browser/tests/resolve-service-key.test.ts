@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyRegisteredMount,
+  removeRegisteredMount,
   resolveAfterRestore,
   resolveServiceKey,
 } from "../src/relay/index-sw.js";
@@ -105,5 +106,29 @@ describe("what REGISTER does to the mount table", () => {
     const table = newMountTable();
     applyRegisteredMount(table, "mesh", "/peers/");
     expect(resolveServiceKey(at("/peers/x"), table, ORIGIN)).toBe("mesh");
+  });
+
+  // A mount the HOST declared is not a registration's to undo: the static
+  // flow registers the key with no path at all, and that must not wipe it.
+  it("leaves a host-declared key alone, path or no path", () => {
+    const table = newMountTable();
+    table.set("app", { path: "/" });
+    const hostKeys = new Set(["app"]);
+
+    applyRegisteredMount(table, "app", undefined, hostKeys);
+    expect(resolveServiceKey(at("/index.html"), table, ORIGIN)).toBe("app");
+
+    applyRegisteredMount(table, "app", "/elsewhere/", hostKeys);
+    expect(resolveServiceKey(at("/index.html"), table, ORIGIN)).toBe("app");
+
+    removeRegisteredMount(table, "app", hostKeys);
+    expect(resolveServiceKey(at("/index.html"), table, ORIGIN)).toBe("app");
+  });
+
+  it("UNREGISTER drops a mount a registration made", () => {
+    const table = newMountTable();
+    applyRegisteredMount(table, "mesh", "/peers/", new Set(["app"]));
+    removeRegisteredMount(table, "mesh", new Set(["app"]));
+    expect(resolveServiceKey(at("/peers/x"), table, ORIGIN)).toBeUndefined();
   });
 });

@@ -162,6 +162,83 @@ describe('REGISTER: takeover "first-wins"', () => {
   });
 });
 
+describe("a static mount is the host's, not a registration's", () => {
+  // THE DOCUMENTED STATIC FLOW: the host declares `{ key: "app", path: "/" }`
+  // at build time and the page calls `initHttpService(h, { key: "app", port })`
+  // with no path of its own. The first registration must not delete the host's
+  // own mount -- which is what a blanket `remove(key)` on a path-less REGISTER
+  // did, leaving the origin with nothing mounted at all.
+  it("survives a path-less registration of the same key, and then routes to it", async () => {
+    const { self, clients } = makeSelf();
+    const farPort = clients.addLive("A");
+    const stopClient = handleChannelCalls(farPort, "CONNECT", async (_event, _data, callPort) => {
+      handleHttpRequests(
+        callPort as unknown as MessagePort,
+        async () => new Response("from the app"),
+      );
+      return true;
+    });
+    const stop = startRelayServiceWorker(self, { mounts: [{ key: "app", path: "/" }] });
+    try {
+      expect(await register(self, "A", "app")).toEqual({ result: true });
+      const response = await dispatchFetch(self, "https://relay.example/index.html");
+      expect(await response.text()).toBe("from the app");
+    } finally {
+      stop();
+      stopClient();
+    }
+  });
+
+  // A `match` entry has no `path` at all, so a path-ful REGISTER used to
+  // replace it with a prefix and the predicate stopped being consulted.
+  it("a static predicate mount survives a path-ful registration of the same key", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, {
+      mounts: [{ key: "app", match: (url) => url.pathname.endsWith(".md") }],
+    });
+    try {
+      expect(await register(self, "A", "app", "/elsewhere/")).toEqual({ result: true });
+      // Still the predicate's: the registration did not overwrite it.
+      await expectTheRelays(self, "https://relay.example/readme.md");
+      // And the registration's own path never became a mount.
+      await expectNotTheRelays(self, "https://relay.example/elsewhere/x");
+    } finally {
+      stop();
+    }
+  });
+
+  // The same rule on a cold start: a path persisted for a host key under an
+  // earlier configuration must not come back and outrank the host's table.
+  it("a persisted registration does not override a host key on restore", async () => {
+    idbStore.set("clientsIds", [["app", { clientId: "A", path: "/other/" }]]);
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, { mounts: [{ key: "app", path: "/app/" }] });
+    try {
+      await expectTheRelays(self, "https://relay.example/app/x");
+      await expectNotTheRelays(self, "https://relay.example/other/x");
+    } finally {
+      stop();
+    }
+  });
+
+  it("a dynamic mount is still removed by a path-less registration", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self);
+    try {
+      expect(await register(self, "A", "svc", "/dyn/")).toEqual({ result: true });
+      await expectTheRelays(self, "https://relay.example/dyn/x");
+
+      expect(await register(self, "A", "svc")).toEqual({ result: true });
+      await expectNotTheRelays(self, "https://relay.example/dyn/x");
+    } finally {
+      stop();
+    }
+  });
+});
+
 describe("decorateResponse", () => {
   it("stamps the relay's own error response, but never a network fallthrough", async () => {
     const { self } = makeSelf();
@@ -237,9 +314,55 @@ describe("decorateResponse", () => {
   });
 });
 
+/**
+ * A request the relay does not claim reaches the network: the listener leaves
+ * it alone entirely -- no `respondWith` -- so the browser performs it itself.
+ */
+async function expectNotTheRelays(self: ServiceWorkerGlobalScope, url: string): Promise<void> {
+  const networkResponse = new Response("from the network");
+  const fetchSpy = vi.fn(async () => networkResponse);
+  vi.stubGlobal("fetch", fetchSpy);
+  try {
+    const responded = tryDispatchFetch(self, url);
+    expect(responded).toBeDefined();
+    expect(await responded).toBe(networkResponse);
+    expect(fetchSpy).toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+/**
+ * A request the relay DOES claim is answered by the relay: with no live client
+ * behind the key that is an error response, which is still the relay's answer
+ * and not the network's.
+ */
+async function expectTheRelays(self: ServiceWorkerGlobalScope, url: string): Promise<void> {
+  const fetchSpy = vi.fn(async () => new Response("from the network"));
+  vi.stubGlobal("fetch", fetchSpy);
+  try {
+    const response = await dispatchFetch(self, url);
+    expect(response.headers.get("Content-Type")).toBe("application/json");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 /** Dispatches a `fetch` event the way the browser would, and resolves with
  * whatever `respondWith` was given. */
 function dispatchFetch(self: ServiceWorkerGlobalScope, url: string): Promise<Response> {
+  const captured = tryDispatchFetch(self, url);
+  if (!captured) throw new Error("fetch listener did not call respondWith");
+  return captured;
+}
+
+/** Dispatches a `fetch` event and returns what `respondWith` was given, or
+ * `undefined` when the listener did not call it at all. */
+function tryDispatchFetch(
+  self: ServiceWorkerGlobalScope,
+  url: string,
+): Promise<Response> | undefined {
   const request = new Request(url);
   let captured: Promise<Response> | undefined;
   const fetchEvent = Object.assign(new Event("fetch"), {
@@ -249,6 +372,5 @@ function dispatchFetch(self: ServiceWorkerGlobalScope, url: string): Promise<Res
     },
   });
   (self as unknown as EventTarget).dispatchEvent(fetchEvent);
-  if (!captured) throw new Error("fetch listener did not call respondWith");
   return captured;
 }

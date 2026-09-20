@@ -78,17 +78,43 @@ export async function resolveAfterRestore(
  * remove any earlier mount when it is not. A path-less re-registration
  * reverts a service to `/~<key>/` addressing, and a stale prefix left behind
  * would keep routing requests to a mount that no longer exists.
+ *
+ * A REGISTRATION ONLY TOUCHES WHAT A REGISTRATION MADE. `hostKeys` names the
+ * mounts the host declared itself, in `options.mounts`. Those are the host's
+ * build-time decision and a page may not undo it: the documented static flow
+ * -- host declares `{ key: "app", path: "/" }`, page calls `initHttpService(h,
+ * { key: "app", port })` with no path -- would otherwise have its very first
+ * registration delete the host's own mount and leave the origin unmounted. A
+ * path-ful REGISTER naming a host key is ignored for the same reason (it would
+ * replace a `match` predicate with a prefix of the page's choosing).
  */
 export function applyRegisteredMount(
   table: MountTable,
   key: string,
   path: string | undefined,
+  hostKeys: ReadonlySet<string> = new Set(),
 ): void {
+  if (hostKeys.has(key)) return;
   if (path != null) {
     table.set(key, { path });
   } else {
     table.remove(key);
   }
+}
+
+/**
+ * What UNREGISTER does to the mount table: drop the mount a registration
+ * made. A host-declared mount stays, for the reason `applyRegisteredMount`
+ * gives -- a page tearing down its service must not take the host's table
+ * with it.
+ */
+export function removeRegisteredMount(
+  table: MountTable,
+  key: string,
+  hostKeys: ReadonlySet<string> = new Set(),
+): void {
+  if (hostKeys.has(key)) return;
+  table.remove(key);
 }
 
 export interface RelayServiceWorkerOptions {
@@ -134,7 +160,13 @@ export function startRelayServiceWorker(
 ): () => void {
   const [register, clear] = newRegistry();
   const mounts = newMountTable({ exclude: options.exclude });
-  for (const { key, ...spec } of options.mounts ?? []) mounts.set(key, spec);
+  // The keys the HOST declared. Kept so a page's REGISTER/UNREGISTER cannot
+  // replace or delete a mount it never created -- see `applyRegisteredMount`.
+  const hostKeys = new Set<string>();
+  for (const { key, ...spec } of options.mounts ?? []) {
+    mounts.set(key, spec);
+    hostKeys.add(key);
+  }
   const takeover = options.takeover ?? "last-wins";
 
   if (typeof self.skipWaiting === "function") {
@@ -154,7 +186,7 @@ export function startRelayServiceWorker(
   // A RESTARTED WORKER HAS AN EMPTY TABLE AND A FULL DATABASE. The registry
   // survives in IndexedDB; the mounts are in memory, so they must be read back
   // or the first fetch after a restart finds nothing mounted.
-  const restored = clientsRegistry.restoreMounts(mounts);
+  const restored = clientsRegistry.restoreMounts(mounts, hostKeys);
 
   // Pages bridge to `registration.active` when uncontrolled, so they do not
   // need this; it is here so any page of this origin can ask for control.
@@ -183,14 +215,14 @@ export function startRelayServiceWorker(
       }
 
       const added = await clientsRegistry.addClient(key, source, path);
-      applyRegisteredMount(mounts, key, path);
+      applyRegisteredMount(mounts, key, path, hostKeys);
       return added;
     }),
   );
   register(
     handleChannelCalls(self, "UNREGISTER", async (_event, data) => {
       const { key } = data as { key: string };
-      mounts.remove(key);
+      removeRegisteredMount(mounts, key, hostKeys);
       return await clientsRegistry.removeClient(key);
     }),
   );
@@ -251,7 +283,7 @@ interface ClientsRegistry {
   removeClient(clientKey: string): Promise<boolean>;
   getClient(clientKey: string): Promise<Client | undefined>;
   getMount(clientKey: string): Promise<RegisteredClient | undefined>;
-  restoreMounts(table: MountTable): Promise<void>;
+  restoreMounts(table: MountTable, hostKeys?: ReadonlySet<string>): Promise<void>;
 }
 
 function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions): ClientsRegistry {
@@ -299,9 +331,15 @@ function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions
     return index[clientKey];
   }
 
-  async function restoreMounts(table: MountTable): Promise<void> {
+  async function restoreMounts(
+    table: MountTable,
+    hostKeys: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     const index = await loadClientsIndex();
     for (const [clientKey, entry] of Object.entries(index)) {
+      // A host-declared mount outranks a persisted registration of the same
+      // key, exactly as it does on a live REGISTER.
+      if (hostKeys.has(clientKey)) continue;
       if (entry.path != null) table.set(clientKey, { path: entry.path });
     }
   }
