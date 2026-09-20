@@ -6,6 +6,28 @@ import { handleClaimRequests } from "../core/service-worker-control.js";
 import { sendHttpRequest } from "../http/http-send-recieve.js";
 import { splitServiceUrl } from "./split-service-url.js";
 
+/** What the registry keeps per service key. */
+export interface RegisteredClient {
+  clientId: string;
+  /** Where the service is mounted. Absent means `/~<key>/`, as before mounts. */
+  path?: string;
+}
+
+/**
+ * One stored registry entry, whatever shape it is on disk.
+ *
+ * BEFORE MOUNTS THE VALUE WAS A BARE CLIENT ID. A browser that ran the earlier
+ * worker still holds that shape, and reading it as an object would drop the id
+ * and quietly unregister every service the visitor had.
+ */
+export function readStoredEntry(value: unknown): RegisteredClient | undefined {
+  if (typeof value === "string") return { clientId: value };
+  if (typeof value !== "object" || value === null) return undefined;
+  const { clientId, path } = value as { clientId?: unknown; path?: unknown };
+  if (typeof clientId !== "string" || clientId === "") return undefined;
+  return typeof path === "string" ? { clientId, path } : { clientId };
+}
+
 /**
  * Boots the relay ServiceWorker: routes fetches shaped `<origin>/~<key>/…` to
  * the client that registered `key`, and exposes REGISTER/UNREGISTER/CONNECT
@@ -36,8 +58,8 @@ export function startRelayServiceWorker(self: ServiceWorkerGlobalScope): () => v
     handleChannelCalls(self, "REGISTER", async (event, data) => {
       const source = event.source as Client | null;
       if (!source) return false;
-      const { key } = data as { key: string };
-      return await clientsRegistry.addClient(key, source);
+      const { key, path } = data as { key: string; path?: string };
+      return await clientsRegistry.addClient(key, source, path);
     }),
   );
   register(
@@ -95,33 +117,40 @@ interface ClientsRegistryOptions {
 }
 
 interface ClientsRegistry {
-  addClient(clientKey: string, client: Client): Promise<boolean>;
+  addClient(clientKey: string, client: Client, path?: string): Promise<boolean>;
   removeClient(clientKey: string): Promise<boolean>;
   getClient(clientKey: string): Promise<Client | undefined>;
+  getMount(clientKey: string): Promise<RegisteredClient | undefined>;
 }
 
 function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions): ClientsRegistry {
-  let _index: Record<string, string> | undefined;
+  let _index: Record<string, RegisteredClient> | undefined;
 
-  async function loadClientsIndex(): Promise<Record<string, string>> {
+  async function loadClientsIndex(): Promise<Record<string, RegisteredClient>> {
     if (!_index) {
-      const entries = ((await get<Array<[string, string]>>(key)) ?? []) as Array<[string, string]>;
-      _index = Object.fromEntries(entries);
+      const entries = ((await get<Array<[string, unknown]>>(key)) ?? []) as Array<
+        [string, unknown]
+      >;
+      _index = {};
+      for (const [clientKey, value] of entries) {
+        const entry = readStoredEntry(value);
+        if (entry) _index[clientKey] = entry;
+      }
     }
     return _index;
   }
 
-  async function storeClientsIndex(): Promise<Record<string, string>> {
+  async function storeClientsIndex(): Promise<Record<string, RegisteredClient>> {
     const index = await loadClientsIndex();
     await set(key, Object.entries(index));
     return index;
   }
 
-  async function addClient(clientKey: string, client: Client): Promise<boolean> {
+  async function addClient(clientKey: string, client: Client, path?: string): Promise<boolean> {
     const index = await loadClientsIndex();
-    const clientId = client.id;
-    if (index[clientKey] === clientId) return false;
-    index[clientKey] = clientId;
+    const current = index[clientKey];
+    if (current?.clientId === client.id && current.path === path) return false;
+    index[clientKey] = path == null ? { clientId: client.id } : { clientId: client.id, path };
     await storeClientsIndex();
     return true;
   }
@@ -134,11 +163,16 @@ function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions
     return true;
   }
 
+  async function getMount(clientKey: string): Promise<RegisteredClient | undefined> {
+    const index = await loadClientsIndex();
+    return index[clientKey];
+  }
+
   async function getClient(clientKey: string): Promise<Client | undefined> {
     const index = await loadClientsIndex();
-    const clientId = index[clientKey];
-    if (!clientId) return undefined;
-    const client = await self.clients.get(clientId);
+    const entry = index[clientKey];
+    if (!entry) return undefined;
+    const client = await self.clients.get(entry.clientId);
     if (!client) {
       delete index[clientKey];
       await storeClientsIndex();
@@ -146,5 +180,5 @@ function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions
     return client ?? undefined;
   }
 
-  return { getClient, addClient, removeClient };
+  return { getClient, getMount, addClient, removeClient };
 }
