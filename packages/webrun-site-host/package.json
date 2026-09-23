@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"

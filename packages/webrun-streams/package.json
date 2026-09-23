@@ -27,6 +27,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "prepack": "pnpm run build",
     "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -46,6 +46,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "test:browser": "pnpm run build && vitest run --config vitest.browser.config.ts",
     "lint": "biome check src tests",
