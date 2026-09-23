@@ -18,8 +18,7 @@ type TopicState = {
   nextId: number;
   /** Bounded ring of recent events, oldest first. */
   buffer: BrokerEvent[];
-  /** Minimal: one subscriber. Task 2's failing test is what makes this a Set. */
-  subscriber?: Subscriber;
+  subscribers: Set<Subscriber>;
 };
 
 export function newBroker({ bufferSize = 64 }: BrokerOptions = {}): Broker {
@@ -27,7 +26,7 @@ export function newBroker({ bufferSize = 64 }: BrokerOptions = {}): Broker {
 
   const state = (topic: string): TopicState => {
     let s = topics.get(topic);
-    if (!s) topics.set(topic, (s = { nextId: 1, buffer: [] }));
+    if (!s) topics.set(topic, (s = { nextId: 1, buffer: [], subscribers: new Set() }));
     return s;
   };
 
@@ -37,16 +36,17 @@ export function newBroker({ bufferSize = 64 }: BrokerOptions = {}): Broker {
       const e: BrokerEvent = { id: s.nextId++, data, ...(event === undefined ? {} : { event }) };
       s.buffer.push(e);
       if (s.buffer.length > bufferSize) s.buffer.shift();
-      s.subscriber?.(e);
+      // Copy before iterating: a subscriber may unsubscribe during delivery.
+      for (const fn of [...s.subscribers]) fn(e);
       return e;
     },
 
     subscribe(topic, fn, lastEventId) {
       const s = state(topic);
       if (lastEventId !== undefined) for (const e of this.replay(topic, lastEventId).events) fn(e);
-      s.subscriber = fn;
+      s.subscribers.add(fn);
       return () => {
-        s.subscriber = undefined;
+        s.subscribers.delete(fn);
       };
     },
 
@@ -61,7 +61,7 @@ export function newBroker({ bufferSize = 64 }: BrokerOptions = {}): Broker {
     },
 
     subscriberCount(topic) {
-      return topics.get(topic)?.subscriber ? 1 : 0;
+      return topics.get(topic)?.subscribers.size ?? 0;
     },
   };
 }

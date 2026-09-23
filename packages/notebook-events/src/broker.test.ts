@@ -35,3 +35,49 @@ describe("newBroker", () => {
     expect(events.map((e) => e.data)).toEqual(["b"]);
   });
 });
+
+describe("newBroker — concurrency and lifecycle", () => {
+  // (5) S2 proved exactly one subscriber; a single-callback broker passes every such test
+  it("delivers to every subscriber on a topic", () => {
+    const broker = newBroker();
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    broker.subscribe("t", (e) => a.push(e.data));
+    broker.subscribe("t", (e) => b.push(e.data));
+    broker.publish("t", "x");
+    expect(a).toEqual(["x"]);
+    expect(b).toEqual(["x"]);
+    expect(broker.subscriberCount("t")).toBe(2);
+  });
+
+  // (1) a disconnecting subscriber must be dropped, or a long-lived server leaks
+  it("releases one subscriber's slot without disturbing the other", () => {
+    const broker = newBroker();
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    const offA = broker.subscribe("t", (e) => a.push(e.data));
+    broker.subscribe("t", (e) => b.push(e.data));
+    expect(broker.subscriberCount("t")).toBe(2);
+
+    broker.publish("t", "before");
+    offA();
+    broker.publish("t", "after");
+
+    expect(a).toEqual(["before"]);
+    expect(b).toEqual(["before", "after"]);
+    expect(broker.subscriberCount("t")).toBe(1);
+  });
+
+  it("tolerates a subscriber unsubscribing during delivery", () => {
+    const broker = newBroker();
+    const seen: unknown[] = [];
+    const off = broker.subscribe("t", () => off());
+    broker.subscribe("t", (e) => seen.push(e.data));
+    expect(broker.subscriberCount("t")).toBe(2);
+
+    expect(() => broker.publish("t", "x")).not.toThrow();
+
+    expect(seen).toEqual(["x"]);
+    expect(broker.subscriberCount("t")).toBe(1); // the self-unsubscriber removed itself
+  });
+});
