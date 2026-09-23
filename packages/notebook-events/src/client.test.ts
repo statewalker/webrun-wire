@@ -11,7 +11,10 @@ class FakeEventSource {
   }
   addEventListener(type: string, fn: (e: MessageEvent) => void) {
     let s = this.listeners.get(type);
-    if (!s) this.listeners.set(type, (s = new Set()));
+    if (!s) {
+      s = new Set();
+      this.listeners.set(type, s);
+    }
     s.add(fn);
   }
   removeEventListener(type: string, fn: (e: MessageEvent) => void) {
@@ -22,8 +25,20 @@ class FakeEventSource {
   }
   emit(type: string, data: string, lastEventId = "1") {
     for (const fn of this.listeners.get(type) ?? []) {
-      fn({ data, lastEventId } as MessageEvent);
+      fn({ type, data, lastEventId } as MessageEvent);
     }
+  }
+  /** A bare Event, as `error` and `open` are dispatched. */
+  emitBare(type: string) {
+    for (const fn of this.listeners.get(type) ?? []) {
+      fn({ type } as MessageEvent);
+    }
+  }
+  listenerTypes() {
+    return [...this.listeners]
+      .filter(([, fns]) => fns.size > 0)
+      .map(([type]) => type)
+      .sort();
   }
 }
 
@@ -72,5 +87,73 @@ describe("newPubSubClient", () => {
     FakeEventSource.instances[0]!.emit("gap", '{"from":1}');
     expect(onGap).toHaveBeenCalledWith("build");
     expect(seen).toEqual([]);
+  });
+});
+
+describe("newPubSubClient — event names", () => {
+  const newClient = (options: Record<string, unknown> = {}) => {
+    FakeEventSource.instances.length = 0;
+    return newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      ...options,
+    });
+  };
+
+  // I-4: per the SSE spec a frame with `event: X` dispatches only as type X, so the
+  // three hardcoded listeners silently dropped every other name — and one of them
+  // was "rebuilt", notebook vocabulary in a generic package.
+  it("listens for `message` and nothing else by default", () => {
+    const client = newClient();
+    client.subscribe("build", () => {});
+    expect(FakeEventSource.instances[0]!.listenerTypes()).toEqual([
+      "error",
+      "gap",
+      "message",
+      "open",
+    ]);
+  });
+
+  it("delivers an arbitrary named event to a subscriber that asked for it", () => {
+    const client = newClient();
+    const seen: Array<[unknown, string | undefined]> = [];
+    client.subscribe("build", (d, e) => seen.push([d, e.event]), { events: ["cell-done"] });
+    FakeEventSource.instances[0]!.emit("cell-done", '{"cell":3}', "9");
+    expect(seen).toEqual([[{ cell: 3 }, "cell-done"]]);
+  });
+
+  it("takes a default event-name set for every subscription on the client", () => {
+    const client = newClient({ events: ["message", "rebuilt"] });
+    const seen: unknown[] = [];
+    client.subscribe("build", (d) => seen.push(d));
+    FakeEventSource.instances[0]!.emit("rebuilt", '{"n":1}');
+    FakeEventSource.instances[0]!.emit("message", '{"n":2}');
+    expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+
+  it("removes every listener it added on unsubscribe", () => {
+    const client = newClient();
+    const off = client.subscribe("build", () => {}, { events: ["message", "cell-done"] });
+    off();
+    expect(FakeEventSource.instances[0]!.listenerTypes()).toEqual([]);
+  });
+});
+
+describe("newPubSubClient — a dead subscription", () => {
+  // I-5: a real EventSource that gets a non-2xx or a wrong content-type closes for
+  // good. With no error listener the page looked healthy and never updated again.
+  it("reports a stream error through onError", () => {
+    FakeEventSource.instances.length = 0;
+    const onError = vi.fn();
+    const onOpen = vi.fn();
+    const client = newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      onError,
+      onOpen,
+    });
+    client.subscribe("build", () => {});
+    FakeEventSource.instances[0]!.emitBare("open");
+    FakeEventSource.instances[0]!.emitBare("error");
+    expect(onOpen).toHaveBeenCalledWith("build");
+    expect(onError).toHaveBeenCalledWith("build", expect.objectContaining({ type: "error" }));
   });
 });

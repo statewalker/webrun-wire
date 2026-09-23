@@ -16,6 +16,9 @@ const { baseUrl } = await adapter.register(`${KEY}/`, (request) => ps.handler(re
 (window as any).__received = [];
 (window as any).__gaps = 0;
 const client = newPubSubClient(`${baseUrl}_events`, {
+  // This fixture publishes under the `rebuilt` name; a named SSE event is never
+  // dispatched as `message`, so the name has to be listed for anyone to see it.
+  events: ["message", "rebuilt"],
   onGap: () => void (window as any).__gaps++,
 });
 client.subscribe("build", (data) => (window as any).__received.push(data));
