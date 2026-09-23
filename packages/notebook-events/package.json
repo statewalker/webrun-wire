@@ -20,9 +20,13 @@
     "build": "tsdown",
     "prepack": "pnpm run build",
     "test": "vitest run --passWithNoTests",
+    "test:browser": "vitest run test-browser --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@statewalker/webrun-http-browser": "^0.6.0",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
