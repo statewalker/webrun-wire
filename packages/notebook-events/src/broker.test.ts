@@ -80,4 +80,17 @@ describe("newBroker — concurrency and lifecycle", () => {
     expect(seen).toEqual(["x"]);
     expect(broker.subscriberCount("t")).toBe(1); // the self-unsubscriber removed itself
   });
+
+  // Pins the `[...s.subscribers]` copy in publish(). Self-unsubscribe is safe in
+  // every engine, so it proves nothing; only removing a NOT-YET-VISITED entry does.
+  it("delivers to a not-yet-visited subscriber even if an earlier callback unsubscribes it", () => {
+    const broker = newBroker();
+    const seenC: unknown[] = [];
+    let offC!: () => void;
+    broker.subscribe("t", () => offC()); // A: runs first, unsubscribes C
+    broker.subscribe("t", () => {}); // B: filler, keeps C unvisited when A runs
+    offC = broker.subscribe("t", (e) => seenC.push(e.data)); // C
+    broker.publish("t", "x");
+    expect(seenC).toEqual(["x"]); // only true because publish snapshots up front
+  });
 });
