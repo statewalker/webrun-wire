@@ -157,3 +157,60 @@ describe("newPubSubClient — a dead subscription", () => {
     expect(onError).toHaveBeenCalledWith("build", expect.objectContaining({ type: "error" }));
   });
 });
+
+describe("newPubSubClient — reserved control names", () => {
+  // `gap`, `error` and `open` are the client's own control channels. Asking for one
+  // as a data event handed the gap frame to the data callback — re-opening the one
+  // invariant this package exists to protect, since a caller that mistakes a gap for
+  // a payload patches forward from a false baseline believing its history complete —
+  // and made a real transport error throw SyntaxError from JSON.parse(undefined).
+  const reserved = ["gap", "error", "open"];
+
+  it("refuses a reserved name in a subscription's event set, before opening anything", () => {
+    FakeEventSource.instances.length = 0;
+    const client = newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+    });
+    for (const name of reserved) {
+      expect(() => client.subscribe("build", () => {}, { events: ["message", name] })).toThrow(
+        /reserved/,
+      );
+    }
+    expect(FakeEventSource.instances).toHaveLength(0); // nothing was opened and leaked
+  });
+
+  it("refuses a reserved name in the client-wide default set", () => {
+    for (const name of reserved) {
+      expect(() =>
+        newPubSubClient("http://h/_events", {
+          EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+          events: [name],
+        }),
+      ).toThrow(/reserved/);
+    }
+  });
+
+  it("keeps a gap off the data callback and a transport error harmless", () => {
+    FakeEventSource.instances.length = 0;
+    const onGap = vi.fn();
+    const onError = vi.fn();
+    const client = newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+      onGap,
+      onError,
+    });
+    const seen: unknown[] = [];
+    expect(() =>
+      client.subscribe("build", (d) => seen.push(d), { events: ["gap", "error"] }),
+    ).toThrow(/reserved/);
+
+    client.subscribe("build", (d) => seen.push(d));
+    const source = FakeEventSource.instances[0]!;
+    source.emit("gap", '{"from":1}');
+    expect(() => source.emitBare("error")).not.toThrow();
+
+    expect(seen).toEqual([]); // no control frame ever reached the data callback
+    expect(onGap).toHaveBeenCalledWith("build");
+    expect(onError).toHaveBeenCalled();
+  });
+});

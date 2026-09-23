@@ -3,6 +3,26 @@ import type { Unsubscribe } from "./broker.js";
 /** The SSE event type a subscription listens for when nothing else is asked for. */
 const DEFAULT_EVENTS = ["message"] as const;
 
+/**
+ * Names this client owns. They are wired to `onGap`, `onError` and `onOpen`, never
+ * to a data callback: a `gap` delivered as data would have the caller patch forward
+ * from a false baseline believing its history complete, and `error`/`open` carry a
+ * bare `Event` with no `data` to parse.
+ */
+const RESERVED_EVENTS: readonly string[] = ["gap", "error", "open"];
+
+function checkEvents(events: readonly string[], where: string): readonly string[] {
+  for (const name of events) {
+    if (RESERVED_EVENTS.includes(name)) {
+      throw new TypeError(
+        `${where}: "${name}" is a reserved event name — it is delivered to ` +
+          `on${name[0]?.toUpperCase()}${name.slice(1)}, not to a subscriber`,
+      );
+    }
+  }
+  return events;
+}
+
 export interface PubSubClientOptions {
   /** Injected for tests, and for runtimes with a non-global EventSource. */
   EventSourceImpl?: typeof EventSource;
@@ -11,6 +31,10 @@ export interface PubSubClientOptions {
    * unless given. A frame published with `event: X` is dispatched by the browser
    * ONLY as type X — it does not also fire `message` — so a name that is not
    * listed here is received by nobody.
+   *
+   * `gap`, `error` and `open` are RESERVED: they are this client's control
+   * channels, reported through `onGap`, `onError` and `onOpen`. Listing one here
+   * throws a `TypeError` rather than handing a control frame to a data callback.
    */
   events?: readonly string[];
   /**
@@ -34,7 +58,10 @@ export interface PubSubClientOptions {
 }
 
 export interface SubscribeOptions {
-  /** Event names for this subscription, overriding the client's default set. */
+  /**
+   * Event names for this subscription, overriding the client's default set.
+   * `gap`, `error` and `open` are reserved; see {@link PubSubClientOptions.events}.
+   */
   events?: readonly string[];
 }
 
@@ -56,14 +83,18 @@ export function newPubSubClient(
 
   const open = new Set<EventSource>();
   const base = baseUrl.replace(/\/$/, "");
-  const defaultEvents = events ?? DEFAULT_EVENTS;
+  const defaultEvents =
+    events === undefined ? DEFAULT_EVENTS : checkEvents(events, "newPubSubClient");
 
   return {
     subscribe(topic, cb, options = {}) {
+      // Validated before anything is opened, so a rejected call leaks no EventSource.
+      const names =
+        options.events === undefined ? defaultEvents : checkEvents(options.events, "subscribe");
+
       const source = new Impl(`${base}/${topic}`);
       open.add(source);
 
-      const names = options.events ?? defaultEvents;
       const listeners: Array<[string, (e: Event) => void]> = [];
       const on = (type: string, fn: (e: Event) => void) => {
         listeners.push([type, fn]);

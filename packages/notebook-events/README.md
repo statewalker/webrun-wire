@@ -58,6 +58,10 @@ A frame published with a name (`publish(topic, data, "rebuilt")`) is dispatched 
 listed, either per client (`events`) or per subscription (`client.subscribe(topic, cb, { events })`).
 The default is `["message"]`, which is what an unnamed `publish(topic, data)` produces.
 
+`gap`, `error` and `open` are **reserved**: they are the client's own control channels, reported
+through `onGap`, `onError` and `onOpen`. Listing one as a data event throws a `TypeError` — a gap
+delivered as data is exactly the failure the gap contract exists to prevent.
+
 ### Gaps
 
 Every event carries an id. A reconnecting `EventSource` sends `Last-Event-ID`, and the server
