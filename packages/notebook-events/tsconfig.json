@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "Preserve",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ESNext", "WebWorker"],
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
