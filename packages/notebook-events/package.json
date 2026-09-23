@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsdown",
     "prepack": "pnpm run build",
-    "test": "vitest run --passWithNoTests",
+    "test": "pnpm run build && vitest run --passWithNoTests",
     "test:browser": "vitest run test-browser --config vitest.browser.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-browser.json"
   },
