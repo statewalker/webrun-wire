@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BrokerEvent } from "./broker.js";
 import { newBroker } from "./broker.js";
 
 describe("newBroker", () => {
@@ -92,5 +93,100 @@ describe("newBroker — concurrency and lifecycle", () => {
     offC = broker.subscribe("t", (e) => seenC.push(e.data)); // C
     broker.publish("t", "x");
     expect(seenC).toEqual(["x"]); // only true because publish snapshots up front
+  });
+});
+
+describe("newBroker — a failing subscriber", () => {
+  // C-1: a bare `for … fn(e)` lets the first throwing subscriber abort delivery to
+  // everyone after it and propagate the throw out of publish().
+  it("isolates a throwing subscriber from the others and from the publisher", () => {
+    const errors: unknown[] = [];
+    const broker = newBroker({ onSubscriberError: (err) => errors.push(err) });
+    const seen: unknown[] = [];
+    broker.subscribe("t", () => {
+      throw new Error("boom");
+    });
+    broker.subscribe("t", (e) => seen.push(e.data));
+
+    expect(() => broker.publish("t", "x")).not.toThrow();
+
+    expect(seen).toEqual(["x"]); // the second subscriber was not starved
+    expect(errors).toHaveLength(1);
+  });
+});
+
+describe("newBroker — replay completeness", () => {
+  // C-2: the ceiling. A client whose id came from a previous server epoch asks for
+  // events above the newest id ever issued; reporting `complete` there tells a stale
+  // page it is current, and onGap never fires.
+  it("reports an incomplete history when afterId is above the newest id", () => {
+    const broker = newBroker();
+    broker.publish("t", "a");
+    broker.publish("t", "b");
+    expect(broker.replay("t", 42)).toEqual({ events: [], complete: false });
+  });
+
+  it("treats an unknown topic as complete only for a client with no history", () => {
+    const broker = newBroker();
+    expect(broker.replay("absent", 0)).toEqual({ events: [], complete: true });
+    expect(broker.replay("absent", 7)).toEqual({ events: [], complete: false });
+  });
+
+  // m-8: with an empty ring every replay used to report complete, disabling the contract.
+  it("retains nothing with bufferSize 0, so only a level client is complete", () => {
+    const broker = newBroker({ bufferSize: 0 });
+    broker.publish("t", "a");
+    broker.publish("t", "b");
+    expect(broker.replay("t", 0).complete).toBe(false);
+    expect(broker.replay("t", 1).complete).toBe(false);
+    expect(broker.replay("t", 2)).toEqual({ events: [], complete: true });
+    expect(broker.replay("t", 3).complete).toBe(false);
+  });
+
+  it("is complete at the first retained event and incomplete one event earlier", () => {
+    const broker = newBroker({ bufferSize: 2 });
+    for (const d of ["a", "b", "c"]) broker.publish("t", d); // ids 1..3; the ring holds 2,3
+    const at = broker.replay("t", 1);
+    expect(at.complete).toBe(true);
+    expect(at.events.map((e) => e.data)).toEqual(["b", "c"]);
+    expect(broker.replay("t", 0).complete).toBe(false); // id 1 was evicted
+  });
+});
+
+describe("newBroker — subscribe's shape", () => {
+  // I-3: the lastEventId parameter discarded `complete` (the C-2 miss, on the public
+  // interface) and reached replay through `this`, so a destructured subscribe threw.
+  it("takes exactly two arguments, never replays, and does not depend on `this`", () => {
+    const { subscribe, publish, subscriberCount } = newBroker();
+    publish("t", "before");
+
+    const seen: unknown[] = [];
+    const loose = subscribe as unknown as (...args: unknown[]) => () => void;
+    const off = loose("t", (e: BrokerEvent) => seen.push(e.data), 0);
+
+    expect(seen).toEqual([]); // no replay on subscribe: callers use replay() and read `complete`
+    expect(subscribe.length).toBe(2);
+    publish("t", "after");
+    expect(seen).toEqual(["after"]);
+    off();
+    expect(subscriberCount("t")).toBe(0);
+  });
+
+  // I-6: an entry created by a touch that left nothing behind must not outlive it.
+  it("drops a topic once it has no subscribers and nothing retained", () => {
+    const broker = newBroker();
+    const off = broker.subscribe("ghost", () => {});
+    expect(broker.topicCount()).toBe(1);
+    off();
+    expect(broker.topicCount()).toBe(0);
+  });
+
+  it("keeps a topic that still has retained events", () => {
+    const broker = newBroker();
+    const off = broker.subscribe("t", () => {});
+    broker.publish("t", "a");
+    off();
+    expect(broker.topicCount()).toBe(1);
+    expect(broker.replay("t", 0).events.map((e) => e.data)).toEqual(["a"]);
   });
 });

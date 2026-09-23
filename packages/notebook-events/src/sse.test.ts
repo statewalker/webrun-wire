@@ -25,3 +25,32 @@ describe("formatSseEvent", () => {
     expect(frame.endsWith("\n\n")).toBe(true);
   });
 });
+
+describe("formatSseEvent — total on any input", () => {
+  // C-1: JSON.stringify returns undefined (not a string) for these, so `.split` threw
+  // and the throw escaped every guard in the handler and the broker.
+  it("frames a payload JSON cannot represent as null instead of throwing", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(formatSseEvent({ id: 1, event: "reload", data: undefined })).toBe(
+      "id: 1\nevent: reload\ndata: null\n\n",
+    );
+    expect(formatSseEvent({ id: 2, data: () => {} })).toBe("id: 2\ndata: null\n\n");
+    expect(formatSseEvent({ id: 3, data: Symbol("s") })).toBe("id: 3\ndata: null\n\n");
+    expect(formatSseEvent({ id: 4, data: 1n })).toBe("id: 4\ndata: null\n\n");
+    expect(formatSseEvent({ id: 5, data: circular })).toBe("id: 5\ndata: null\n\n");
+  });
+
+  // m-10: a newline in the event name used to inject whole frames onto the wire.
+  it("cannot be made to inject a frame through the event name", () => {
+    const frame = formatSseEvent({ id: 1, event: "a\ndata: injected\r\nevent: x", data: 0 });
+    expect(frame.split("\n").filter((l) => l.startsWith("data:"))).toEqual(["data: 0"]);
+    expect(frame).toBe("id: 1\nevent: adata: injectedevent: x\ndata: 0\n\n");
+  });
+
+  // m-9: the doc comment used to promise special handling for a pre-serialized
+  // string; it never happened. A string is JSON-encoded like anything else.
+  it("JSON-encodes a string payload like any other value", () => {
+    expect(formatSseEvent({ id: 1, data: "hi" })).toBe('id: 1\ndata: "hi"\n\n');
+  });
+});
