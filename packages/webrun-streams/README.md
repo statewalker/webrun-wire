@@ -15,7 +15,7 @@ Every higher-level package in the `webrun-*` family (and its consumers — scann
 5. **Error (de)serialisation** for passing exceptions across structured-clone / JSON boundaries without losing stacks or extra fields.
 6. **Line / JSONL / text codecs** so stream-processing code doesn't re-invent split/join/encode/decode in every consumer.
 
-The MessagePack codec that previously rode along here is split out to [`@statewalker/webrun-msgpack`](../webrun-msgpack) so consumers that don't need framing don't pull in `@ygoe/msgpack`.
+The MessagePack codec that previously rode along here is split out to [`@statewalker/webrun-msgpack`](../webrun-msgpack) so consumers that don't need framing don't pull in a MessagePack implementation.
 
 ## Install
 

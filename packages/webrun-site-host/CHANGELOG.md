@@ -1,5 +1,19 @@
 # @statewalker/webrun-site-host
 
+## 0.1.7
+
+### Patch Changes
+
+- Updated dependencies [8b789ef]
+  - @statewalker/webrun-http-browser@0.6.0
+
+## 0.1.6
+
+### Patch Changes
+
+- Updated dependencies [8bf5ee6]
+  - @statewalker/webrun-http-browser@0.5.0
+
 ## 0.1.5
 
 ### Patch Changes

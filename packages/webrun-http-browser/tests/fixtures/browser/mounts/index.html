@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>mounts fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for mounts (see tests/browser/relay-mounts.browser.ts).
+      //
+      // TWO SERVICES, ONE RELAY CONNECTION, ONE IFRAME -- the shape mounts
+      // exist for: an app at the scope root and a mesh gateway one level down,
+      // in one session origin. `registerConnectionsHandler` routes a CONNECT
+      // by its key, so the two services share this port without answering each
+      // other's calls.
+      //
+      // The page then waits to be CONTROLLED by the relay worker: without
+      // control its own `fetch()` never reaches the worker, and a mount could
+      // not be observed from here at all.
+      //
+      // THIS PAGE IS EXCLUDED, so the worker does not answer its navigation --
+      // and a page whose navigation the worker did not answer can load
+      // uncontrolled in Firefox, with no `controllerchange` ever coming on its
+      // own. `awaitServiceWorkerControl` is the package's own remedy: it asks
+      // the worker to `clients.claim()` and waits for control. A page SERVED
+      // by a mount needs none of this; it is controlled from its first byte.
+      import {
+        awaitServiceWorkerControl,
+        initHttpService,
+        newRemoteRelayChannel,
+      } from "/dist/index.js";
+
+      const BASE = "/tests/fixtures/browser/mounts/";
+      const SERVICES = [
+        { key: "app", path: BASE },
+        { key: "mesh", path: `${BASE}peers/` },
+      ];
+
+      window.initiallyControlled = !!navigator.serviceWorker.controller;
+      window.ready = (async () => {
+        const started = performance.now();
+        const elapsed = () => Math.round(performance.now() - started);
+        try {
+          const connection = await newRemoteRelayChannel({
+            baseUrl: new URL("./", import.meta.url),
+            url: new URL("./relay.html", import.meta.url),
+          });
+          for (const { key, path } of SERVICES) {
+            await initHttpService(
+              async (request) => new Response(`${key}:${new URL(request.url).pathname}`),
+              { key, path, port: connection.port },
+            );
+          }
+          await awaitControl(10_000);
+          return { ok: true, controlled: true, ms: elapsed() };
+        } catch (error) {
+          return { ok: false, name: error.name, message: error.message, ms: elapsed() };
+        }
+      })();
+
+      // `clients.claim()` in the worker takes an in-scope page that loaded
+      // before the worker existed, so a first visit is controlled by the time
+      // the relay connection is up. A reload of an EXCLUDED page is the case
+      // that needs asking: see the note above.
+      async function awaitControl(timeoutMs) {
+        if (navigator.serviceWorker.controller) return;
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) throw new Error("no relay worker is registered for this page");
+        await awaitServiceWorkerControl(registration, { timeout: timeoutMs });
+      }
+    </script>
+  </body>
+</html>

@@ -1,12 +1,32 @@
 import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls } from "../core/data-calls.js";
+import { withDeadline } from "../core/deadline.js";
 import { newRegistry } from "../core/registry.js";
+import {
+  awaitServiceWorkerControl,
+  DEFAULT_SERVICE_WORKER_TIMEOUT,
+  handleClaimRequests,
+  ServiceWorkerControlError,
+} from "../core/service-worker-control.js";
 
 export interface SwPortHandlerOptions {
   key: string;
   scope?: string;
   serviceWorkerUrl?: string;
   bindPort: (port: MessagePort) => void | Promise<void>;
+  /**
+   * Upper bound, in ms, for `start()`'s wait for the worker to activate, take
+   * control of the page and answer the handshake. `start()` rejects with a
+   * `ServiceWorkerControlError` past it instead of waiting forever.
+   * Default `DEFAULT_SERVICE_WORKER_TIMEOUT` (30 s).
+   */
+  timeout?: number;
+  /**
+   * If the page is still uncontrolled once the worker is active — after a
+   * hard reload, say — and the worker does not take it over when asked,
+   * reload the page once instead of rejecting. Default `false`.
+   */
+  reloadIfUncontrolled?: boolean;
 }
 
 interface ChannelInfo {
@@ -84,6 +104,15 @@ export class SwPortHandler {
     return { key: this.key };
   }
 
+  /**
+   * Registers the worker and waits until it is activated and controls this
+   * page, then opens the port to it. The page must be controlled, because
+   * only a controlled page's `fetch()` reaches the worker. When the page
+   * loaded uncontrolled (a hard reload does that), the worker is asked to
+   * claim it. Rejects with a `ServiceWorkerControlError` when that fails or
+   * `timeout` passes (`reason` says which step); a later `start()` tries
+   * again.
+   */
   async start(): Promise<void> {
     if (!this._registrationPromise) {
       this._registrationPromise = (async () => {
@@ -97,20 +126,44 @@ export class SwPortHandler {
         });
         register(() => registration.unregister());
 
-        register(
-          handleChannelCalls(
-            navigator.serviceWorker,
-            "UPDATE_COMMUNICATION_PORT",
-            async (_event, _params, port: MessagePort) => {
-              await this._setCommunicationPort(port);
-              return this._getRegistrationInfo();
-            },
-          ),
+        const stopListening = handleChannelCalls(
+          navigator.serviceWorker,
+          "UPDATE_COMMUNICATION_PORT",
+          async (_event, _params, port: MessagePort) => {
+            await this._setCommunicationPort(port);
+            return this._getRegistrationInfo();
+          },
         );
+        register(stopListening);
 
-        this._serviceWorker = await getServiceWorkerController();
-        await awaitServiceWorkerActivation(this._serviceWorker);
-        await this._updateCommunicationChannel();
+        const timeout = this.options.timeout ?? DEFAULT_SERVICE_WORKER_TIMEOUT;
+        const deadline = Date.now() + timeout;
+        try {
+          this._serviceWorker = await awaitServiceWorkerControl(registration, {
+            timeout,
+            reloadIfUncontrolled: this.options.reloadIfUncontrolled,
+          });
+          await withDeadline(
+            deadline,
+            this._updateCommunicationChannel(),
+            () =>
+              new ServiceWorkerControlError(
+                "unresponsive",
+                `ServiceWorker "${this._serviceWorker?.scriptURL}" controls this page but did ` +
+                  `not answer the UPDATE_COMMUNICATION_PORT handshake within ${timeout} ms. ` +
+                  "Check that the worker script runs this package's same-origin dispatcher " +
+                  "(it importScripts `sw-worker.js`, or calls `startHttpDispatcher`).",
+              ),
+          );
+        } catch (error) {
+          // Forget this attempt so a later start() retries. Stop listening,
+          // but keep the registration: the worker is fine — it is this page
+          // that is not controlled, and other pages may be using the worker.
+          stopListening();
+          this._cleanupRegistrations = undefined;
+          this._registrationPromise = undefined;
+          throw error;
+        }
       })();
     }
     return this._registrationPromise;
@@ -127,37 +180,6 @@ export class SwPortHandler {
       }
     }
   }
-}
-
-function getServiceWorkerController(): Promise<ServiceWorker> {
-  return new Promise((resolve) => {
-    const container = navigator.serviceWorker;
-    if (container.controller) {
-      resolve(container.controller);
-      return;
-    }
-    const onChange = () => {
-      if (!container.controller) return;
-      resolve(container.controller);
-      container.removeEventListener("controllerchange", onChange);
-    };
-    container.addEventListener("controllerchange", onChange);
-  });
-}
-
-function awaitServiceWorkerActivation(worker: ServiceWorker): Promise<void> {
-  return new Promise((resolve) => {
-    if (worker.state === "activated") {
-      resolve();
-      return;
-    }
-    const onStateChange = () => {
-      if (worker.state !== "activated") return;
-      worker.removeEventListener("statechange", onStateChange);
-      resolve();
-    };
-    worker.addEventListener("statechange", onStateChange);
-  });
 }
 
 export interface SwPortDispatcherOptions {
@@ -221,7 +243,8 @@ export class SwPortDispatcher {
   }
 
   start(): void {
-    this._cleanup = handleChannelCalls(
+    const stopClaims = handleClaimRequests(this.self);
+    const stopPortUpdates = handleChannelCalls(
       this.self,
       "UPDATE_COMMUNICATION_PORT",
       async (event, channelInfo, port: MessagePort) => {
@@ -232,6 +255,10 @@ export class SwPortDispatcher {
         return { ...(channelInfo as ChannelInfo) };
       },
     );
+    this._cleanup = () => {
+      stopClaims();
+      stopPortUpdates();
+    };
 
     this.self.addEventListener("install", (event) => {
       this.log("Skip waiting on install.", event);

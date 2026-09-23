@@ -94,7 +94,7 @@ skip `emulateMux` entirely.
 
 ```
 webrun-streams        (foundation — the Duplex seam, emulateMux, iterator/stream/error/text/jsonl primitives)
-webrun-msgpack        (foundation — length-prefixed MessagePack frame codec)
+webrun-msgpack        (foundation — MessagePack: serialize/deserialize, stream and port codecs)
     ▲
     ├── transport adapters — each supplies a Duplex over a concrete transport
     │     webrun-rpc                 (ports + RPC: MessagePort, workers, iframes)
@@ -126,8 +126,8 @@ are rare and listed per package below.
 
 | Package | Version | Summary |
 | --- | --- | --- |
-| [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.1.1 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
-| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.1.1 | Two MessagePack codecs: a length-prefixed **stream** codec for async iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
+| [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.2.0 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
+| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.3.0 | MessagePack with no runtime dependencies: `serialize` / `deserialize`, a length-prefixed **stream** codec for iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
 
 #### [`@statewalker/webrun-streams`](./packages/webrun-streams)
 
@@ -153,16 +153,24 @@ that make it usable:
 Streams-safe MessagePack framing: `encodeMsgpack` / `decodeMsgpack` move
 arbitrary values as `[4-byte BE length][msgpack payload]` frames, with a decoder
 that buffers across chunk boundaries and never yields a partial trailing frame.
-`encodeFloat32Arrays` / `decodeFloat32Arrays` are a zero-copy specialisation for
-embedding pipelines. One runtime dependency, `@ygoe/msgpack`.
+`encodeFloat32Arrays` / `decodeFloat32Arrays` specialise it for embedding
+pipelines, and `msgpackCodec` carries `webrun-rpc` port envelopes over a byte
+transport. Underneath is `serialize` / `deserialize`, exported too: a TypeScript
+port of Yves Goergen's [msgpack.js](https://github.com/ygoe/msgpack.js) (MIT),
+with fixes for truncated input, timestamps, UTF-8 and `__proto__` keys found by
+running the conformance cases of
+[msgpack-test-suite](https://github.com/kawanet/msgpack-test-suite),
+[msgpack-javascript](https://github.com/msgpack/msgpack-javascript) and
+[msgpackr](https://github.com/kriszyp/msgpackr) against it — credits and the
+full list of changes are in the package README. No runtime dependencies.
 
 ### HTTP
 
 | Package | Version | Summary |
 | --- | --- | --- |
-| [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams) | 0.2.1 | HTTP/1.1 request/response over a `Duplex`, in three layers. |
-| [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser) | 0.3.4 | ServiceWorker-based HTTP server for browsers, same-origin and relay modes. |
-| [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http) | 0.1.1 | Expose object methods as HTTP endpoints; call them with `fetch`. |
+| [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams) | 0.2.2 | HTTP/1.1 request/response over a `Duplex`, in three layers. |
+| [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser) | 0.5.0 | ServiceWorker-based HTTP server for browsers, same-origin and relay modes. |
+| [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http) | 0.1.2 | Expose object methods as HTTP endpoints; call them with `fetch`. |
 
 #### [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams)
 
@@ -188,6 +196,11 @@ handlers in JavaScript, call them with standard `fetch()`. Two operating modes:
   any page that embeds a hidden relay iframe. Cross-origin friendly; works from
   notebooks, Observable, unpkg and third-party hosts.
 
+Start-up never hangs: a page its worker does not control — a hard reload loads
+one — is claimed on request, and every wait is bounded by a `timeout` that
+rejects with an actionable `ServiceWorkerControlError`. Verified in Chromium and
+Firefox by the package's Playwright suite.
+
 Its [README](./packages/webrun-http-browser/README.md) covers architecture, the
 full export surface, design notes, constraints, and runnable demos. One runtime
 dependency outside the workspace: `idb-keyval` (≈1 KB), to survive SW restarts.
@@ -210,8 +223,8 @@ ServiceWorker, a MessagePort bridge or a WebSocket — including
 
 | Package | Version | Summary |
 | --- | --- | --- |
-| [`@statewalker/webrun-site-builder`](./packages/webrun-site-builder) | 0.1.1 | Compose files + endpoints + auth into a `(Request) ⇒ Response` site. |
-| [`@statewalker/webrun-site-host`](./packages/webrun-site-host) | 0.1.1 | Host such a site behind a same-origin ServiceWorker in one call. |
+| [`@statewalker/webrun-site-builder`](./packages/webrun-site-builder) | 0.1.2 | Compose files + endpoints + auth into a `(Request) ⇒ Response` site. |
+| [`@statewalker/webrun-site-host`](./packages/webrun-site-host) | 0.1.6 | Host such a site behind a same-origin ServiceWorker in one call. |
 
 #### [`@statewalker/webrun-site-builder`](./packages/webrun-site-builder)
 
@@ -266,13 +279,13 @@ neither needs it.
 
 | Package | Version | Transport | Peer deps |
 | --- | --- | --- | --- |
-| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.1.1 | Ports and RPC over them: `multiplexPort` and `transferPortMux`; `duplexOverPort`, which runs one `Duplex` over one port with window-of-one backpressure; and typed request/response primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
-| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | 0.1.1 | WebSocket. Browser-native, or Node via an injected constructor. | — |
-| [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | 0.1.1 | WebRTC data channels — one per call, with a 1-byte DATA/END/ERROR frame for half-close and error propagation. | — |
-| [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | 0.1.1 | libp2p streams, with an authenticated `remotePeer` available to handlers via `serveConnections`. | `libp2p`, `@libp2p/interface`, `@multiformats/multiaddr` |
-| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | 0.1.1 | LiveKit reliable data channel — an SFU for when direct P2P won't connect. | `livekit-client` |
-| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | 0.1.1 | PeerJS `DataConnection` — the shortest path to a browser-to-browser link. | `peerjs` |
-| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | 0.1.1 | Not a transport but the *setup* for one: `PeerManager` (WebRTC discovery), `QrSignaling` (serverless offer/answer via QR), `RoomManager` (LiveKit membership). Yields `ByteChannel`s. | `livekit-client` (optional) |
+| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.4.0 | Ports and RPC over them: `multiplexPort` and `transferPortMux`; `duplexOverPort`, which runs one `Duplex` over one port with window-of-one backpressure; and typed request/response primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
+| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | 0.2.0 | WebSocket. Browser-native, or Node via an injected constructor. | — |
+| [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | 0.1.2 | WebRTC data channels — one per call, with a 1-byte DATA/END/ERROR frame for half-close and error propagation. | — |
+| [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | 0.1.2 | libp2p streams, with an authenticated `remotePeer` available to handlers via `serveConnections`. | `libp2p`, `@libp2p/interface`, `@multiformats/multiaddr` |
+| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | 0.2.0 | LiveKit reliable data channel — an SFU for when direct P2P won't connect. | `livekit-client` |
+| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | 0.2.0 | PeerJS `DataConnection` — the shortest path to a browser-to-browser link. | `peerjs` |
+| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | 0.1.2 | Not a transport but the *setup* for one: `PeerManager` (WebRTC discovery), `QrSignaling` (serverless offer/answer via QR), `RoomManager` (LiveKit membership). Yields `ByteChannel`s. | `livekit-client` (optional) |
 
 ### Testing
 
