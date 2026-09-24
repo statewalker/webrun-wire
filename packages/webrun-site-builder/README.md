@@ -83,6 +83,7 @@ npm install @statewalker/webrun-site-builder @statewalker/webrun-files
 | `newBasicAuth(credentials, opts?)` | Factory producing an `AuthPredicate` that checks HTTP basic credentials and challenges with `401 WWW-Authenticate: Basic`. |
 | `newServeFiles(filesApi, opts?)` | Standalone file-serving function: `(request, path) ⇒ Response`. Used internally by `.setFiles`, exposed for advanced composition. |
 | `getMimeType(path)` | Resolve a `Content-Type` from a file extension; falls back to `application/octet-stream`. |
+| `decodeUrlPath(pathname)` | Percent-decode a URL path, per segment, into the path a `FilesApi` stores — or `null` when it must not be looked up at all. Applied automatically by `newServeFiles`; exposed so a custom file layer can apply the same rule. |
 | `newRouteMatcher(pattern, method?)` | Thin `URLPattern` wrapper returning extracted groups or `null`. Exposed for building custom layers. |
 | `SiteHandler`, `EndpointHandler`, `EndpointEnv`, `AuthPredicate`, `ErrorHandler` | Type aliases for the contract surface. |
 | `ServeFilesOptions` | Options for `newServeFiles` / `.setFiles`: `getMimeType`, `directoryIndex` (**no default** — without it a directory request is `404`, not `index.html`), and `transform` (a per-mount response filter). |
@@ -251,6 +252,39 @@ Any uncaught throw in any layer is routed to the error handler.
 - Directory paths return `404` by default. Opt into the conventional
   static-site fallback with `{ directoryIndex: "index.html" }`; if set
   but the index is missing the response is still `404`.
+
+#### Path decoding
+
+The `path` handed to `newServeFiles` is a **URL** path, and a URL path is
+percent-encoded by definition — `new URL("http://h/My Report.html").pathname`
+is already `/My%20Report.html`. A `FilesApi` stores the decoded name, so
+`decode-path.ts` decodes before the lookup: a file stored as
+`/My Report.html` is served for `/My%20Report.html`. Without it every name
+carrying a space, a `#`, or a non-ASCII character answered `404` although the
+file existed.
+
+The decode is **per segment**, and that is the security-relevant part.
+`normalizePath` in `@statewalker/webrun-files` drops `.` segments but does not
+resolve `..`, and a root-anchored backend such as
+`@statewalker/webrun-files-node` resolves `rootDir + path` on the real
+filesystem — so a `..` reaching the lookup escapes the mount. A whole-path
+`decodeURIComponent` would manufacture exactly that escape out of
+`/..%2f..%2fetc/passwd`. Therefore:
+
+- a segment decoding to `.` or `..` rejects the whole path (`404`, and the
+  `FilesApi` is never consulted);
+- so does a segment that decodes to something containing `/`, `\`, or a NUL —
+  an encoded separator is never turned into a real one;
+- decoding happens **once**: `%252e%252e%252f` becomes the literal text
+  `%2e%2e%2f`, an odd file name and nothing more;
+- a malformed escape (`%zz`, a trailing `%`) is **not** an error. A file name
+  may legitimately contain a `%` and `decodeURIComponent` throws `URIError` on
+  such input — an unhandled throw here would be a `500` where a `404` belongs.
+  The raw segment is used instead and still passes every check above, so the
+  answer is either the file that really is named that, or a plain `404`.
+
+Mount prefixes are matched against the still-encoded pathname, so a prefix
+passed to `setFiles` should be spelled in its URL form.
 
 ### URL patterns
 

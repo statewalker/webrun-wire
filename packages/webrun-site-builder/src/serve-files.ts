@@ -1,4 +1,5 @@
 import type { FilesApi, ReadOptions } from "@statewalker/webrun-files";
+import { decodeUrlPath } from "./decode-path.js";
 import { getMimeType } from "./mime.js";
 
 export interface ServeFilesOptions {
@@ -43,6 +44,14 @@ export interface ServeFilesOptions {
  * honours `Range: bytes=<start>-<end>` for partial content. Only serves
  * exact-match file paths — directory URLs return `404` unless
  * `directoryIndex` is explicitly set.
+ *
+ * `path` is a **URL** path and is treated as one: it is percent-decoded by
+ * {@link decodeUrlPath} before it reaches `filesApi`, so `/My%20Report.html`
+ * finds the file stored as `/My Report.html`. This is the only place the
+ * decode happens — it is where a URL path stops being a URL and becomes a
+ * name. A path that cannot be decoded into a safe name (a dot-segment, a
+ * separator or a NUL that appears only after decoding) is answered `404`
+ * without consulting `filesApi` at all.
  */
 export function newServeFiles(
   filesApi: FilesApi,
@@ -65,7 +74,12 @@ export function newServeFiles(
       );
     }
 
-    const resolved = await resolvePath(filesApi, path, directoryIndex);
+    // Decode before the lookup — and refuse outright anything that would only
+    // become a traversal once decoded. See `decodeUrlPath`.
+    const decodedPath = decodeUrlPath(path);
+    if (decodedPath === null) return apply(request, new Response("Not Found", { status: 404 }));
+
+    const resolved = await resolvePath(filesApi, decodedPath, directoryIndex);
     if (!resolved) return apply(request, new Response("Not Found", { status: 404 }));
     const { path: filePath, size } = resolved;
 
