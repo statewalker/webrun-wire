@@ -142,13 +142,20 @@ describe("urlUpstream on a runtime without Request.prototype.body (the Firefox s
     } as RequestInit);
 
     const res = await upstream(request);
-    const { arrivals } = (await res.json()) as { arrivals: number[] };
+    const { arrivals, body: arrived } = (await res.json()) as {
+      arrivals: number[];
+      body: string;
+    };
 
+    // The timing proves it streamed...
     expect(arrivals.length).toBeGreaterThanOrEqual(2);
-    // The first byte arrives well before the 300ms gap has elapsed...
+    // ...the first byte arrives well before the 300ms gap has elapsed...
     expect(arrivals[0]).toBeLessThan(150);
     // ...and the last byte arrives only after it has, proving the two writes
     // were not merged into a single buffered send.
     expect(arrivals[arrivals.length - 1] - arrivals[0]).toBeGreaterThan(150);
+    // ...and the bytes prove it arrived whole: a route that only timed
+    // arrivals could pass while quietly corrupting or truncating the body.
+    expect(arrived).toBe("first-second");
   });
 });

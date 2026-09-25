@@ -18,3 +18,7 @@ The fix buffers via `arrayBuffer()` only when `request.body` reads absent — a
 real stream still streams, so a large upload through a runtime that supports
 request streams is never held in memory. `duplex: "half"` is now set only when
 the outbound body is actually a `ReadableStream`.
+
+A request whose body was already read elsewhere now resolves to this
+package's own `502 upstream-unreachable`, the same as any other unreachable
+upstream, instead of throwing out of the handler.
