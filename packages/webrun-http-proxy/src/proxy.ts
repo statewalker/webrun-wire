@@ -99,11 +99,40 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
     for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
     for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
 
+    // FIREFOX HAS NO `Request.prototype.body` (checked against 155):
+    // `request.body` reads as `undefined` there even for a genuine payload, so
+    // `body: request.body` silently builds a bodyless outbound request in that
+    // engine while working in Chromium, where the property is a stream. This
+    // defect has shipped from this exact pattern four times already
+    // (statewalker/httpeers: edge-dispatch.ts, two sites in core/router.ts, a
+    // demo page) — a POST through a session origin arrived as 0 bytes sent, in
+    // Firefox only, everywhere else silent.
+    //
+    // The streaming path stays first and unconditional: a runtime that has
+    // request streams never reaches the fallback, and never buffers an upload.
+    let body: ReadableStream<Uint8Array> | ArrayBuffer | undefined;
+    if (request.body != null) {
+      body = request.body;
+    } else {
+      // `request.body` reads `null`/`undefined` for two different reasons that
+      // are indistinguishable from here: genuinely no body (GET, HEAD, a POST
+      // built with none), or Firefox's missing accessor hiding a real one.
+      // Buffering the whole of it is the only way to tell them apart, and it
+      // is cheap in the genuinely-empty case — `arrayBuffer()` on a bodyless
+      // request resolves immediately with zero bytes, it does not wait on the
+      // network. A zero-length result is indistinguishable from an absent body
+      // (Chromium's own `new Request(url, { method: "POST", body: "" })`
+      // yields a non-null *empty* stream, which the branch above already
+      // handles), so an empty buffer here is treated as absent too.
+      const buffered = await request.arrayBuffer();
+      if (buffered.byteLength > 0) body = buffered;
+    }
+
     const outbound = new Request(target, {
       method: request.method,
       headers,
-      body: request.body,
-      ...(request.body != null ? { duplex: "half" as const } : {}),
+      body,
+      ...(body instanceof ReadableStream ? { duplex: "half" as const } : {}),
       signal: request.signal,
       redirect: "manual",
     });
