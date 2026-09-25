@@ -38,6 +38,20 @@ export async function startFixture(): Promise<Fixture> {
       return;
     }
 
+    if (url.pathname.startsWith("/request-stream")) {
+      // Records WHEN each chunk of the REQUEST body arrived, relative to when
+      // this handler started -- the only way to tell "the proxy streamed the
+      // body" from "the proxy buffered it and only then opened the upstream
+      // connection", which a concatenated result cannot distinguish (both
+      // produce the same bytes; only the timing differs).
+      const start = Date.now();
+      const arrivals: number[] = [];
+      for await (const _chunk of req) arrivals.push(Date.now() - start);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ arrivals }));
+      return;
+    }
+
     if (url.pathname.startsWith("/redirects")) {
       res.writeHead(302, { location: `${url.origin}/echo/redirected` });
       res.end();

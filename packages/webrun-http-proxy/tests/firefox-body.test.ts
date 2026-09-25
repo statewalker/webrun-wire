@@ -11,8 +11,9 @@
  *
  * Rather than require a browser, `Object.defineProperty` hides the property
  * on a real `Request` the same way Firefox's own prototype does, and the
- * assertion below is on the bytes that arrived at the upstream server — not
- * on a status code, which stayed 200 throughout even when the body was lost.
+ * assertions below are on what actually arrived at the upstream server —
+ * bytes, timing, status — never a status code alone, which stayed 200
+ * throughout even when the body was lost.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -57,7 +58,7 @@ describe("urlUpstream on a runtime without Request.prototype.body (the Firefox s
     expect(arrived.body).toBe(payload);
   });
 
-  it("frames no body at all for a genuinely empty one, same as the streaming path", async () => {
+  it("POST with a genuinely empty body: the upstream still receives zero bytes, same as the streaming path", async () => {
     const upstream = urlUpstream({ base: `${fixture.origin}/echo` });
 
     const request = hideBody(new Request("http://mesh.local/x", { method: "POST" }));
@@ -68,7 +69,7 @@ describe("urlUpstream on a runtime without Request.prototype.body (the Firefox s
     expect(arrived.body).toBe("");
   });
 
-  it("leaves GET alone — no body is buffered or sent", async () => {
+  it("GET: the upstream receives zero bytes (the body is never buffered — GET is decided before the body is touched at all)", async () => {
     const upstream = urlUpstream({ base: `${fixture.origin}/echo` });
 
     const request = hideBody(new Request("http://mesh.local/x", { method: "GET" }));
@@ -79,13 +80,57 @@ describe("urlUpstream on a runtime without Request.prototype.body (the Firefox s
     expect(arrived.body).toBe("");
   });
 
-  it("still streams chunk by chunk when `request.body` is available", async () => {
-    // No hiding here: the untouched path a real Chromium/Node request takes.
+  it("HEAD: no body is attached to the outbound request (a HEAD response has none to check upstream, so this inspects the outbound request itself)", async () => {
+    let seenMethod: string | undefined;
+    let seenBody: BodyInit | null | undefined;
+    const upstream = urlUpstream({
+      base: `${fixture.origin}/echo`,
+      fetchImpl: (async (input: Request) => {
+        seenMethod = input.method;
+        seenBody = input.body;
+        return new Response(null, { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const request = hideBody(new Request("http://mesh.local/x", { method: "HEAD" }));
+    await upstream(request);
+
+    expect(seenMethod).toBe("HEAD");
+    expect(seenBody).toBeNull();
+  });
+
+  it("an already-consumed body is reported as this package's own 502, not a rejected promise", async () => {
     const upstream = urlUpstream({ base: `${fixture.origin}/echo` });
 
+    const request = new Request("http://mesh.local/x", {
+      method: "POST",
+      body: "read by something else first",
+    });
+    await request.text(); // disturbs the body: `request.bodyUsed` is now true
+    hideBody(request); // Firefox hides `body` for every request, consumed or not
+
+    // Pre-fix, buffering ran OUTSIDE the try: `request.arrayBuffer()` on an
+    // already-consumed body throws `TypeError: Body is unusable`, so this
+    // call would have rejected instead of resolving to a Response — a new
+    // failure mode introduced by the fix, in exactly the engine it targets.
+    const res = await upstream(request);
+
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-webrun-proxy")).toBe("upstream-unreachable");
+  });
+
+  it("a real ReadableStream body still streams to the upstream — chunks arrive separately, not merged into one", async () => {
+    // No hiding here: the untouched path a real Chromium/Node request takes.
+    const upstream = urlUpstream({ base: `${fixture.origin}/request-stream` });
+
     const body = new ReadableStream<Uint8Array>({
-      start(controller) {
+      async start(controller) {
         controller.enqueue(new TextEncoder().encode("first-"));
+        // Buffering would wait for the WHOLE input stream — at least this
+        // delay — before opening the upstream connection at all, so nothing
+        // would arrive at the fixture before it elapses. Streaming lets the
+        // first chunk leave (and arrive) almost immediately.
+        await new Promise((resolve) => setTimeout(resolve, 300));
         controller.enqueue(new TextEncoder().encode("second"));
         controller.close();
       },
@@ -97,8 +142,13 @@ describe("urlUpstream on a runtime without Request.prototype.body (the Firefox s
     } as RequestInit);
 
     const res = await upstream(request);
-    const arrived = (await res.json()) as { body: string };
+    const { arrivals } = (await res.json()) as { arrivals: number[] };
 
-    expect(arrived.body).toBe("first-second");
+    expect(arrivals.length).toBeGreaterThanOrEqual(2);
+    // The first byte arrives well before the 300ms gap has elapsed...
+    expect(arrivals[0]).toBeLessThan(150);
+    // ...and the last byte arrives only after it has, proving the two writes
+    // were not merged into a single buffered send.
+    expect(arrivals[arrivals.length - 1] - arrivals[0]).toBeGreaterThan(150);
   });
 });
