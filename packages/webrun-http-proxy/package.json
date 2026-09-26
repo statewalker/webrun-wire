@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-proxy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Re-issue an HTTP request to an outside origin, safely: credentials consumed, hop-by-hop headers dropped, body streamed.",
   "license": "MIT",

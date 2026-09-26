@@ -1,5 +1,13 @@
 # @statewalker/site-builder-jspm-demo
 
+## 0.0.8
+
+### Patch Changes
+
+- Updated dependencies [89922b5]
+  - @statewalker/webrun-site-host@0.2.0
+  - @statewalker/webrun-site-builder@0.2.0
+
 ## 0.0.7
 
 ### Patch Changes
