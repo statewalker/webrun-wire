@@ -99,16 +99,67 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
     for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
     for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
 
-    const outbound = new Request(target, {
-      method: request.method,
-      headers,
-      body: request.body,
-      ...(request.body != null ? { duplex: "half" as const } : {}),
-      signal: request.signal,
-      redirect: "manual",
-    });
+    // FIREFOX HAS NO `Request.prototype.body` (checked against 155):
+    // `request.body` reads as `undefined` there even for a genuine payload, so
+    // `body: request.body` silently builds a bodyless outbound request in that
+    // engine while working in Chromium, where the property is a stream. This
+    // defect has shipped from this exact pattern four times already
+    // (statewalker/httpeers: edge-dispatch.ts, two sites in core/router.ts, a
+    // demo page) — a POST through a session origin arrived as 0 bytes sent, in
+    // Firefox only, everywhere else silent.
+    //
+    // GET/HEAD is decided FIRST and never touches the body at all -- the
+    // Fetch spec forbids giving either one a body (`new Request(url, {
+    // method: "GET", body })` throws), so deciding this before anything else
+    // removes the await for the common case and removes any reliance on a
+    // byte count being the only thing standing between a GET and that throw.
+    // Matches `bodyOf` in httpeers-core, which the other four fixed sites use.
+    const bodyless = request.method === "GET" || request.method === "HEAD";
+
+    // `duplex` is a plain boolean decided in the branch that already knows,
+    // not `body instanceof ReadableStream` checked later: a stream built in a
+    // different realm (crossing a worker or iframe boundary) fails that
+    // `instanceof`, `duplex` would then be silently omitted, and `new
+    // Request` throws "duplex option is required" for a stream body.
+    let body: ReadableStream<Uint8Array> | ArrayBuffer | undefined;
+    let streaming = false;
+    if (!bodyless && request.body != null) {
+      // The streaming path stays first and unconditional: a runtime that has
+      // request streams never reaches the buffering fallback below, and
+      // never buffers an upload.
+      body = request.body;
+      streaming = true;
+    }
 
     try {
+      if (!bodyless && !streaming) {
+        // Firefox. Without `request.body` there is nothing to stream from, so
+        // the only way to see the payload at all is to buffer the whole of
+        // it. This runs INSIDE the try: Firefox hides `body` for EVERY
+        // request, so a request whose body was already consumed elsewhere
+        // throws `TypeError: Body is unusable` here too, and uncaught that
+        // would turn a proxied call into a rejected promise instead of this
+        // package's own `502 upstream-unreachable` -- a new failure mode, in
+        // exactly the engine this buffering exists to fix. Caught here, it is
+        // reported the same as any other unreachable upstream.
+        //
+        // A zero-length result is indistinguishable from an absent body
+        // (Chromium's own `new Request(url, { method: "POST", body: "" })`
+        // yields a non-null *empty* stream, handled by the branch above), so
+        // an empty buffer here is treated as absent too.
+        const buffered = await request.arrayBuffer();
+        if (buffered.byteLength > 0) body = buffered;
+      }
+
+      const outbound = new Request(target, {
+        method: request.method,
+        headers,
+        body,
+        ...(streaming ? { duplex: "half" as const } : {}),
+        signal: request.signal,
+        redirect: "manual",
+      });
+
       const upstream = await doFetch(outbound);
       // AN OPAQUE REDIRECT HAS STATUS 0, and `new Response(body, {status: 0})`
       // throws — which is how the shipping proxy reports a redirecting

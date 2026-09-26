@@ -28,8 +28,35 @@ export async function startFixture(): Promise<Fixture> {
       for (const [name, value] of Object.entries(req.headers)) {
         if (typeof value === "string") headers[name] = value;
       }
+      // The bytes that actually arrived on the wire — the only way to tell a
+      // forwarder that silently drops the body from one that sends it.
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      const body = Buffer.concat(chunks).toString("utf8");
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ path: url.pathname, query: url.search, headers }));
+      res.end(JSON.stringify({ path: url.pathname, query: url.search, headers, body }));
+      return;
+    }
+
+    if (url.pathname.startsWith("/request-stream")) {
+      // Records WHEN each chunk of the REQUEST body arrived, relative to when
+      // this handler started -- the only way to tell "the proxy streamed the
+      // body" from "the proxy buffered it and only then opened the upstream
+      // connection", which a concatenated result alone cannot distinguish
+      // (both produce the same bytes; only the timing differs). The bytes are
+      // kept too, and returned alongside the timestamps: the timing proves it
+      // streamed, the bytes prove it arrived whole -- a route that only timed
+      // arrivals could pass while quietly corrupting or truncating the body.
+      const start = Date.now();
+      const arrivals: number[] = [];
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        arrivals.push(Date.now() - start);
+        chunks.push(chunk as Buffer);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ arrivals, body }));
       return;
     }
 
