@@ -60,8 +60,17 @@ export class SwPortHandler {
     return this.options.scope ?? new URL("./", this.serviceWorkerUrl).pathname;
   }
 
+  /**
+   * The scope as a url on the worker's origin. Resolved against the worker's
+   * own url when one is given, not against this module's: a bundle that is
+   * not an ES module (an IIFE, Theia's frontend) has no `import.meta.url`, and
+   * `new URL(scope, undefined)` threw `Invalid URL` there. Only without a
+   * worker url does the module's location decide (its default `index-sw.js`
+   * sits next to it).
+   */
   get rootUrl(): URL {
-    return new URL(this.scope, import.meta.url);
+    const base = this.options.serviceWorkerUrl ? this.serviceWorkerUrl : import.meta.url;
+    return new URL(this.scope, base);
   }
 
   get serviceWorkerUrl(): string {
