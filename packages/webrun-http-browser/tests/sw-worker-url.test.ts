@@ -64,4 +64,14 @@ describe("SwPortHandler: resolving serviceWorkerUrl", () => {
       () => new SwPortHandler({ key: "mesh", serviceWorkerUrl: "http://[bad", bindPort }),
     ).toThrow(/serviceWorkerUrl/);
   });
+
+  // A bundle that is not an ES module (Theia's esbuild frontend, any IIFE)
+  // has no `import.meta.url`: resolving the scope against the MODULE's url
+  // threw `Invalid URL` there, and the edge never started. The worker's own
+  // url is the right base anyway: the scope is a path on the worker's origin.
+  it("roots the scope at the worker's origin, not at this module's url", () => {
+    atPage("http://localhost:4173/app/index.html");
+    const handler = new SwPortHandler({ key: "mesh", serviceWorkerUrl: "/sw.js", bindPort });
+    expect(handler.rootUrl.href).toBe("http://localhost:4173/");
+  });
 });
