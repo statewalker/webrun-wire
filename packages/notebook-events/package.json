@@ -1,0 +1,38 @@
+{
+  "name": "@statewalker/notebook-events",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Generic publish/subscribe over Server-Sent Events: a standard FetchHandler and a matching client.",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepack": "pnpm run build",
+    "test": "pnpm run build && vitest run --passWithNoTests",
+    "test:browser": "vitest run test-browser --config vitest.browser.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-browser.json"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-http-browser": "^0.6.0",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}
