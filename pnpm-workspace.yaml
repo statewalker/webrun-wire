@@ -6,7 +6,7 @@ packages:
 catalog:
   "@chainsafe/libp2p-noise": ^17.0.0
   "@chainsafe/libp2p-yamux": ^8.0.1
-  "@changesets/cli": "^2.31.1"
+  "@changesets/cli": "^3.0.3"
   "@libp2p/interface": ^3.3.0
   "@libp2p/tcp": ^11.0.28
   "@libp2p/utils": ^7.4.1
@@ -21,7 +21,7 @@ catalog:
   "peer": "^1.0.2"
   "peerjs": "^1.5.5"
   "playwright": "^1.63.0"
-  "testcontainers": "^11.14.0"
+  "testcontainers": "^12.2.0"
   "ws": "^8.22.0"
   "@biomejs/biome": ^2.5.15
   "@types/node": ^26.6.4
