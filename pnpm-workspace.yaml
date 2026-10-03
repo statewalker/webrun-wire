@@ -13,7 +13,7 @@ catalog:
   "@multiformats/multiaddr": ^13.0.3
   "@roamhq/wrtc": "^0.8.0"
   "@types/ws": "^8.18.2"
-  "@vitest/browser-playwright": "^4.1.11"
+  "@vitest/browser-playwright": "^5.0.3"
   "esbuild": "^0.28.2"
   "libp2p": ^3.3.11
   "livekit-client": "^2.22.3"
@@ -25,7 +25,7 @@ catalog:
   "ws": "^8.22.0"
   "@biomejs/biome": ^2.5.15
   "@types/node": ^26.6.4
-  "@vitest/coverage-v8": ^4.1.11
+  "@vitest/coverage-v8": ^5.0.3
   hono: ^4.13.12
   http-server: ^14.1.1
   idb-keyval: ^6.3.0
@@ -36,7 +36,7 @@ catalog:
   turbo: ^2.11.7
   typescript: ^7.0.2
   vite: ^8.3.2
-  vitest: ^4.1.11
+  vitest: ^5.0.3
 
 catalogs:
   peers:
