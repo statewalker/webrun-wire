@@ -35,19 +35,19 @@
     "@statewalker/webrun-streams": "workspace:*"
   },
   "peerDependencies": {
-    "livekit-client": "^2.18.3"
+    "livekit-client": "catalog:peers"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "@types/node": "catalog:",
-    "@vitest/browser-playwright": "^4.1.10",
-    "livekit-client": "^2.18.3",
-    "livekit-server-sdk": "^2.10.0",
-    "playwright": "^1.62.1",
+    "@vitest/browser-playwright": "catalog:",
+    "livekit-client": "catalog:",
+    "livekit-server-sdk": "catalog:",
+    "playwright": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
-    "testcontainers": "^11.0.0",
+    "testcontainers": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

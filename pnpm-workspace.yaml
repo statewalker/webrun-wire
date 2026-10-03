@@ -4,36 +4,44 @@ packages:
   - "tools/*"
 
 catalog:
+  "@chainsafe/libp2p-noise": 17.0.0
+  "@chainsafe/libp2p-yamux": 8.0.1
+  "@changesets/cli": "^2.30.0"
+  "@libp2p/interface": 3.2.5
+  "@libp2p/tcp": 11.0.26
+  "@libp2p/utils": 7.3.2
+  "@multiformats/multiaddr": 13.0.3
+  "@roamhq/wrtc": "^0.8.0"
+  "@types/ws": "^8.5.13"
+  "@vitest/browser-playwright": "^4.1.10"
+  "esbuild": "^0.28.2"
+  "libp2p": 3.3.8
+  "livekit-client": "^2.18.3"
+  "livekit-server-sdk": "^2.10.0"
+  "peer": "^1.0.2"
+  "peerjs": "^1.5.5"
+  "playwright": "^1.63.0"
+  "testcontainers": "^11.0.0"
+  "ws": "^8.18.0"
   "@biomejs/biome": ^2.5.8
-  "@biscuit-auth/biscuit-wasm": ^0.6.0
-  "@jspm/generator": ^2.16.3
-  "@noble/curves": ^2.4.0
-  "@noble/hashes": ^2.4.0
-  "@statewalker/webrun-files": ^0.9.0
-  "@statewalker/webrun-files-browser": ^0.9.0
-  "@statewalker/webrun-files-mem": ^0.9.0
-  "@statewalker/webrun-files-node": ^0.9.0
   "@types/node": ^26.2.0
-  "@types/lodash.debounce": ^4.0.9
-  "@types/react": ^19.2.18
-  "@types/react-dom": ^19.2.4
   "@vitest/coverage-v8": ^4.1.10
-  es-module-lexer: ^2.3.1
-  marked: ^18.0.9
-  react: ^19.2.8
-  react-dom: ^19.2.8
   hono: ^4.13.2
   http-server: ^14.1.1
   idb-keyval: ^6.3.0
-  "lodash.debounce": ^4.0.8
-  pnpm: ^11.21.0
   rimraf: ^6.1.3
   rolldown: ^1.2.4
-  sucrase: ^3.35.1
   tsdown: ^0.22.14
   tsx: ^4.23.12
   turbo: ^2.10.9
   typescript: ^7.0.2
   vite: ^8.2.1
-  vite-plugin-static-copy: ^4.1.1
   vitest: ^4.1.10
+
+catalogs:
+  peers:
+    "@libp2p/interface": "^3.0.0"
+    "@multiformats/multiaddr": "^13.0.0"
+    "libp2p": "^3.0.0"
+    "livekit-client": "^2.18.3"
+    "peerjs": "^1.5.5"

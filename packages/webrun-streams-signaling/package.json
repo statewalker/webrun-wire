@@ -35,7 +35,7 @@
     "@statewalker/webrun-streams": "workspace:*"
   },
   "peerDependencies": {
-    "livekit-client": "^2.18.3"
+    "livekit-client": "catalog:peers"
   },
   "peerDependenciesMeta": {
     "livekit-client": {
@@ -45,7 +45,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
-    "livekit-client": "^2.18.3",
+    "livekit-client": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

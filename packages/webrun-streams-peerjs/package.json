@@ -35,17 +35,17 @@
     "@statewalker/webrun-streams": "workspace:*"
   },
   "peerDependencies": {
-    "peerjs": "^1.5.5"
+    "peerjs": "catalog:peers"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@roamhq/wrtc": "^0.8.0",
+    "@roamhq/wrtc": "catalog:",
     "@statewalker/webrun-streams-conformance": "workspace:*",
     "@types/node": "catalog:",
-    "@vitest/browser-playwright": "^4.1.10",
-    "peer": "^1.0.2",
-    "peerjs": "^1.5.5",
-    "playwright": "^1.62.1",
+    "@vitest/browser-playwright": "catalog:",
+    "peer": "catalog:",
+    "peerjs": "catalog:",
+    "playwright": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

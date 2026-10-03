@@ -2,7 +2,7 @@
   "name": "@statewalker/webrun-wire-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.16.1",
   "description": "Transport-agnostic HTTP, RPC, and streaming primitives for the webrun ecosystem - monorepo",
   "homepage": "https://github.com/statewalker/webrun-wire",
   "author": {
@@ -31,11 +31,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@changesets/cli": "^2.30.0",
+    "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "tsx": "catalog:",
-    "turbo": "^2.9.6",
+    "turbo": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
