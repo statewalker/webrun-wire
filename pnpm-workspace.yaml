@@ -11,7 +11,7 @@ catalog:
   "@libp2p/tcp": ^11.0.28
   "@libp2p/utils": ^7.4.1
   "@multiformats/multiaddr": ^13.0.3
-  "@roamhq/wrtc": "^0.8.0"
+  "@roamhq/wrtc": "^0.10.0"
   "@types/ws": "^8.18.2"
   "@vitest/browser-playwright": "^5.0.3"
   "esbuild": "^0.28.2"
