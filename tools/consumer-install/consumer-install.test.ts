@@ -16,13 +16,6 @@ export type ConsumerTarget = {
 };
 
 export const PACKAGES: ConsumerTarget[] = [
-  { name: "@statewalker/webrun-site-builder", dir: "webrun-site-builder", subpaths: ["."] },
-  {
-    name: "@statewalker/webrun-site-host",
-    dir: "webrun-site-host",
-    subpaths: ["."],
-    browserOnly: ["."], // registers a ServiceWorker; cannot import under Node
-  },
   {
     name: "@statewalker/webrun-http-browser",
     dir: "webrun-http-browser",
