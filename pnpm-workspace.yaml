@@ -7,7 +7,7 @@ catalog:
   "@chainsafe/libp2p-noise": 17.0.0
   "@chainsafe/libp2p-yamux": 8.0.1
   "@changesets/cli": "^2.30.0"
-  "@libp2p/interface": 3.2.5
+  "@libp2p/interface": 3.3.0
   "@libp2p/tcp": 11.0.26
   "@libp2p/utils": 7.3.2
   "@multiformats/multiaddr": 13.0.3
