@@ -38,12 +38,12 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-rpc": "workspace:*"
+    "@statewalker/webrun-rpc": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-streams": "workspace:*",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams": "workspace:^",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

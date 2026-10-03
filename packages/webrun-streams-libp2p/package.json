@@ -31,7 +31,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
     "@libp2p/interface": "catalog:peers",
@@ -51,7 +51,7 @@
     "@libp2p/tcp": "catalog:",
     "@libp2p/utils": "catalog:",
     "@multiformats/multiaddr": "catalog:",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "libp2p": "catalog:",
     "rimraf": "catalog:",

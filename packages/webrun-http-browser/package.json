@@ -57,9 +57,9 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-http-streams": "workspace:*",
-    "@statewalker/webrun-rpc": "workspace:*",
-    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-http-streams": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
+    "@statewalker/webrun-streams": "workspace:^",
     "idb-keyval": "catalog:"
   },
   "devDependencies": {

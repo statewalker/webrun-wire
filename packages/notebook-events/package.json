@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test-browser.json"
   },
   "devDependencies": {
-    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-http-browser": "workspace:^",
     "esbuild": "catalog:",
     "playwright": "catalog:",
     "tsdown": "catalog:",

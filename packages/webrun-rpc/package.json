@@ -35,11 +35,11 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",

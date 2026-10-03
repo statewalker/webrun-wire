@@ -31,7 +31,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-streams": "workspace:^",
     "vitest": "catalog:"
   },
   "devDependencies": {

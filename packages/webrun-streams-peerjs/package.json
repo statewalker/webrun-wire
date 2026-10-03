@@ -32,7 +32,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
     "peerjs": "catalog:peers"
@@ -40,7 +40,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@roamhq/wrtc": "catalog:",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "peer": "catalog:",

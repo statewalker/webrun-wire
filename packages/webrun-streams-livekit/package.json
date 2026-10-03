@@ -32,14 +32,14 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
     "livekit-client": "catalog:peers"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "livekit-client": "catalog:",
