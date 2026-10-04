@@ -97,6 +97,31 @@ function definedOptions<T extends Record<string, unknown>>(fields: T): Partial<T
  * Caller-side: each `call(input)` opens a new libp2p `Stream` via
  * `node.dialProtocol(peer, [protocol])` and runs the call over it.
  */
+/** The early-stream guard of `connect()`, per local node and remote peer. */
+interface StreamGate {
+  /** A connection on which a stream has negotiated a protocol: the remote is ready. */
+  provenConnection: Connection | null;
+  /** The stream being opened while no connection is proven; the others wait for it. */
+  firstOpening: Promise<Stream> | null;
+}
+
+const streamGates = new WeakMap<Libp2p, Map<string, StreamGate>>();
+
+function streamGateFor(node: Libp2p, peer: PeerId | Multiaddr): StreamGate {
+  let gates = streamGates.get(node);
+  if (gates == null) {
+    gates = new Map();
+    streamGates.set(node, gates);
+  }
+  const key = peer.toString();
+  let gate = gates.get(key);
+  if (gate == null) {
+    gate = { provenConnection: null, firstOpening: null };
+    gates.set(key, gate);
+  }
+  return gate;
+}
+
 export const connect: Connect<ConnectLibp2pParams> = async ({
   node,
   peer,
@@ -111,10 +136,47 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
     runOnLimitedConnection,
   });
   const open = new Set<Stream>();
+
+  // A burst of calls must not reach the remote before its muxer is ready.
+  //
+  // When there is no connection to the peer yet, every call dials it and they
+  // all share the one connection libp2p establishes. Their streams can arrive
+  // while the REMOTE side is still upgrading that connection, and yamux counts
+  // those "early streams": past `maxEarlyStreams` (10 by default) it aborts the
+  // whole muxer, so every stream on the connection dies — the remote sees EOF
+  // during protocol negotiation, this side sees `StreamResetError`. Raising the
+  // limit on our own nodes would not help against any other libp2p peer.
+  //
+  // So until one stream has negotiated its protocol on an open connection, the
+  // calls open their streams one at a time: a completed negotiation means the
+  // remote has finished its upgrade, and from then on streams are not early and
+  // open concurrently. If that connection closes, the next burst is gated again.
+  // The state is shared by every connect() to the same peer from the same node
+  // (callers often connect() per request), since they all share its connection.
+  const gate = streamGateFor(node, peer);
+  const openStream = async (): Promise<Stream> => {
+    while (gate.provenConnection?.status !== "open") {
+      if (gate.firstOpening == null) {
+        const opening = node.dialProtocol(peer, [proto], dialOptions);
+        gate.firstOpening = opening;
+        try {
+          const stream = await opening;
+          gate.provenConnection =
+            node.getConnections().find((connection) => connection.streams.includes(stream)) ?? null;
+          return stream;
+        } finally {
+          gate.firstOpening = null;
+        }
+      }
+      await gate.firstOpening.catch(() => undefined);
+    }
+    return node.dialProtocol(peer, [proto], dialOptions);
+  };
+
   const call: Duplex = (input) => {
     let streamRef: Stream | null = null;
     const gen = (async function* () {
-      const stream = await node.dialProtocol(peer, [proto], dialOptions);
+      const stream = await openStream();
       streamRef = stream;
       open.add(stream);
       let sourceCompleted = false;
