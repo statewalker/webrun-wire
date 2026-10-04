@@ -99,8 +99,13 @@ function definedOptions<T extends Record<string, unknown>>(fields: T): Partial<T
  */
 /** The early-stream guard of `connect()`, per local node and remote peer. */
 interface StreamGate {
-  /** A connection on which a stream has negotiated a protocol: the remote is ready. */
-  provenConnection: Connection | null;
+  /**
+   * A stream has negotiated a protocol on an open connection: the remote is ready.
+   * `connection` is that connection when the node can tell (`getConnections`), so a
+   * burst after it closes is gated again; a node that offers only `dialProtocol`
+   * stays proven.
+   */
+  proven: { connection: Connection | null } | null;
   /** The stream being opened while no connection is proven; the others wait for it. */
   firstOpening: Promise<Stream> | null;
 }
@@ -116,10 +121,25 @@ function streamGateFor(node: Libp2p, peer: PeerId | Multiaddr): StreamGate {
   const key = peer.toString();
   let gate = gates.get(key);
   if (gate == null) {
-    gate = { provenConnection: null, firstOpening: null };
+    gate = { proven: null, firstOpening: null };
     gates.set(key, gate);
   }
   return gate;
+}
+
+function isProven(gate: StreamGate): boolean {
+  if (gate.proven == null) return false;
+  return gate.proven.connection == null || gate.proven.connection.status === "open";
+}
+
+/**
+ * The connection carrying `stream`, when `node` can list its connections.
+ * Callers may pass a narrow stand-in that offers only `dialProtocol` (httpeers
+ * routes streams onto a kept relay circuit that way), so nothing else is required.
+ */
+function connectionOf(node: Libp2p, stream: Stream): Connection | null {
+  if (typeof node.getConnections !== "function") return null;
+  return node.getConnections().find((connection) => connection.streams.includes(stream)) ?? null;
 }
 
 export const connect: Connect<ConnectLibp2pParams> = async ({
@@ -155,14 +175,13 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
   // (callers often connect() per request), since they all share its connection.
   const gate = streamGateFor(node, peer);
   const openStream = async (): Promise<Stream> => {
-    while (gate.provenConnection?.status !== "open") {
+    while (!isProven(gate)) {
       if (gate.firstOpening == null) {
         const opening = node.dialProtocol(peer, [proto], dialOptions);
         gate.firstOpening = opening;
         try {
           const stream = await opening;
-          gate.provenConnection =
-            node.getConnections().find((connection) => connection.streams.includes(stream)) ?? null;
+          gate.proven = { connection: connectionOf(node, stream) };
           return stream;
         } finally {
           gate.firstOpening = null;
