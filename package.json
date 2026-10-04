@@ -4,7 +4,10 @@
   "type": "module",
   "packageManager": "pnpm@10.16.1",
   "description": "Transport-agnostic HTTP, RPC, and streaming primitives for the webrun ecosystem - monorepo",
-  "homepage": "https://github.com/statewalker/webrun-wire",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -12,7 +15,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/statewalker/webrun-wire.git"
+    "url": "git+https://github.com/statewalker/webrun-wire.git"
   },
   "scripts": {
     "build": "pnpm -r run build",
@@ -27,7 +30,8 @@
     "publish-all": "pnpm run build && pnpm -r publish --access public --no-git-checks",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release-packages": "changeset publish"
+    "release-packages": "changeset publish",
+    "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
