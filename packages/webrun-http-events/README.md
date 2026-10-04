@@ -1,4 +1,4 @@
-# @statewalker/notebook-events
+# @statewalker/webrun-http-events
 
 Generic publish/subscribe over [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html):
 a standard `FetchHandler` on the server side and a matching `EventSource` client on the page side.
@@ -7,13 +7,13 @@ No runtime dependencies, no DOM APIs on the server half (it runs in a Worker, a 
 Node), and no vocabulary of its own — topics and event names are yours.
 
 ```sh
-npm install @statewalker/notebook-events
+npm install @statewalker/webrun-http-events
 ```
 
 ## Server
 
 ```ts
-import { newPubSub } from "@statewalker/notebook-events";
+import { newPubSub } from "@statewalker/webrun-http-events";
 
 const events = newPubSub({ topics: ["build"], bufferSize: 64 });
 
@@ -38,7 +38,7 @@ The handler answers `405` to anything but `GET` and `404` to an unknown or empty
 ## Client
 
 ```ts
-import { newPubSubClient } from "@statewalker/notebook-events";
+import { newPubSubClient } from "@statewalker/webrun-http-events";
 
 const client = newPubSubClient("/_events", {
   events: ["message", "rebuilt"], // see "event names" below
