@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-conformance",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": false,
   "type": "module",
   "description": "Conformance test suite for Duplex/Connect/Serve adapters in the webrun-streams-* family",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -31,7 +32,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-streams": "workspace:^",
     "vitest": "catalog:"
   },
   "devDependencies": {

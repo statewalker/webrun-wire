@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-msgpack",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": false,
   "type": "module",
   "description": "MessagePack for the wire, with no runtime dependencies: serialize/deserialize (a TypeScript port of msgpack.js), a length-prefixed stream codec for iterables (values and Float32Arrays), and msgpackCodec, a PortCodec that carries webrun-rpc port envelopes over a byte transport.",
@@ -17,6 +17,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -38,12 +39,12 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-rpc": "workspace:*"
+    "@statewalker/webrun-rpc": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-streams": "workspace:*",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams": "workspace:^",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

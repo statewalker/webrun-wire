@@ -1,0 +1,11 @@
+{
+  // `test-browser/` is page code and Node code, so it needs the DOM lib the shipped
+  // package deliberately does not get (see tsconfig.json's `lib`). It lives in its own
+  // project rather than widening that one — and it IS checked: `pnpm typecheck` runs both.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["./test-browser", "./*.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-rpc-http",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "HTTP-based service RPC: expose object methods as a (Request) => Response handler and call them with fetch",
@@ -19,6 +19,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -34,7 +35,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

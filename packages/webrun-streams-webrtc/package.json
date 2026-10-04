@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-webrtc",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "WebRTC DataChannel-backed Connect/Serve adapter (native multi-stream) in the webrun-streams-* family",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -32,15 +33,15 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@roamhq/wrtc": "^0.8.0",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@roamhq/wrtc": "catalog:",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
-    "@vitest/browser-playwright": "^4.1.10",
-    "playwright": "^1.62.1",
+    "@vitest/browser-playwright": "catalog:",
+    "playwright": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-peerjs",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": false,
   "type": "module",
   "description": "PeerJS DataConnection-backed Connect/Serve adapter in the webrun-streams-* family",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -32,20 +33,20 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
-    "peerjs": "^1.5.5"
+    "peerjs": "catalog:peers"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@roamhq/wrtc": "^0.8.0",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@roamhq/wrtc": "catalog:",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
-    "@vitest/browser-playwright": "^4.1.10",
-    "peer": "^1.0.2",
-    "peerjs": "^1.5.5",
-    "playwright": "^1.62.1",
+    "@vitest/browser-playwright": "catalog:",
+    "peer": "catalog:",
+    "peerjs": "catalog:",
+    "playwright": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

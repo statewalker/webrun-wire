@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-ws",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": false,
   "type": "module",
   "description": "WebSocket-backed Connect/Serve adapter in the webrun-streams-* family",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -34,18 +35,18 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "ws": "^8.18.0"
+    "ws": "catalog:"
   },
   "sideEffects": false,
   "publishConfig": {

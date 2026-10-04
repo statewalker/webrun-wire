@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-libp2p",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "libp2p native multi-stream Connect/Serve adapter in the webrun-streams-* family",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -31,12 +32,12 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
-    "@libp2p/interface": "^3.0.0",
-    "@multiformats/multiaddr": "^13.0.0",
-    "libp2p": "^3.0.0"
+    "@libp2p/interface": "catalog:peers",
+    "@multiformats/multiaddr": "catalog:peers",
+    "libp2p": "catalog:peers"
   },
   "peerDependenciesMeta": {
     "libp2p": {
@@ -45,15 +46,15 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@chainsafe/libp2p-noise": "17.0.0",
-    "@chainsafe/libp2p-yamux": "8.0.1",
-    "@libp2p/interface": "3.2.5",
-    "@libp2p/tcp": "11.0.26",
-    "@libp2p/utils": "7.3.2",
-    "@multiformats/multiaddr": "13.0.3",
-    "@statewalker/webrun-streams-conformance": "workspace:*",
+    "@chainsafe/libp2p-noise": "catalog:",
+    "@chainsafe/libp2p-yamux": "catalog:",
+    "@libp2p/interface": "catalog:",
+    "@libp2p/tcp": "catalog:",
+    "@libp2p/utils": "catalog:",
+    "@multiformats/multiaddr": "catalog:",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
-    "libp2p": "3.3.8",
+    "libp2p": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

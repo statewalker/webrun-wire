@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-browser",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "private": false,
   "type": "module",
   "description": "ServiceWorker-based HTTP server for browsers, with relay and same-origin dispatch modes",
@@ -19,21 +19,26 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./sw": {
+      "source": "./src/sw.ts",
       "types": "./dist/sw.d.ts",
       "import": "./dist/sw.js"
     },
     "./relay-sw": {
+      "source": "./src/relay-sw.ts",
       "default": "./dist/relay-sw.js"
     },
     "./relay-worker": {
+      "source": "./src/relay-worker.ts",
       "types": "./dist/relay-worker.d.ts",
       "import": "./dist/relay-worker.js"
     },
     "./sw-worker": {
+      "source": "./src/sw-worker.ts",
       "default": "./dist/sw-worker.js"
     }
   },
@@ -57,16 +62,16 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-http-streams": "workspace:*",
-    "@statewalker/webrun-rpc": "workspace:*",
-    "@statewalker/webrun-streams": "workspace:*",
+    "@statewalker/webrun-http-streams": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
+    "@statewalker/webrun-streams": "workspace:^",
     "idb-keyval": "catalog:"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "http-server": "catalog:",
-    "playwright": "^1.62.1",
+    "playwright": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

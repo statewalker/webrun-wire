@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-signaling",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "Generic P2P signaling/connection-setup (PeerManager, QrSignaling, RoomManager) yielding webrun-streams ByteChannels",
@@ -17,6 +17,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -32,10 +33,10 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
-    "livekit-client": "^2.18.3"
+    "livekit-client": "catalog:peers"
   },
   "peerDependenciesMeta": {
     "livekit-client": {
@@ -45,7 +46,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
-    "livekit-client": "^2.18.3",
+    "livekit-client": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

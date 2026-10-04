@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-streams",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "private": false,
   "type": "module",
   "description": "HTTP request/response over Duplex — merge of webrun-http + webrun-http-port",
@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
@@ -34,7 +35,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@statewalker/webrun-streams": "workspace:*"
+    "@statewalker/webrun-streams": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
