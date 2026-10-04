@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-browser",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": false,
   "type": "module",
   "description": "ServiceWorker-based HTTP server for browsers, with relay and same-origin dispatch modes",
@@ -29,7 +29,6 @@
       "import": "./dist/sw.js"
     },
     "./relay-sw": {
-      "source": "./src/relay-sw.ts",
       "default": "./dist/relay-sw.js"
     },
     "./relay-worker": {
@@ -38,7 +37,6 @@
       "import": "./dist/relay-worker.js"
     },
     "./sw-worker": {
-      "source": "./src/sw-worker.ts",
       "default": "./dist/sw-worker.js"
     }
   },
