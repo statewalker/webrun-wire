@@ -16,7 +16,7 @@
       "@statewalker/webrun-http-streams": ["./packages/webrun-http-streams/src"],
       "@statewalker/webrun-msgpack": ["./packages/webrun-msgpack/src"],
       "@statewalker/webrun-rpc": ["./packages/webrun-rpc/src"],
-        "@statewalker/webrun-rpc-http": ["./packages/webrun-rpc-http/src"],
+      "@statewalker/webrun-rpc-http": ["./packages/webrun-rpc-http/src"],
       "@statewalker/webrun-streams": ["./packages/webrun-streams/src"],
       "@statewalker/webrun-streams-conformance": ["./packages/webrun-streams-conformance/src"],
       "@statewalker/webrun-streams-libp2p": ["./packages/webrun-streams-libp2p/src"],
