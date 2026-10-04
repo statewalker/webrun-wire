@@ -101,6 +101,28 @@ describe("a burst of calls on a fresh connection", () => {
 
     expectAllEchoed(results);
   }, 20_000);
+
+  it("needs nothing from the node but dialProtocol", async () => {
+    // Callers pass narrow stand-ins (httpeers routes streams onto a kept relay
+    // circuit with an object that has only `dialProtocol`).
+    const server = await createNode(false);
+    const client = await createNode(false);
+    await serve({ node: server, maxInboundStreams: 256 }, echo);
+    const addr = server.getMultiaddrs()[0];
+    if (!addr) throw new Error("server has no listen address");
+    const dialer = {
+      dialProtocol: client.dialProtocol.bind(client),
+    } as Pick<Libp2p, "dialProtocol"> as Libp2p;
+
+    const { call } = await connect({ node: dialer, peer: addr, maxOutboundStreams: 256 });
+    const results = await Promise.allSettled(
+      Array.from({ length: BURST }, (_, i) =>
+        collect(call([new TextEncoder().encode(`call ${i}`)])),
+      ),
+    );
+
+    expectAllEchoed(results);
+  }, 20_000);
 });
 
 function expectAllEchoed(results: PromiseSettledResult<string>[]): void {
