@@ -4,6 +4,15 @@
   "private": false,
   "type": "module",
   "description": "Generic publish/subscribe over Server-Sent Events: a standard FetchHandler and a matching client.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-wire.git",
+    "directory": "packages/webrun-http-events"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire/tree/main/packages/webrun-http-events#readme",
   "license": "MIT",
   "exports": {
     ".": {

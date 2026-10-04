@@ -4,7 +4,10 @@
   "private": false,
   "type": "module",
   "description": "Ports and RPC over them: a port multiplexer, and typed request/response and streaming primitives over any MessageTarget.",
-  "homepage": "https://github.com/statewalker/webrun-wire",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire/tree/main/packages/webrun-rpc#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -12,7 +15,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:statewalker/webrun-wire.git",
+    "url": "git+https://github.com/statewalker/webrun-wire.git",
     "directory": "packages/webrun-rpc"
   },
   "exports": {

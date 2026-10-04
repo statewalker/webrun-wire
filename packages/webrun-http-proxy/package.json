@@ -3,10 +3,14 @@
   "version": "0.2.2",
   "type": "module",
   "description": "Re-issue an HTTP request to an outside origin, safely: credentials consumed, hop-by-hop headers dropped, body streamed.",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire/tree/main/packages/webrun-http-proxy#readme",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/statewalker/webrun-wire.git",
+    "url": "git+https://github.com/statewalker/webrun-wire.git",
     "directory": "packages/webrun-http-proxy"
   },
   "main": "./dist/index.js",
