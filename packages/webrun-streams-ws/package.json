@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-ws",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "WebSocket-backed Connect/Serve adapter in the webrun-streams-* family",
