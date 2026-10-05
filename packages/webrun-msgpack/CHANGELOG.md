@@ -1,5 +1,15 @@
 # @statewalker/webrun-msgpack
 
+## 0.3.3
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+- Updated dependencies
+  - @statewalker/webrun-rpc@0.4.3
+
 ## 0.3.0
 
 ### Minor Changes

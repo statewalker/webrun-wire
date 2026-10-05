@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-events",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Generic publish/subscribe over Server-Sent Events: a standard FetchHandler and a matching client.",

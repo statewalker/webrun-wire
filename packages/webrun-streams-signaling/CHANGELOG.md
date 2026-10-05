@@ -1,5 +1,15 @@
 # @statewalker/webrun-streams-signaling
 
+## 0.1.5
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+- Updated dependencies
+  - @statewalker/webrun-streams@0.2.2
+
 ## 0.1.2
 
 ### Patch Changes

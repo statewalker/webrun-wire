@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-livekit",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "type": "module",
   "description": "LiveKit-backed Connect/Serve adapter in the webrun-streams-* family",
