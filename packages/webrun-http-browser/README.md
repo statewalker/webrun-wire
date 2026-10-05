@@ -1,211 +1,174 @@
 # @statewalker/webrun-http-browser
 
-ServiceWorker-based HTTP server for browsers. You write ordinary
-`(Request) ⇒ Response` handlers in JavaScript; a ServiceWorker intercepts
-same-origin `fetch()` calls and routes them to your handlers — no network
-round-trip, no external server, no bundler tricks required.
+## What it is
 
-Two modes, picked by how the SW is hosted:
+A ServiceWorker-based HTTP server for the browser. You write ordinary
+`(Request) => Response` handlers in page JavaScript; a ServiceWorker intercepts
+`fetch()` calls and routes them to those handlers over a `MessagePort`, with no
+network round-trip and no external server. It has two modes:
 
-- **Same-origin** (`@statewalker/webrun-http-browser/sw`) — your app
-  registers its own SW and mounts handlers next to the page.
-- **Relay** (default entry) — a SW running at a shared relay origin
-  (CDN / unpkg / your own host) serves requests for any page that embeds
-  a hidden relay iframe. Cross-origin friendly.
+- **Same-origin** (`./sw` + `./sw-worker`): your app registers its own worker
+  next to its pages and mounts handlers under URL prefixes.
+- **Relay** (`.` + `./relay-sw` or `./relay-worker`): a worker hosted on a relay
+  origin serves requests for any page that embeds a hidden relay iframe. The
+  page never registers a worker of its own.
 
 ## Why it exists
 
-The browser already has everything needed to be an HTTP server: `Request`,
-`Response`, `ReadableStream`, `ServiceWorker`. Two things are missing from
-the raw platform APIs, and this package fills them:
+The browser already has `Request`, `Response`, `ReadableStream` and
+ServiceWorkers. What it lacks is the plumbing between them:
 
-1. **Plumbing for same-origin SW dispatch.** Browsers let a SW intercept
-   `fetch` events, but you still have to build URL routing, MessageChannel
-   wiring between the page and the SW, and recovery after SW restarts.
-2. **A way to use a SW from a page that isn't on the SW's origin.** The
-   relay mode lets *any* page (Observable, notebooks, a `file://` demo,
-   unpkg, a third-party host) share a SW hosted somewhere else. The page
-   never registers a SW of its own — it just embeds a hidden iframe.
+1. **Same-origin dispatch.** A worker can intercept `fetch` events, but you
+   still need URL routing, a `MessageChannel` between page and worker, recovery
+   after the worker is stopped and restarted, and a way out when the page loads
+   uncontrolled.
+2. **A worker for a page that is not on the worker's origin.** Relay mode lets
+   any page (a notebook, a CDN-hosted page, a third-party host) use a worker
+   hosted elsewhere by embedding a hidden iframe.
 
-Combining both modes means the same handler code works in an app you
-control *and* in an embed you don't.
-
-## Install
-
-```sh
-npm install @statewalker/webrun-http-browser
-```
-
-Browser-only — it needs `navigator.serviceWorker`, so a secure context
-(`https://` or `localhost`) is required. No peer dependencies.
+The same handler code works in both modes.
 
 ## How to use
 
 ```sh
-npm install @statewalker/webrun-http-browser
+pnpm add @statewalker/webrun-http-browser
 ```
 
-| Subpath | Purpose |
+- **Peer dependencies:** none.
+- **Environment:** browser only. Pages need `navigator.serviceWorker`, which
+  requires a secure context (`https://` or `http://localhost`).
+
+### Entry points
+
+| Subpath | Format | Runs in | What it gives |
+| --- | --- | --- | --- |
+| `.` | ESM, `dist/index.js` + `.d.ts` | page, relay iframe | Relay page API (`newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `getRelayWindowMessageHandler`, `splitServiceUrl`), ServiceWorker lifecycle helpers (`initServiceWorker`, `newServiceWorkerPort`, `awaitActiveServiceWorker`, `awaitServiceWorkerControl`, `handleClaimRequests`, `ServiceWorkerControlError`), the `MessagePort` call primitives, and everything re-exported from `@statewalker/webrun-streams` and `@statewalker/webrun-http-streams`. |
+| `./sw` | ESM, `dist/sw.js` + `.d.ts` | page and worker | Same-origin classes: `SwHttpAdapter` (page), `SwHttpDispatcher` and `startHttpDispatcher` (worker), and their bases `SwPortHandler` / `SwPortDispatcher`. |
+| `./sw-worker` | IIFE, `dist/sw-worker.js`, no types | ServiceWorker | Prebuilt same-origin worker: calls `startHttpDispatcher({ self, log: console.log })`. Load it with `importScripts`. |
+| `./relay-sw` | IIFE, `dist/relay-sw.js`, no types | ServiceWorker | Prebuilt relay worker: calls `startRelayServiceWorker(self, self.RELAY_OPTIONS ?? {})`. Load it with `importScripts`. |
+| `./relay-worker` | ESM, `dist/relay-worker.js` + `.d.ts` | ServiceWorker | The relay worker runtime as a typed module, for a host that bundles its own worker: `startRelayServiceWorker`, `RelayServiceWorkerOptions`, `MountSpec`. Not re-exported from `.`, because it only runs inside a worker. |
+
+The ESM subpaths also have a `source` condition pointing at `src/`.
+
+### Static files in the package
+
+The published package also ships three directories, served straight from a
+static host:
+
+| Path | Contents |
 | --- | --- |
-| `@statewalker/webrun-http-browser` | Page-side relay API: `newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `splitServiceUrl`, `initServiceWorker`, `newServiceWorkerPort`, `getRelayWindowMessageHandler`; the MessagePort call primitives (`callChannel`, `handleChannelCalls`, `newInvokationChannel`, `sendStream`, `handleStreams`, `newRegistry`); plus everything re-exported from `@statewalker/webrun-http-streams` (`HttpError`, the client/server stubs), `@statewalker/webrun-streams` (stream and error helpers) and the `MessageTarget` family from `@statewalker/webrun-rpc` |
-| `@statewalker/webrun-http-browser/sw` | Same-origin adapter classes: `SwHttpAdapter` (page), `SwHttpDispatcher` (SW), `startHttpDispatcher` bootstrap; `start()` options `timeout` and `reloadIfUncontrolled` |
-| `@statewalker/webrun-http-browser/relay-sw` | IIFE bundle of the relay SW runtime — load via `importScripts` from a loader script in your relay origin. No declarations: it takes its options from `self.RELAY_OPTIONS` |
-| `@statewalker/webrun-http-browser/relay-worker` | The same runtime as a typed ES module, for a host that bundles its own relay worker: `startRelayServiceWorker(self, options)`, plus `RelayServiceWorkerOptions` and `MountSpec` to type them (including a hand-written `self.RELAY_OPTIONS`) |
-| `@statewalker/webrun-http-browser/sw-worker` | IIFE bundle of the same-origin SW runtime — ditto, for same-origin apps |
+| `public-relay/relay.html`, `public-relay/relay-sw.js` | A ready relay: the iframe page (calls `getRelayWindowMessageHandler`) and a worker loader that `importScripts("../dist/relay-sw.js")`. `newRemoteRelayChannel()` points here by default. |
+| `public/index.html`, `public/index.js`, `public/sw-worker.js` | Minimal same-origin demo, and a loader that `importScripts("../dist/sw-worker.js")`. |
+| `demo/demo-1.html`, `demo/demo-2.html` | Relay demos: a Hono app (loaded from esm.sh) as an in-tab site, and a local folder served through the File System Access API. |
 
 ## Examples
 
-> Every example below needs a real browser: a ServiceWorker, and for relay
-> mode an iframe on the relay origin. None of them run under Node, and
-> ServiceWorkers only register over `http://localhost` or HTTPS. The runnable
-> versions are in [`public/`](./public) and [`demo/`](./demo) — see
-> [Running the bundled examples](#running-the-bundled-examples).
+Every example needs a real browser with ServiceWorker support. None runs under
+Node.
 
-### Relay mode — cross-origin
-
-Your page ↔ hidden relay iframe ↔ relay ServiceWorker. The relay SW claims
-URLs shaped `<relay-origin>/~<service-key>/…` and forwards each request to
-whichever page registered that `key`.
+### Relay mode: serve a handler from the page
 
 ```ts
 import {
-  newRemoteRelayChannel,
-  initHttpService,
   callHttpService,
+  initHttpService,
+  newRemoteRelayChannel,
 } from "@statewalker/webrun-http-browser";
 
-// 1. Embed the relay iframe and open a MessagePort into its SW.
+// 1. Embed the hidden relay iframe and get a port into its worker.
 const connection = await newRemoteRelayChannel({
-  url: new URL("https://my-relay.example/public-relay/relay.html"),
+  url: new URL("https://my-relay.example/relay.html"),
 });
 
-// 2. Register a handler for service "FS".
-const baseUrl = `${connection.baseUrl}~FS`;
-await initHttpService(
-  async (request) =>
-    new Response(`Hello ${new URL(request.url).pathname}`),
+// 2. Register a handler for service "FS". Returns a cleanup that unregisters it.
+const unregister = await initHttpService(
+  async (request) => new Response(`Hello ${new URL(request.url).pathname}`),
   { key: "FS", port: connection.port },
 );
 
-// 3a. Any browser tab loading the service URL now hits your handler:
-await fetch(`${baseUrl}/anything`);
-
-// 3b. …or call it directly through the same port, bypassing `fetch`
-//     (useful when the caller isn't on the relay origin):
-const res = await callHttpService(
-  new Request(`${baseUrl}/anything`),
-  { key: "FS", port: connection.port },
-);
+// 3. Call it through the same port, without going through `fetch`.
+const res = await callHttpService(new Request("https://my-relay.example/~FS/anything"), {
+  key: "FS",
+  port: connection.port,
+});
 ```
 
-[`demo/demo-1.html`](./demo/demo-1.html) wires this to a Hono router
-serving a mini site; [`demo/demo-2.html`](./demo/demo-2.html) pipes a
-local-disk folder (File System Access API) through it.
+Any tab whose `fetch` reaches the relay worker for `https://my-relay.example/~FS/…`
+is answered by this page's handler. `callHttpService` reaches the service over
+the iframe's port instead, which is what a caller on another origin uses. It
+rejects with `No service with key "FS"` when the worker refuses the
+connection.
 
-### Mounting a service at a path
+`newRemoteRelayChannel(options?)` takes `baseUrl` (default: the package's own
+`public-relay/` directory, resolved from the module URL), `url` (default
+`relay.html` under `baseUrl`) and `container` (default `document.body`). It
+resolves `{ baseUrl, port, close() }`.
 
-A service can claim a path prefix instead of living at `/~<key>/`. Both the
-key and the path are the caller's, and several services can share **one**
-relay connection — the shape mounts exist for is an app at the origin root
-and, say, a gateway one level down, both reachable through the same iframe:
+### Relay mode: mount services at paths
+
+A service can claim a path prefix instead of `/~<key>/`. Several services can
+share one relay connection:
 
 ```ts
-const connection = await newRemoteRelayChannel(/* … */);
-
 await initHttpService(appHandler, { key: "app", path: "/", port: connection.port });
 await initHttpService(meshHandler, { key: "mesh", path: "/peers/", port: connection.port });
 ```
 
-A `CONNECT` is routed to the service named in its `key`, so the two never see
-each other's calls even though they share one port. (Earlier builds routed
-every `CONNECT` on a connection to every registered service, which collided
-whenever more than one service shared a port — fixed before this shipped.)
-
-The worker routes by the longest matching path prefix, so a catch-all at `/`
-does not shadow `/peers/`, and registration order does not matter. A service
-registered with no `path` is reachable at `/~<key>/`, exactly as before —
-unless the host declared that key in `mounts`, in which case the host's mount
-stands and the page need not repeat it.
-
-**A request that matches no mount is not the relay's** — the worker does not
-answer it at all, so the browser performs it exactly as it would with no
-worker installed. That is what lets a host serve its own files from the same
-origin, and it is why a root mount needs `exclude`.
-
-**The matched prefix is NOT stripped.** A handler mounted at `/peers/`
-receives `/peers/12D3Koo/llm`, not `/12D3Koo/llm` — the request reaches it
-with the path the browser asked for, whichever mount matched. A handler that
-wants to route relative to its mount keeps its own `basePath` and strips the
+The worker routes by the longest matching prefix, so a catch-all at `/` does
+not shadow `/peers/`, and registration order does not matter. The matched
+prefix is not stripped: a handler mounted at `/peers/` receives
+`/peers/12D3Koo/llm`. A handler that routes relative to its mount strips the
 prefix itself.
 
-These options are read by `startRelayServiceWorker`, which a host that
-bundles its own relay worker imports from
-`@statewalker/webrun-http-browser/relay-worker` and calls directly (see the
-options table below for the prebuilt-bundle equivalent):
+### Relay mode: build your own relay worker
 
 ```ts
+/// <reference lib="webworker" />
 import { startRelayServiceWorker } from "@statewalker/webrun-http-browser/relay-worker";
 
-startRelayServiceWorker(self, {
+declare const self: ServiceWorkerGlobalScope;
+
+const stop = startRelayServiceWorker(self, {
   exclude: (url) =>
     url.pathname === "/index.html" ||
     url.pathname === "/relay.html" ||
     url.pathname === "/relay-sw.js",
   takeover: "first-wins",
   canRegister: (client, _key) => new URL(client.url).pathname === "/relay.html",
-  decorateResponse: (response) => withMyHeaders(response),
+  decorateResponse: (response) => response,
 });
 ```
 
-> **Mounting at `/` — set `takeover: "first-wins"` and `canRegister`.**
-> The default is `takeover: "last-wins"` with no `canRegister`, which is what
-> the relay has always done: the last page to REGISTER a key gets it. Before
-> mounts the worst that bought a rogue or buggy same-origin page was
-> `/~<key>/`; with mounts it can claim the **origin root**, and the mount is
-> persisted in IndexedDB, so it outlives the page and every worker restart.
-> On an origin where more than the host's own page can reach the relay,
-> `takeover: "first-wins"` keeps a live holder's key and `canRegister` says
-> which client may ask for it — set both, together, for any mount at `/`.
+| Option | Default | What it does |
+| --- | --- | --- |
+| `mounts` | none | Fixed table `Array<{ key, path?, match? }>`, for a host that knows its services at build time. A key declared here belongs to the host: a page's `REGISTER` or `UNREGISTER` for it never replaces or removes the mount, so the page can register with no `path`. |
+| `exclude` | none | `(url) => boolean`. Paths the relay never claims, through the table or through `/~<key>/`. Checked first. |
+| `canRegister` | everyone | `(client, key) => boolean \| Promise<boolean>`. Refuses a registration with `this client may not register "<key>"`. |
+| `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key; a second page gets `"<key>" is already served by another client`. A holder that reloaded is no longer live, so it can always re-register. |
+| `decorateResponse` | none | `(response, request) => Response`. Stamps headers on responses the relay makes, including its error responses. Not applied to requests the worker leaves to the network. |
 
-A root mount claims *every* path under the worker's scope, including the
-host's own navigation. If `exclude` only covers the relay page and its
-worker script, a reload requests the host's own entry page — say
-`/index.html` — through the mount too, the mount has no handler for it, and
-the origin cannot come back. `exclude` needs three things, always: the relay
-page, the worker script, and the host's own entry page. That third one is
-easy to miss because nothing fails until the first reload.
+`startRelayServiceWorker` returns a function that removes its listeners.
 
-An excluded page is one the worker does not answer, and in Firefox such a
-page can load **uncontrolled** even while the worker is running — then its
-own `fetch()` never reaches the worker and its mounts look dead. The remedy
-is the one this package already ships for that case: call
-`awaitServiceWorkerControl(registration)` (exported from the package root)
-before relying on `fetch()` from an excluded page. A page *served by* a mount
-is a navigation the worker answers, so it is controlled from its first byte
-and needs nothing.
+### Relay mode: options for the prebuilt worker
 
-#### `self.RELAY_OPTIONS` — options for the prebuilt worker
-
-`dist/relay-sw.js` is an IIFE loaded via classic `importScripts`, so a host
-that uses the shipped worker (rather than building its own from
-`startRelayServiceWorker`) cannot pass options as arguments. It reads them
-instead from `self.RELAY_OPTIONS`, which the host's own tiny worker script
-sets *before* importing the bundle:
+`dist/relay-sw.js` is an IIFE loaded with classic `importScripts`, which cannot
+pass arguments. It reads its options from `self.RELAY_OPTIONS`, set by the
+host's own worker script before the import:
 
 ```js
-// relay-sw.js — served next to your relay page.
+// relay-sw.js, served next to your relay page
 self.RELAY_OPTIONS = {
-  exclude: (url) => url.pathname === "/index.html" || url.pathname === "/relay.html" || url.pathname === "/relay-sw.js",
+  exclude: (url) =>
+    url.pathname === "/index.html" ||
+    url.pathname === "/relay.html" ||
+    url.pathname === "/relay-sw.js",
   takeover: "first-wins",
 };
-importScripts("/path/to/node_modules/@statewalker/webrun-http-browser/dist/relay-sw.js");
+importScripts("/path/to/@statewalker/webrun-http-browser/dist/relay-sw.js");
 ```
 
-This is the only way a prebuilt-worker host reaches `exclude`, `takeover`,
-`canRegister` or `decorateResponse` — omit it and the worker boots with `{}`,
-exactly as it did before mounts. The bundle ships no declarations, so to type
-that object (in a TypeScript loader script, or to check it before shipping)
-import the type from the runtime entry:
+Without it the worker starts with `{}`. To type the object, import the type from
+the typed subpath:
 
 ```ts
 import type { RelayServiceWorkerOptions } from "@statewalker/webrun-http-browser/relay-worker";
@@ -213,63 +176,68 @@ import type { RelayServiceWorkerOptions } from "@statewalker/webrun-http-browser
 declare const self: ServiceWorkerGlobalScope & { RELAY_OPTIONS?: RelayServiceWorkerOptions };
 ```
 
-| Option | Default | What it does |
-| --- | --- | --- |
-| `mounts` | none | A fixed table, for a host that knows its services at build time. Each entry is `{ key, path? , match? }`. A key declared here is the host's: a page's REGISTER or UNREGISTER for the same key never replaces or removes it, so the page can register with no `path` of its own. |
-| `exclude` | none | Paths the relay never claims — neither through the table nor through the `/~<key>/` spelling. Checked first. |
-| `canRegister` | everyone | Refuse a registration from the wrong page. |
-| `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key. |
-| `decorateResponse` | none | Stamp headers on responses the relay makes; not applied to network fetches. |
+### Relay mode: the iframe page
+
+`public-relay/relay.html` is this, and a self-hosted relay page looks the same:
+
+```html
+<script type="module">
+  import { getRelayWindowMessageHandler } from "../dist/index.js";
+
+  window.onmessage = getRelayWindowMessageHandler({
+    swUrl: `${new URL("./relay-sw.js", import.meta.url)}`,
+    scopeUrl: `${new URL("./", import.meta.url)}`,
+  });
+</script>
+```
+
+Pass `swUrl` explicitly. Its default is `index-sw.js` next to the module, a
+file the build does not produce. `timeout` bounds the wait for the worker to
+activate. If the worker cannot start, every call the parent makes on the port
+is answered with that error, so the parent's `initHttpService` /
+`callHttpService` reject instead of hanging.
 
 ### Same-origin mode
-
-Your page registers its own SW, handlers are local to the page:
 
 ```ts
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 
-const KEY = "demo"; // also the first URL segment the SW routes here
+const KEY = "demo"; // also the first URL segment the worker routes here
 const adapter = new SwHttpAdapter({
   key: KEY,
   serviceWorkerUrl: new URL("./sw-worker.js", import.meta.url).toString(),
 });
 await adapter.start();
 
-const { baseUrl } = await adapter.register(`${KEY}/api/`, async (request) => {
-  return new Response(JSON.stringify({ now: Date.now() }), {
-    headers: { "Content-Type": "application/json" },
-  });
-});
+const { baseUrl, remove } = await adapter.register(`${KEY}/api/`, async () =>
+  Response.json({ now: Date.now() }),
+);
 
-// fetch(`${baseUrl}anything`) is intercepted by the SW.
+const res = await fetch(`${baseUrl}anything`); // answered by the handler above
 ```
 
-`start()` resolves once the worker is activated **and controls the page** —
-only a controlled page's `fetch()` reaches the worker. Two options bound it:
+The worker script is a one-line loader served next to the app pages, so the
+worker's default scope covers them:
+
+```js
+// sw-worker.js
+importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
+```
+
+`SwHttpAdapter` options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `timeout` | `30_000` | Upper bound, in ms, for the wait for the worker to activate, take control and answer the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError` (see `reason`) instead of waiting forever. |
-| `reloadIfUncontrolled` | `false` | If the page is still uncontrolled once the worker is active, reload it once instead of rejecting (see below). |
+| `key` | required | First URL segment under the scope that the worker routes to this page. |
+| `serviceWorkerUrl` | none; pass it | Resolved against `location.href`. An unresolvable value throws `Invalid serviceWorkerUrl: "<value>" (relative to <href>)`. |
+| `scope` | directory of `serviceWorkerUrl` | Registration scope. |
+| `timeout` | `30_000` | Upper bound, in ms, for activation, control and the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError`. |
+| `reloadIfUncontrolled` | `false` | Reload the page once instead of rejecting when it stays uncontrolled. |
 
-#### When the page is not controlled
+`register(prefix, handler)` resolves `{ baseUrl, prefix, remove() }`. The
+prefix must start with the adapter's `key`.
 
-A page can load **uncontrolled although its worker is active**: a hard reload
-(Ctrl+Shift+R / Cmd+Shift+R) bypasses ServiceWorkers for that load, and the
-worker's `clients.claim()` already ran when it activated, so nothing ever
-hands the page to it. (Firefox has also been seen leaving a second page of a
-running worker uncontrolled.) `start()` then asks the worker to claim the page
-again — a `CLAIM` call this package's workers answer with `clients.claim()` —
-and waits for `controllerchange`. That takes the page over in Chromium and
-Firefox, both verified by the browser tests.
-
-If it still is not controlled (a worker that does not answer `CLAIM`, a page
-outside the worker's scope), `start()` rejects with a
-`ServiceWorkerControlError` whose `reason` is `"uncontrolled"` and whose message
-says what happened and what to do. With `reloadIfUncontrolled: true` it reloads
-the page instead — a normal reload is a controlled navigation — at most once:
-a `sessionStorage` marker makes a second uncontrolled load reject rather than
-loop. After a failure, calling `start()` again retries.
+### Same-origin mode: a page that is not controlled
 
 ```ts
 try {
@@ -280,344 +248,280 @@ try {
 }
 ```
 
-Check `name` or `reason`, not `instanceof`: each bundle of this package carries
-its own copy of the class.
-
-The SW script itself ships as a pre-built IIFE bundle. Put a tiny loader
-next to your app pages so the SW's default scope covers them:
-
-```js
-// public/sw-worker.js — served next to your app pages.
-importScripts(
-  "/path/to/node_modules/@statewalker/webrun-http-browser/dist/sw-worker.js",
-);
-```
-
-The working example lives in [`public/`](./public).
+Check `name` or `reason`, not `instanceof`: each bundle carries its own copy of
+the class. After a failure, calling `start()` again retries.
 
 ### Running the bundled examples
 
 ```sh
-pnpm run example:same-origin   # public/index.html    — same-origin SW demo
-pnpm run example:relay-site    # demo/demo-1.html     — relay + Hono dynamic site
-pnpm run example:relay-files   # demo/demo-2.html     — relay + local-disk file server
-pnpm run serve                 # just a static server on :5173 (no auto-open)
+pnpm run example:same-origin   # build, serve on :5173, open public/index.html
+pnpm run example:relay-site    # build, serve on :5173, open demo/demo-1.html
+pnpm run example:relay-files   # build, serve on :5173, open demo/demo-2.html
+pnpm run serve                 # static server on :5173, no build, no browser
 ```
 
-Each `example:*` script builds first, starts a static server on `:5173`,
-then opens the target page in the default browser. ServiceWorkers only
-register over `http://localhost` or HTTPS, so always visit through
-`http://localhost:5173/…` — `file://` won't work.
-
-#### [`public/index.html`](./public/index.html) — minimal same-origin SW
-
-The smallest possible in-browser HTTP server. The page registers
-`public/sw-worker.js` (which `importScripts`es the shipped
-`dist/sw-worker.js`), constructs a `SwHttpAdapter` with key `"demo"`,
-and registers a single handler at `demo/api/` that returns JSON. The
-page then makes a standard `fetch(baseUrl + "anything")` and logs the
-result.
-
-Why it's interesting:
-
-- **No framework, no glue, ~40 lines of inline JS.** This is the
-  unwrapped pattern — everything
-  [`@statewalker/webrun-site-host`](../webrun-site-host) and
-  [`@statewalker/webrun-site-builder`](../webrun-site-builder) build on
-  top of. Useful as a reference for exactly what the SW lifecycle
-  looks like at its lowest level.
-- **Shows the SW-routing contract.** The adapter's `key: "demo"` is
-  the first URL segment the SW uses to find this page's registration;
-  `adapter.register(\`${KEY}/api/\`, ...)` mounts the handler prefix
-  under the same key. The mapping is visible and inspectable — great
-  for debugging your own SW-based code.
-
-#### [`demo/demo-1.html`](./demo/demo-1.html) — relay + Hono dynamic site
-
-A full-blown mini web site running in a single tab, behind the
-**relay** ServiceWorker. The page spins up a Hono router with a
-`/api/:name` endpoint and a static-file catch-all, registers it as
-service `MY_SITE`, and embeds the service root in an iframe. Inside
-the iframe, typing into an input fires `fetch("./api/" + name)` and
-renders the JSON response — the whole back-end is the Hono app
-running in the outer tab.
-
-Why it's interesting:
-
-- **An entire web framework running client-side.** Hono is a normal
-  Node/Deno/CF-Workers framework — here it's loaded from esm.sh and
-  mounted inside the browser with no server involvement. The
-  `(Request) ⇒ Response` contract makes this transparent.
-- **Relay mode = cross-origin friendly.** Because the SW lives at the
-  relay origin (not the page's origin), this pattern also works when
-  your page is served from Observable, unpkg, a notebook, or a static
-  `file://` — places where registering your own SW isn't possible.
-  The hidden relay iframe does the SW registration on your behalf.
-- **Two ways to call the service.** The iframe uses plain `fetch()`
-  through the SW; any other browser tab pointing at
-  `<relay-origin>/~MY_SITE/...` is also routed to this tab's Hono
-  app. Demonstrates that the page hosting the handler and the caller
-  don't have to share an origin.
-
-#### [`demo/demo-2.html`](./demo/demo-2.html) — FS Access API folder as a site
-
-Click **Open folder**, grant read access, and any directory on your
-local disk is exposed as an in-browser HTTP site under
-`<relay-origin>/~FS/…`. The left panel shows a live file tree; clicking
-a file loads it in the iframe preview. The service handler is a ~20-line
-function that resolves paths via
-[`FileSystemDirectoryHandle.getFileHandle`](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getFileHandle)
-and streams the file's bytes back through the SW.
-
-Why it's interesting:
-
-- **Zero installs, real files.** Browse arbitrary directories as if
-  they were hosted — open a local project's `index.html` and it just
-  runs. Relative URLs inside the hosted files resolve correctly because
-  the SW serves every asset, CSS, and JS under the same origin.
-- **Permissioned + sandboxed.** The browser's File System Access API
-  provides the "backend" (read permission granted per-folder by the
-  user); the relay SW provides the "network". You get the ergonomics
-  of a local HTTP dev server without running one.
-- **Directory picker + request router in <100 lines.** No build step,
-  no tooling. Shows how small the glue between a platform API and a
-  `(Request) ⇒ Response` handler can be.
-
-## Exports
-
-The package root re-exports everything from
-[`@statewalker/webrun-streams`](../webrun-streams) and
-[`@statewalker/webrun-http-streams`](../webrun-http-streams), so existing
-imports keep working after those extractions. Its own surface is below.
-
-### Relay mode
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `newRemoteRelayChannel(opts?)` | function | Embeds the hidden relay iframe, handshakes a `MessageChannel`, resolves a `RemoteRelayChannel`. |
-| `RemoteRelayChannelOptions` | interface | `baseUrl`, `url`, `container` — where the relay lives and what to append the iframe to. |
-| `RemoteRelayChannel` | interface | `{ baseUrl, port, close() }`. |
-| `initHttpService(handler, opts)` | function | Registers `handler` as the server for a service `key` on the relay, optionally mounted at `path`. Several services may share one `port`. Returns a cleanup. |
-| `callHttpService(request, opts)` | function | Sends a `Request` to the service under `key`; resolves its `Response`. |
-| `ServiceOptions` | interface | `{ key: string; path?: string; port: MessageTarget }` — shared by the two above. `path` mounts the service (see [Mounting a service at a path](#mounting-a-service-at-a-path)); omitted, it stays at `/~<key>/`. |
-| `getRelayWindowMessageHandler(opts?)` | function | The `window.onmessage` handler that runs *inside* the relay iframe. |
-| `RelayWindowHandlerOptions` | interface | `swUrl`, `scopeUrl` for that handler. |
-| `splitServiceUrl(url, separator?)` | function | Splits a relay URL into service key + remaining path (default separator `~`); anchored to the pathname, so a query string like `?q=~foo` is never read as a service. |
-| `SplitServiceUrl` | interface | Its result shape. |
-| `startRelayServiceWorker(self, opts?)` | function | The SW side of the relay: routes `fetch` to the client that registered a mount, and answers `REGISTER`/`UNREGISTER`/`CONNECT`. Not re-exported from the package root — it is what the prebuilt `dist/relay-sw.js` calls internally; see [`self.RELAY_OPTIONS`](#selfrelay_options--options-for-the-prebuilt-worker). |
-| `RelayServiceWorkerOptions` | interface | `{ mounts?, exclude?, canRegister?, takeover?, decorateResponse? }` — see the options table in [Mounting a service at a path](#mounting-a-service-at-a-path). |
-
-### ServiceWorker lifecycle
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `initServiceWorker(opts)` | function | Registers a SW and resolves with it once it is activated: the controller, or the registration's active worker when the page is not controlled (the relay only needs to message it). Rejects with a `ServiceWorkerControlError` past `timeout`. |
-| `InitServiceWorkerOptions` | interface | `{ swUrl, scopeUrl?, type?, timeout? }`. |
-| `newServiceWorkerPort(registration?)` | function | A `MessagePort` that transparently bridges to the controlling SW, or to `registration.active` while the page is not controlled. |
-| `awaitActiveServiceWorker(registration, opts?)` | function | Resolves with the registration's worker once `activated`; rejects (`reason: "activation-timeout"`) past `timeout`. |
-| `awaitServiceWorkerControl(registration, opts?)` | function | Resolves with the controller once the page is controlled, asking the worker to claim an uncontrolled page; bounded by `timeout`, optional `reloadIfUncontrolled`. What `SwHttpAdapter.start()` uses. |
-| `handleClaimRequests(self)` | function | Worker side: answers the page's `CLAIM` call with `clients.claim()`. Both of this package's workers install it; use it in a worker of your own. |
-| `ServiceWorkerControlError` | class | `name: "ServiceWorkerControlError"`, `reason`: `"activation-timeout"` (worker did not activate in time), `"uncontrolled"` (active, but the page is not controlled), `"unresponsive"` (controls the page, did not answer `SwHttpAdapter`'s handshake). |
-| `DEFAULT_SERVICE_WORKER_TIMEOUT` / `CLAIM_CALL` | const | `30_000` ms / `"CLAIM"`. |
-
-### Connection registry
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `initializeConnection(opts)` | function | Sends `CONNECT` for a service `key`; resolves a `MessagePort`, or `null` if no such service. |
-| `InitializeConnectionOptions` | interface | `{ key, communicationPort, ...extra }` — extra fields ride along in the CONNECT payload. |
-| `registerConnectionsHandler(opts)` | function | Registers a `key` and answers inbound `CONNECT`s. Returns a cleanup that unregisters. |
-| `RegisterConnectionsHandlerOptions` | interface | `{ key, handler, communicationPort }`. |
-
-### Messaging primitives
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `callChannel(target, type, data, port?)` | function | One typed request/response over a `MessageTarget`. |
-| `handleChannelCalls(target, type, handler)` | function | Answer those calls. Returns an unsubscribe. |
-| `ChannelCallHandler` | type | The handler signature the two above exchange. |
-| `newInvokationChannel(opts)` | function | Multiplexed invocations over one target. |
-| `InvocationChannel` / `NewInvocationChannelOptions` | interface | Its result and options. |
-| `handleStreams(...)` / `StreamHandler<T>` | function / type | Stream-shaped invocations over the same channel. |
-
-> **These stream primitives have no backpressure.** `sendStream`'s chunk sender
-> discards the promise it is handed, so a fast producer over a slow consumer
-> accumulates without bound; there is also no per-stream timeout and no chunking
-> to a transport's message ceiling. `@statewalker/webrun-rpc`'s `duplexOverPort`
-> is the replacement — one `Duplex` over one port, with the confirmation
-> withheld until the consumer has pulled. Migrating this package onto it is
-> planned, not done.
-| `MessageTarget` / `MessageSource` / `MessageSink` / `MessageListener` | interface / type | The structural port view everything above accepts — a `MessagePort`, a `Worker`, or a SW bridge. Defined in [`@statewalker/webrun-streams`](../webrun-streams) and re-exported here. |
-| `newRegistry(onError?)` | function | Small cleanup registry used for teardown. |
-| `Registry` / `NewRegistryResult` / `CleanupAction` | interface / type | Its shapes. |
-
-### HTTP over a port
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `sendHttpRequest(port, request)` | function | **Deprecated.** Ship a `Request` over a `MessageTarget`, await the `Response`. |
-| `handleHttpRequests(port, handler)` | function | **Deprecated.** Serve an `HttpHandler` on the other end of one. |
-
-### Subpath entry points
-
-| Entry | Purpose |
-| --- | --- |
-| `@statewalker/webrun-http-browser/sw` | `SwHttpAdapter` — the same-origin ServiceWorker adapter. |
-| `@statewalker/webrun-http-browser/relay-sw` | IIFE relay SW runtime, loadable via `importScripts(...)`. Reads its options from `self.RELAY_OPTIONS`, set before the `importScripts` call. |
-| `@statewalker/webrun-http-browser/sw-worker` | IIFE same-origin SW runtime, loadable via `importScripts(...)`. |
+Open them through `http://localhost:5173/…`; ServiceWorkers do not register
+from `file://`. The relay demos fetch their service through
+`<relay-base>/~KEY/` URLs under `public-relay/`, which the relay worker
+does not claim; see
+[`/~<key>/` is recognised only at the origin root](#key-is-recognised-only-at-the-origin-root).
 
 ## Internals
 
-### Source layout
+### How a request travels
+
+Relay mode:
 
 ```
-src/
-├── core/                          ┐
-│   ├── data-calls.ts              │  Transport primitives over a
-│   ├── data-channels.ts           │  `MessageTarget`: one-shot
-│   ├── message-target.ts          │  `callChannel` / `handleChannelCalls`,
-│   ├── registry.ts                │  the request/response
-│                                  │  `newInvokationChannel`, streaming
-│   └── service-worker-control.ts  │  `sendStream` / `handleStreams` with
-│                                  │  backpressure, and `newRegistry`.
-│                                  │  Bounded waits for a worker to
-│                                  │  activate / take control, and the
-│                                  │  `CLAIM` request that takes over an
-│                                  │  uncontrolled page.
-│                                  │  Also re-exports
-│                                  │  `@statewalker/webrun-streams`.
-│                                  ┘
-├── http/                          ┐
-│   ├── http-send-recieve.ts       │  Browser-specific HTTP transport:
-│   │                              │  `handleHttpRequests` /
-│   │                              │  `sendHttpRequest` over `MessageTarget`s,
-│   │                              │  built on the client/server stubs.
-│   └── index.ts                   │  Re-exports
-│                                  ┘  `@statewalker/webrun-http-streams`.
-├── sw/                            ┐
-│   ├── sw-dispatcher.ts           │  Same-origin mode:
-│   │                              │  `SwPortHandler` (page) /
-│   │                              │  `SwPortDispatcher` (SW side,
-│   │                              │  IndexedDB-persisted client index).
-│   ├── http-sw-dispatcher.ts      │  `SwHttpAdapter` /
-│   │                              │  `SwHttpDispatcher` /
-│   └── index.ts                   │  `startHttpDispatcher`.
-│                                  ┘
-├── relay/                         ┐
-│   ├── index.ts                   │  Relay mode page-side:
-│   │                              │  `newRemoteRelayChannel`,
-│   │                              │  `initHttpService`,
-│   │                              │  `callHttpService`,
-│   │                              │  `getRelayWindowMessageHandler`.
-│   ├── index-sw.ts                │  `startRelayServiceWorker` — the SW
-│   │                              │  side (registry keyed by service key).
-│   └── split-service-url.ts       │  `<base>/~<key>/<path>` parser.
-│                                  ┘
-├── index.ts                       — public entry: core + http + relay.
-├── sw.ts                          — `./sw` subpath entry.
-├── relay-sw.ts                    — relay SW bootstrap (IIFE target).
-└── sw-worker.ts                   — same-origin SW bootstrap (IIFE target).
+caller tab                     relay origin                                  serving page
+fetch(<relay>/~KEY/x) ──► relay worker ── CONNECT(key) ──► relay iframe ──port──► initHttpService handler
+                          (mount table,       │                                          │
+                           IndexedDB)         └──────── MessagePort per call ◄───────────┘
+callHttpService(req, {key, port}) ──port──► relay iframe ──► relay worker ──► same path
 ```
 
-### Design notes
+Same-origin mode:
 
-- **Two SW strategies**. Same-origin mode needs the SW to be served next
-  to the app (scope-rooted loader); relay mode puts the SW anywhere and
-  ferries messages through an iframe, at the cost of a `CONNECT`
-  round-trip per call. Pick the stricter mode when you own the origin.
-- **Adapter key = URL segment**. For the same-origin path, the adapter's
-  `key` option **must match** the first URL segment the SW routes to it:
-  if `key: "demo"` and the SW scope is `/public/`, handlers answer at
-  `/public/demo/…`. The SW extracts the segment from the URL and looks up
-  `handlersIndex` by key. This is why
-  `adapter.register(\`${KEY}/api/\`, …)` prefixes the registration path
-  with the same key.
-- **IIFE for SW bundles**. The SW runtime bundles (`relay-sw.js`,
-  `sw-worker.js`) are IIFE rather than ESM so a classic
-  `importScripts(...)` loader script can pull them in. Registering as
-  `{ type: "module" }` SWs would work but is subject to
-  `Service-Worker-Allowed` header games for a scope wider than the
-  bundle's directory.
-- **ESM page-side bundles are self-contained**. `dist/index.js` and
-  `dist/sw.js` inline their dependencies (`idb-keyval`,
-  `@statewalker/webrun-http-streams`, `@statewalker/webrun-streams`) so a
-  page can load them straight from a static host without a bundler or
-  import map.
-- **Streaming uses `newAsyncGenerator`** (from `@statewalker/webrun-streams`,
-  via `recieveIterator`). The queue-based async generator gives explicit
-  backpressure — each `next(value)` returns a `Promise<boolean>` that resolves
-  once the consumer has dequeued — and drains in-flight producers on consumer
-  exit.
-- **No literal `new URL("…", import.meta.url)` in page-side code**.
-  Bundlers (Vite among them) turn that pattern into an emitted asset at build
-  time, before tree-shaking; the relay defaults resolved `"../"` that way,
-  which is the package itself, so every Vite consumer shipped a dead copy of
-  `dist/index.js`. They resolve against a `moduleUrl` variable instead, and
-  `tests/dist/vite-consumer.dist.ts` builds a Vite app to prove nothing is
-  emitted.
-- **Uncontrolled pages are handled per mode**. Same-origin mode needs
-  control — an uncontrolled page's `fetch()` never reaches the worker — so it
-  asks the worker to claim the page. Relay mode needs only a worker to message,
-  so an uncontrolled relay page bridges to `registration.active`.
-- **SW client registry is IndexedDB-persisted**. Both `SwPortDispatcher`
-  (same-origin) and `relay/index-sw.ts` keep their client-lookup tables in
-  IndexedDB so a SW wake-up after idle doesn't lose its bindings.
+```
+page fetch(<scope>/KEY/...) ──► same-origin worker ── first path segment = KEY ──► page's port
+                                                                                 └► SwHttpAdapter
+                                                                                    (first registered prefix that matches)
+```
+
+Each call opens its own `MessageChannel`. The request is turned into a
+`SerializedHttpEnvelope` by `newHttpClientStub` and rebuilt on the other side
+by `newHttpServerStub` (both from `@statewalker/webrun-http-streams`), with the
+body streamed as chunks over the port.
+
+### Every bundle is self-contained
+
+This package does not externalise its dependencies. Its own HTML loads
+`../dist/index.js` from a static host with no import map, and the two IIFE
+workers are loaded with `importScripts`, which cannot resolve a bare
+specifier. So each of the five outputs is one file with `idb-keyval`,
+`@statewalker/webrun-streams` and `@statewalker/webrun-http-streams` inlined,
+built from its own rolldown config so no chunks are shared. The cost is
+duplicated code across bundles, and that `instanceof` does not hold across this
+package's boundary.
+
+The workers are IIFE rather than module workers so a classic `importScripts`
+loader can pull them in. The relay page registers its worker with no `type`.
+
+Page-side defaults resolve against a `moduleUrl` variable instead of a literal
+`new URL("…", import.meta.url)`. Bundlers such as Vite rewrite the literal form
+into an emitted asset at build time, which made consumers ship a dead copy of
+`dist/index.js`.
+
+### Relay routing: a request that is nobody's goes to the network
+
+For each `fetch` the relay worker decides, in this order:
+
+1. Another origin: not the relay's.
+2. `exclude(url)` is true: not the relay's.
+3. The longest matching mount prefix, then `match` predicates in registration
+   order.
+4. The `/~<key>/` spelling.
+
+A request that matches nothing is not answered at all: the worker does not call
+`respondWith`, so the browser performs it as if no worker were installed. That
+is what lets a host serve its own files from the relay origin, and it is why a
+root mount needs `exclude`.
+
+A root mount claims every path under the scope, including the host's own
+navigation. `exclude` needs three entries: the relay page, the worker script,
+and the host's own entry page. Miss the third and nothing fails until the first
+reload, which then requests the entry page through the mount and cannot get
+back.
+
+Mounts live in memory and registrations in IndexedDB, so a restarted worker
+reads the registrations back before routing. Requests that arrive before that
+read settles are claimed and, if nobody's, re-issued with `fetch(request)`.
+After it settles the decision is synchronous again, which keeps navigation
+preload and `cache: "only-if-cached"` working. A failed restore is logged
+(`[relay] failed to restore mounts from the registry`) and routing continues
+with whatever the table holds.
+
+### `/~<key>/` is recognised only at the origin root
+
+`splitServiceUrl` is anchored to the start of the pathname:
+`https://host/~FS/a/b` yields key `FS`, while
+`http://localhost:5173/public-relay/~FS/a` yields no key. So a relay worker
+whose scope is a subdirectory, like the shipped `public-relay/`, does not claim
+`fetch()` calls to `<scope>/~<key>/…`; they go to the network. `callHttpService`
+still works there, since it does not depend on URL routing, and so does a
+service registered with a `path` inside the scope. Query strings and fragments
+are ignored, so `?q=~foo` is never read as a service.
+
+### Who may register a key
+
+The default `takeover: "last-wins"` lets the last page that registers a key
+take it. With mounts, a rogue or buggy same-origin page could then claim the
+origin root, and the registration persists in IndexedDB across page loads and
+worker restarts. On any origin where more than the host's own page can reach
+the relay, set `takeover: "first-wins"` and `canRegister` together for a mount
+at `/`.
+
+A `CONNECT` is delivered only to the service named by its key. Services on one
+port that are not the addressee stay silent; a reply of `false` would reach the
+worker first and turn into a 403.
+
+### Relay error responses
+
+When the relay worker cannot hand a request to a service, it answers with JSON
+(`{ status, statusText, message, url, key, baseUrl, path }`):
+
+| Cause | Status |
+| --- | --- |
+| No live client for the key (the page closed) | `410`, `Error 410: Resource Gone` |
+| The page refused the connection | `403`, `Error 403: Forbidden` |
+| Anything else thrown | `500`, with `statusText` `Bad Request` (from `HttpError.fromError`) |
+
+### Same-origin routing
+
+The worker takes the first path segment under its scope as the key and forwards
+the request to the page that registered it. A key that was registered at some
+point but has no live page answers `404 Not Found (no active handler)` rather
+than falling through to the network: a dev server's SPA fallback would
+otherwise serve the app shell for every site URL. Any other URL is passed
+through with `fetch(event.request)` unchanged; rebuilding the request would
+drop `mode`, and the constructor throws for `only-if-cached` navigations. On the
+page, a request matching no registered prefix gets `404 Error 404: Not found`.
+
+The worker keeps the claimed keys and client ids in IndexedDB (`claimedKeys`,
+`clientIds`) and asks each known client for a fresh port when it restarts. The
+relay keeps its registry under `clientsIds` as `{ clientId, path }` entries and
+still reads the older bare-client-id shape.
+
+`SwPortHandler.stop()` unregisters every ServiceWorker registration of the
+origin, not only its own.
+
+### A page can load uncontrolled although its worker is active
+
+A hard reload (Ctrl+Shift+R / Cmd+Shift+R) bypasses ServiceWorkers for that
+load, and the worker's `clients.claim()` already ran at activation, so nothing
+hands the page to it. Firefox has also left a second page of a running worker
+uncontrolled.
+
+Same-origin mode needs control, because only a controlled page's `fetch()`
+reaches the worker. `awaitServiceWorkerControl` (used by `SwHttpAdapter.start()`)
+sends a `CLAIM` call, which this package's workers answer with
+`clients.claim()`, and waits for `controllerchange` plus a 1 s grace period.
+If control still does not come it rejects with `ServiceWorkerControlError`,
+`reason: "uncontrolled"`, and a message that starts
+`This page is not controlled by its ServiceWorker …`. With
+`reloadIfUncontrolled: true` it reloads once instead; a `sessionStorage`
+marker makes a second uncontrolled load reject rather than loop. A worker of
+your own should call `handleClaimRequests(self)`.
+
+Relay mode needs only a worker to message, so an uncontrolled relay page
+bridges to `registration.active`. A page excluded from a root mount is not
+answered by the worker and can load uncontrolled in Firefox; call
+`awaitServiceWorkerControl(registration)` before relying on its `fetch()`.
+
+`ServiceWorkerControlError.reason` is one of:
+
+- `activation-timeout`: the worker did not activate within `timeout`
+  (`ServiceWorker "<url>" (scope <scope>) did not activate within <n> ms …`);
+- `uncontrolled`: active, but the page is not controlled;
+- `unresponsive`: controls the page but did not answer the adapter's
+  `UPDATE_COMMUNICATION_PORT` handshake in time.
+
+### The port transport has no backpressure
+
+`sendStream` / `handleStreams`, and the `sendHttpRequest` /
+`handleHttpRequests` pair built on them, discard the promise their chunk
+sender returns, so a fast producer over a slow consumer accumulates without
+bound. There is also no per-stream timeout and no chunking to a transport's
+message size limit. `sendHttpRequest` and `handleHttpRequests` are marked
+`@deprecated` in favour of `duplexOverPort` / `serveDuplexOverPort` from
+`@statewalker/webrun-rpc` with `httpFetch` / `httpServe` from
+`@statewalker/webrun-http-streams`, which do have backpressure. Both modes of
+this package still use the deprecated pair internally. A caller that stops
+reading early does tell the peer to stop producing.
+
+### Defaults that point at a file the build does not produce
+
+`getRelayWindowMessageHandler`'s default `swUrl` and `SwPortHandler`'s default
+worker URL both resolve to `index-sw.js` next to the module. No such file is
+built. Pass `swUrl` / `serviceWorkerUrl` explicitly. Constructing a
+`SwHttpAdapter` with neither `serviceWorkerUrl` nor `scope` fails with
+`RangeError: Maximum call stack size exceeded`, because each default is
+computed from the other.
 
 ### Constraints
 
-- **Request bodies are buffered on Firefox.** The stubs this package uses
-  (`newHttpClientStub` / `newHttpServerStub` from
-  [`@statewalker/webrun-http-streams`](../webrun-http-streams)) stream request
-  bodies wherever the runtime implements `Request.prototype.body`. Firefox
-  does not (checked against 146), so on that browser the whole request body is
-  buffered into memory on both the sending and the receiving side — a large
-  upload is a proportionally large allocation, and a handler that wanted to
-  stream its request body cannot. Response streaming is unaffected on every
-  browser. See that package's README for the details and for the Safari
-  caveat.
-- **ServiceWorker scope rules apply.** A SW registered at `/public/sw-worker.js`
-  only controls pages and fetches under `/public/`. If you need a broader
-  scope, the SW script must be served with the
-  `Service-Worker-Allowed` HTTP header, *or* live higher in the origin.
-- **A hard reload loads the page without its worker.** Handled — see
-  [When the page is not controlled](#when-the-page-is-not-controlled) — as long
-  as the worker answers `CLAIM`. A worker script of your own that
-  `importScripts` this package's `sw-worker.js` or `relay-sw.js` does; one
-  that does not should call `handleClaimRequests(self)`.
-- **`http://localhost` or HTTPS only.** Browsers refuse to register SWs
-  on other `http://` origins.
-- **Relay mode needs an iframe-capable sandbox.** Pages with strict CSP
-  that blocks `frame-src` to the relay origin can't use the relay path.
-- **Consumer-side `fetch()` only works from pages under the SW's scope.**
-  When your caller is on another origin, use `callHttpService(request,
-  …)` — it reaches the SW through the iframe's MessagePort and bypasses
-  the browser's fetch routing.
+- **Firefox buffers request bodies.** Firefox has no `Request.prototype.body`,
+  so the stubs read the whole request body into memory on both sides. Response
+  streaming is unaffected.
+- **Scope rules apply.** A worker at `/public/sw-worker.js` controls only
+  `/public/`. A wider scope needs the `Service-Worker-Allowed` header, or the
+  script must live higher up.
+- **Relay mode needs an iframe.** A page whose CSP blocks `frame-src` to the
+  relay origin cannot use it.
+- **Plain `fetch()` works only from pages under the worker's scope.** A caller
+  on another origin uses `callHttpService`.
+
+### Exports of the root entry
+
+Relay, page side:
+
+| Export | Purpose |
+| --- | --- |
+| `newRemoteRelayChannel(opts?)` / `RemoteRelayChannel`, `RemoteRelayChannelOptions` | Embed the relay iframe; resolves `{ baseUrl, port, close() }`. |
+| `initHttpService(handler, { key, path?, port })` | Register a service; resolves a cleanup that unregisters it. |
+| `callHttpService(request, { key, port })` | Call a service through the port. |
+| `ServiceOptions` | `{ key, path?, port }`. |
+| `getRelayWindowMessageHandler(opts?)` / `RelayWindowHandlerOptions` | The relay iframe's `window.onmessage`; options `swUrl`, `scopeUrl`, `timeout`. |
+| `initializeConnection(opts)` / `InitializeConnectionOptions` | Send `CONNECT` for a key; resolves a `MessagePort`, or `null` if refused. Extra fields ride in the payload. |
+| `registerConnectionsHandler(opts)` / `RegisterConnectionsHandlerOptions` | Register a key (and optional `path`) and answer its `CONNECT`s; resolves a cleanup. |
+| `splitServiceUrl(url, separator = "~")` / `SplitServiceUrl` | Parse `<origin>/~<key>/<path>` into `{ url, key, baseUrl, path }`. |
+
+ServiceWorker lifecycle:
+
+| Export | Purpose |
+| --- | --- |
+| `initServiceWorker({ swUrl, scopeUrl?, type?, timeout? })` / `InitServiceWorkerOptions` | Register a worker; resolves the controller, or the active worker if the page is not controlled. |
+| `newServiceWorkerPort(registration?)` | A `MessagePort` bridged to the controller, or to `registration.active`. |
+| `awaitActiveServiceWorker(registration, { timeout? })` | Resolves once `activated`. |
+| `awaitServiceWorkerControl(registration, { timeout?, reloadIfUncontrolled? })` | Resolves once the page is controlled, asking the worker to claim it. |
+| `handleClaimRequests(self)` | Worker side: answer `CLAIM` with `clients.claim()`. |
+| `ServiceWorkerControlError`, `ServiceWorkerControlFailure` | Error class and its `reason` union. |
+| `AwaitServiceWorkerOptions`, `AwaitServiceWorkerControlOptions` | Option types. |
+| `DEFAULT_SERVICE_WORKER_TIMEOUT`, `CLAIM_CALL` | `30_000`, `"CLAIM"`. |
+
+Messaging primitives:
+
+| Export | Purpose |
+| --- | --- |
+| `callChannel(target, type, params, ...transfers)` / `handleChannelCalls(target, type, handler)` / `ChannelCallHandler` | One typed request/response over a `MessageTarget`; errors travel serialised. |
+| `newInvokationChannel(opts)` / `InvocationChannel`, `NewInvocationChannelOptions` | Numbered invocations over one target. |
+| `sendStream(port, input, params?)` / `handleStreams(port, handler)` / `StreamHandler` | Stream-shaped calls, one `MessageChannel` each. No backpressure. |
+| `sendHttpRequest(port, request)` / `handleHttpRequests(port, handler)` | Deprecated. HTTP over the stream calls. |
+| `newRegistry(onError?)` / `Registry`, `NewRegistryResult`, `CleanupAction` | Cleanup registry. |
+| `MessageTarget`, `MessageSource`, `MessageSink`, `MessageListener` | Port view types, re-exported from `@statewalker/webrun-rpc`. |
+
+The root entry also re-exports all of `@statewalker/webrun-streams` and
+`@statewalker/webrun-http-streams`.
 
 ### Dependencies
 
-Runtime:
+All four runtime dependencies are bundled into `dist/`:
 
-- `@statewalker/webrun-http-streams` — the `newHttpClientStub` /
-  `newHttpServerStub` pair this package's MessagePort transport is built
-  on, plus `HttpError`. Workspace-local.
-- `@statewalker/webrun-streams` — iterator/stream primitives and
-  serialisable errors. Workspace-local.
-- `idb-keyval` — tiny (<1 KB) IndexedDB KV used by both SW modes to keep
-  client/service registrations across SW restarts.
+- `@statewalker/webrun-http-streams`: the client/server stubs the port
+  transport is built on, and `HttpError`.
+- `@statewalker/webrun-streams`: iterator helpers and error serialisation.
+- `@statewalker/webrun-rpc`: only the `MessageTarget` types.
+- `idb-keyval`: a small IndexedDB key-value store that keeps registrations
+  across worker restarts.
 
-Dev: TypeScript, vitest, rolldown, rimraf, `http-server` (for the
-`example:*` scripts), `@types/node` (catalog versions from the monorepo
-root), `playwright` and `vite` (for `test:browser`).
+### Tests
 
-## Tests
-
-- `pnpm test` — unit tests under Node, against the source.
-- `pnpm test:browser` — builds, then runs `tests/browser/` in real Chromium and
-  Firefox through Playwright against the built bundles (first visit, normal
-  reload, hard reload, second tab, the relay page, and the timeout and
-  uncontrolled errors), plus `tests/dist/`, which builds a Vite consumer of
-  the bundles. Needs the browsers: `npx playwright install chromium firefox`.
+- `pnpm test`: unit tests under Node, against the source.
+- `pnpm run test:browser`: builds, then runs `tests/browser/` in Chromium and
+  Firefox through Playwright against the built bundles, plus
+  `tests/packaging/`, which checks the published exports map. Needs the
+  browsers: `pnpm exec playwright install chromium firefox`.
 
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT

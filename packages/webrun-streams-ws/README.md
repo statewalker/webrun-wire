@@ -1,48 +1,70 @@
 # @statewalker/webrun-streams-ws
 
-WebSocket-backed `Connect` / `Serve` adapter in the `webrun-streams-*` family.
+## What it is
 
-## What this is
-
-A binding between a `WebSocket` and the [`webrun-streams`](../webrun-streams)
-`Duplex` seam. One `WebSocket` becomes one
-[`ByteChannel`](../webrun-streams#the-duplex-seam); `emulateMux` layers many
-concurrent logical calls on top of that single socket.
-
-The point is that your handler never mentions WebSockets. It is an ordinary
-`Duplex` — `(input: AsyncIterable<Uint8Array>) => AsyncGenerator<Uint8Array>` —
-so the same function runs unchanged over a `MessagePort`, a WebRTC data
-channel, libp2p, or an in-process pipe. Swapping transports is swapping the
-import.
+A WebSocket adapter for the `Duplex` seam from `@statewalker/webrun-streams`.
+`connect` opens a WebSocket and returns a `call` function; `serve` binds a
+handler to every inbound WebSocket. Each socket is wrapped as a `ByteChannel`
+and run through `emulateMux`, so many concurrent calls share one socket. The
+handler is an ordinary `Duplex`
+(`(input) => AsyncGenerator<Uint8Array>`) and never sees the socket.
 
 ## Why it exists
 
-A raw `WebSocket` gives you one unordered-in-practice message pipe with no
-notion of a request, no concurrency, no half-close, and no way to propagate an
-error from the far end as an `Error`. Everything above it has to reinvent
-framing, correlation and teardown.
+A raw WebSocket is one message pipe. It has no notion of a request, no
+concurrency, no half-close, and no way to deliver the far end's exception as
+an `Error`. Everything above it would have to build framing, correlation and
+teardown. This adapter wraps the socket as a `ByteChannel` and lets
+`emulateMux` provide independent streams with backpressure, end-of-stream,
+cancellation and error propagation. Because the handler is a plain `Duplex`,
+the same function runs over any other adapter that implements the seam.
 
-This adapter supplies the missing piece exactly once: it wraps the socket as a
-`ByteChannel`, and `emulateMux` turns that into as many independent
-back-pressured byte streams as you need — each with proper end-of-stream,
-mid-stream cancellation, and error propagation.
-
-## Install
+## How to use
 
 ```sh
-npm install @statewalker/webrun-streams-ws
+pnpm add @statewalker/webrun-streams-ws
 ```
 
-In the browser the global `WebSocket` is used automatically. In Node, supply a
-constructor — the [`ws`](https://www.npmjs.com/package/ws) package works as-is:
+Runtime dependency: `@statewalker/webrun-streams`. No peer dependencies. One
+entry point, `.`.
 
-```sh
-npm install ws
-```
+- **Browser and worker**: `connect` uses the global `WebSocket`.
+- **Node**: pass a constructor as `WebSocketCtor`. The `ws` package works
+  (`pnpm add ws`). On the server side, `serve` takes an `onConnection`
+  subscription instead of a server object, so it works with `ws`'s
+  `WebSocketServer` or any other source of open sockets.
 
-## Getting started
+| Export | What it gives |
+| --- | --- |
+| `connect(params)` | `Connect<ConnectWsParams>`. Opens a socket, waits for it to open, resolves `{ call, close }`. Each `call(input)` opens a new stream on the socket; `close()` closes the mux and the socket. |
+| `serve(params, handler)` | `Serve<ServeWsParams>`. Wraps each socket from `onConnection` in its own `emulateMux` and binds `handler`. Resolves to an idempotent teardown. |
+| `byteChannelFromWebSocket(ws)` | Wraps one open socket as a `ByteChannel`, for driving `emulateMux` yourself or reusing a socket you already own. |
+| `WebSocketLike` | Structural socket type accepted everywhere: `readyState`, `send`, `close`, `addEventListener` / `removeEventListener` for `message`, `open`, `close`, `error`. Node's `ws` satisfies it as is; the DOM `WebSocket` satisfies it at runtime but needs a cast at the type level (see Internals). |
+| `WS_READY_STATE` | `{ CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 }`. |
+| `ConnectWsParams`, `ServeWsParams` | Parameter types, below. |
 
-Serve a handler over an in-process `WebSocketServer` and call it:
+`ConnectWsParams`:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `url` | `string` | required | `ws://` or `wss://` URL. |
+| `protocols` | `string \| string[]` | none | Subprotocols passed to the constructor. |
+| `WebSocketCtor` | `new (url, protocols?) => WebSocketLike` | `globalThis.WebSocket` | Required where there is no global `WebSocket`. |
+| `mux` | `EmulateMuxOptions` | `emulateMux` defaults | `mtu`, `maxStreams`, `maxStreamBuffer`. `side` is always `"initiator"`. |
+
+`ServeWsParams`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `onConnection` | `(cb: (ws: WebSocketLike) => void) => () => void` | Subscribes to inbound open sockets; returns an unsubscribe function. |
+| `mux` | `EmulateMuxOptions` | As above. `side` is always `"responder"`. |
+
+Both sides of a connection must run this package's `emulateMux` wire format;
+a plain WebSocket peer cannot talk to it.
+
+## Examples
+
+### Serve and call in Node
 
 ```ts
 import { connect, serve } from "@statewalker/webrun-streams-ws";
@@ -50,7 +72,6 @@ import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 
 const wss = new WebSocketServer({ port: 8080 });
 
-// The handler is a plain Duplex: bytes in, bytes out.
 const stop = await serve(
   {
     onConnection: (cb) => {
@@ -64,8 +85,8 @@ const stop = await serve(
 );
 
 const { call, close } = await connect({
-  url: "ws://localhost:8080",
-  WebSocketCtor: NodeWebSocket, // omit in the browser
+  url: "ws://127.0.0.1:8080",
+  WebSocketCtor: NodeWebSocket,
 });
 
 for await (const chunk of call([new TextEncoder().encode("hello")])) {
@@ -74,103 +95,138 @@ for await (const chunk of call([new TextEncoder().encode("hello")])) {
 
 await close();
 await stop();
+wss.close();
 ```
 
-In a browser the client side is just:
-
-```ts
-const { call, close } = await connect({ url: "wss://example.com/socket" });
-```
-
-### Concurrent calls
-
-Each `call(...)` is an independent stream over the same socket. They interleave
-without interfering:
+### Browser client, concurrent calls
 
 ```ts
 import { collectBytes } from "@statewalker/webrun-streams";
+import { connect } from "@statewalker/webrun-streams-ws";
 
+const { call, close } = await connect({ url: "wss://example.com/socket" });
+const enc = new TextEncoder();
+
+// Each call is an independent stream on the same socket.
 const [a, b] = await Promise.all([
-  collectBytes(call(requestA)),
-  collectBytes(call(requestB)),
+  collectBytes(call([enc.encode("first")])),
+  collectBytes(call([enc.encode("second")])),
 ]);
+await close();
 ```
 
-### Carrying HTTP over it
+### HTTP over the socket
 
-Pair with [`webrun-http-streams`](../webrun-http-streams) to move real
-`Request` / `Response` objects across the socket:
+`@statewalker/webrun-http-streams` carries `Request` / `Response` over any
+`Duplex`:
 
 ```ts
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
+import { connect } from "@statewalker/webrun-streams-ws";
 
-const response = await fetchOverDuplex(call, new Request("http://x/api/todo"));
+const { call } = await connect({ url: "wss://example.com/socket" });
+const response = await fetchOverDuplex(call, new Request("http://peer/api/todo"));
 ```
 
-## API
+### Driving `emulateMux` on a socket you own
 
-### `connect(params): Promise<{ call, close }>`
+```ts
+import { emulateMux } from "@statewalker/webrun-streams";
+import { byteChannelFromWebSocket, type WebSocketLike } from "@statewalker/webrun-streams-ws";
 
-Opens a `WebSocket` and resolves once it is open. Type: `Connect<ConnectWsParams>`.
-
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `url` | `string` | — | WebSocket URL (`ws://` or `wss://`). |
-| `protocols` | `string \| string[]` | — | Subprotocol(s) passed to the constructor. |
-| `WebSocketCtor` | constructor | global `WebSocket` | Constructor to use. Required where there is no global `WebSocket` (Node). |
-| `mux` | `EmulateMuxOptions` | `emulateMux`'s own | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"initiator"` regardless of `mux.side`. |
-
-Resolves to `{ call: Duplex, close: () => Promise<void> }`. Each `call(input)`
-opens a fresh logical stream; `close()` tears down the socket and every stream
-on it.
-
-### `serve(params, handler): Promise<() => Promise<void>>`
-
-Registers `handler` against a source of inbound sockets. Type: `Serve<ServeWsParams>`.
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `onConnection` | `(cb: (ws: WebSocketLike) => void) => () => void` | Subscribes to inbound connections; returns an unsubscribe function. |
-| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"responder"` regardless of `mux.side`. |
-
-The indirection means this package never depends on a particular server
-library — wire it to `ws`, to a Deno/Bun handler, or to your own accept loop.
-Returns an idempotent teardown.
-
-### `byteChannelFromWebSocket(ws): ByteChannel`
-
-Wraps a single socket as a `ByteChannel` (`send` / `recv` / `closed` / `close`).
-Use this when you want to drive `emulateMux` yourself, or reuse a socket you
-already own.
-
-### `WebSocketLike` / `WS_READY_STATE`
-
-The structural socket interface this package accepts, and the
-`CONNECTING`/`OPEN`/`CLOSING`/`CLOSED` constants. Typing against `WebSocketLike`
-rather than the DOM `WebSocket` is what lets the same code accept Node's `ws`.
-
-## Conformance
-
-Passes every level (L0–L6) of
-[`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
-against an in-process `WebSocketServer`: body sizes up to 10 MiB, concurrent
-calls, half-close, mid-stream cancellation, error propagation with stack and
-custom fields preserved, idempotent teardown, and flow control against a slow
-consumer at a small advertised window.
-
-```sh
-pnpm --filter @statewalker/webrun-streams-ws test
+declare const socket: WebSocket; // already open
+// The cast is needed with current DOM typings; see "WebSocketLike and the DOM type" below.
+const mux = emulateMux(byteChannelFromWebSocket(socket as unknown as WebSocketLike), {
+  side: "initiator",
+});
+const response = mux.call([new TextEncoder().encode("ping")]);
 ```
 
-## Dependencies
+## Internals
 
-| Dependency | Kind | Why |
-| --- | --- | --- |
-| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` / `ByteChannel` seam and `emulateMux`. |
-| `ws` | dev / your choice | Only for the Node tests. Consumers pass their own constructor. |
+### One socket, one mux
 
-No other runtime dependencies. ESM only (`"type": "module"`).
+```
+ client                                     server
+ call(a) ──┐                            ┌──> handler(a)
+ call(b) ──┼─ emulateMux ══ WebSocket ══ emulateMux ─┼──> handler(b)
+ call(c) ──┘  (initiator)               (responder) └──> handler(c)
+              ByteChannel               ByteChannel
+```
+
+`connect` creates one socket and one `emulateMux` with `side: "initiator"`.
+`serve` creates one `emulateMux` with `side: "responder"` per inbound socket,
+and closes it when that socket closes. The sides are forced, overriding any
+`mux.side`, so the two ends always allocate stream ids from different sets
+(even and odd). Flow control, framing and stream lifetimes are `emulateMux`'s;
+see `@statewalker/webrun-streams`.
+
+### Why the server takes `onConnection` and not a server object
+
+`serve` depends only on a subscription function, so this package has no
+dependency on a server library. It can be wired to `ws`, to a runtime's
+built-in WebSocket upgrade, or to a custom accept loop.
+
+### How `byteChannelFromWebSocket` maps the socket
+
+- Each WebSocket message is one `recv` item. `Uint8Array` (including Node
+  `Buffer`), `ArrayBuffer` and other `ArrayBufferView`s are passed through
+  without copying. A `Blob` is read asynchronously, which can reorder it
+  relative to later messages; set `binaryType = "arraybuffer"` in the browser
+  if that matters. Text messages are accepted and delivered as UTF-8 bytes.
+  Anything else is ignored.
+- `send` is silently dropped when the socket is not `OPEN` or the channel is
+  closed; `emulateMux` learns about the failure from `closed`.
+- The socket's `close` event ends `recv` and resolves `closed`, which fails
+  every in-flight call with `TransportClosedError`.
+
+### WebSocketLike and the DOM type
+
+`WebSocketLike` is structural so that the DOM `WebSocket` and Node's `ws`
+both fit without this package depending on either. `ws`'s `WebSocket` type
+checks as is. The DOM type does not: `WebSocketLike.send` accepts
+`Uint8Array<ArrayBufferLike>`, which the current DOM `WebSocket.send` typing
+(`BufferSource`) rejects, so passing a DOM socket to
+`byteChannelFromWebSocket` or a DOM constructor as `WebSocketCtor` needs
+`as unknown as WebSocketLike`. `connect` without `WebSocketCtor` uses the
+global `WebSocket` and does the cast itself.
+
+### Failure modes
+
+| Situation | Error |
+| --- | --- |
+| No `WebSocketCtor` and no global `WebSocket` | `webrun-streams-ws connect: no WebSocket constructor available. Pass \`params.WebSocketCtor\` (e.g. the \`ws\` package's WebSocket in Node).` |
+| Socket errors before opening | `WebSocket error before open` |
+| Socket closes before opening | `WebSocket closed before it opened` |
+| `byteChannelFromWebSocket` on a socket that is not open | `byteChannelFromWebSocket: WebSocket is in readyState <n>, expected OPEN (1)` |
+| Socket closes with calls in flight | `TransportClosedError` (`transport closed`) |
+
+`connect` has no timeout of its own; a socket that never opens or fails leaves
+the promise pending.
+
+### Teardown is listener-only on the server
+
+The function `serve` resolves to unsubscribes from `onConnection` and nothing
+else. Muxes on sockets that are already connected keep running until their
+socket closes. To drop live connections, close the sockets (for example
+`wss.close()` plus `terminate()` on each client with `ws`).
+
+### Tests and measurements
+
+`pnpm test` runs the shared conformance suite (L0 to L6) against an in-process
+`ws` server; the pair helper forwards L6's small window through `mux`.
+`pnpm run test:bench` runs a separate measurement that compares a direct
+WebSocket round trip with one bridged through a `MessageChannel`. It reports
+numbers and does not gate on a threshold, because a timing threshold on
+shared CI hardware is unreliable, and it is excluded from `pnpm test`.
+
+### Dependencies
+
+- `@statewalker/webrun-streams` (`workspace:^`): `emulateMux`, the
+  `ByteChannel` / `Duplex` types and `normalizeToUint8Array`.
+- No other runtime dependencies. `ws` is a dev dependency used only by the
+  tests; consumers supply their own constructor.
 
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT

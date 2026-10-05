@@ -2,8 +2,12 @@
 
 Move `Request`/`Response` and async iterators over any byte channel, and host
 ordinary `(Request) ⇒ Response` handlers in a browser tab via ServiceWorker.
-Adjacent in-browser build pipeline work simulates client + server execution
-without a network server.
+
+Scope of this glossary: **SiteHandler** and **SwHttpAdapter** are implemented
+by this repository's packages. **SiteBuilder**, **HostedSiteBuilder**,
+**FilesApi**, the *P2P mesh* and the *in-browser build pipeline* sections
+describe code built on top of these packages; that code is not in this
+repository.
 
 ## Language
 
