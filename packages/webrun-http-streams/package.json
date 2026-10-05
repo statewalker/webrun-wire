@@ -3,7 +3,7 @@
   "version": "0.2.4",
   "private": false,
   "type": "module",
-  "description": "HTTP request/response over Duplex — merge of webrun-http + webrun-http-port",
+  "description": "HTTP request/response over a webrun-streams Duplex, encoded as HTTP/1.1, plus transport-agnostic fetch stubs",
   "bugs": {
     "url": "https://github.com/statewalker/webrun-wire/issues"
   },

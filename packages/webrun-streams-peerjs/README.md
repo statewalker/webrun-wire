@@ -1,70 +1,80 @@
 # @statewalker/webrun-streams-peerjs
 
-PeerJS `DataConnection`-backed `Connect` / `Serve` adapter in the
-`webrun-streams-*` family.
+## What it is
 
-## What this is
-
-A binding between a PeerJS [`DataConnection`](https://peerjs.com/docs/#dataconnection)
-and the [`webrun-streams`](../webrun-streams) `Duplex` seam. One
-`DataConnection` becomes one `ByteChannel`; `emulateMux` layers many concurrent
-logical calls on top of it.
-
-Your handler is an ordinary `Duplex` —
-`(input: AsyncIterable<Uint8Array>) => AsyncGenerator<Uint8Array>` — identical
-to the one you would run over a WebSocket or a `MessagePort`.
+A `Connect` / `Serve` adapter that runs `@statewalker/webrun-streams` `Duplex` calls over a PeerJS
+[`DataConnection`](https://peerjs.com/docs/#dataconnection). One connection becomes one
+`ByteChannel`, and `webrun-streams`' `emulateMux` runs many concurrent calls over it. Your handler
+is an ordinary `Duplex`, `(input: AsyncIterable<Uint8Array>) => AsyncGenerator<Uint8Array>`, the
+same function you would run over a WebSocket or a `MessagePort`.
 
 ## Why it exists
 
-PeerJS is the least-effort route to a browser-to-browser connection: it ships a
-public broker, so you get a working peer link without standing up signalling
-infrastructure. What it hands you afterwards is a single message pipe with no
-request framing, no concurrency, no half-close, and no error propagation.
+PeerJS is the least-effort route to a browser-to-browser connection: it ships a public broker, so
+you get a working peer link without running signalling infrastructure. What it hands you is one
+message pipe with no request framing, no concurrency, no half-close and no error propagation. This
+adapter supplies those, so the transport becomes a detail: a handler prototyped over PeerJS runs
+unchanged over any other `webrun-streams` adapter.
 
-This adapter supplies those once, so the transport becomes an implementation
-detail — prototype over PeerJS's public broker, then move the same handler to
-[`webrun-streams-webrtc`](../webrun-streams-webrtc) or
-[`webrun-streams-libp2p`](../webrun-streams-libp2p) for production without
-touching it.
-
-## Install
+## How to use
 
 ```sh
-npm install @statewalker/webrun-streams-peerjs peerjs
+pnpm add @statewalker/webrun-streams-peerjs peerjs
 ```
 
-`peerjs` is a **peer dependency** (`^1.5.5`) — you own the `Peer` instance and
-its broker configuration.
+`peerjs` is a required peer dependency (`^1.5.5`). You create and own the `Peer`, its broker
+configuration and its connections. Browser only in practice: PeerJS needs WebRTC. One entry point,
+`.`, ESM only.
 
-> [!IMPORTANT]
-> Connections must be opened with `serialization: "raw"`. PeerJS otherwise
-> applies its own encoding to your bytes and the framing will not survive.
+**Connections must use `serialization: "raw"`.** Otherwise PeerJS encodes the bytes itself and the
+mux framing does not survive. The adapter checks and throws
+`TypeError: byteChannelFromPeerJs: DataConnection serialization is '<value>', expected 'raw'`.
 
-## Getting started
+| Export | Purpose |
+| --- | --- |
+| `connect(params: ConnectPeerJsParams)` | `Connect`. Takes one open `DataConnection`. Resolves `{ call, close }`; each `call(input)` opens a new logical stream. `close()` ends the mux and closes the connection. |
+| `serve(params: ServePeerJsParams, handler)` | `Serve`. Takes a `Peer`, serves `handler` on every inbound connection. Resolves an idempotent teardown. |
+| `ConnectPeerJsParams` | `{ conn: DataConnection; mux?: EmulateMuxOptions }`. |
+| `ServePeerJsParams` | `{ peer: Peer; mux?: EmulateMuxOptions }`. |
+| `byteChannelFromPeerJs(conn)` | The `ByteChannel` both use, for driving `emulateMux` yourself. |
 
-Responder — listen for inbound connections on a connected `Peer`:
+`mux` is forwarded to `emulateMux` (`mtu`, `maxStreamBuffer`, `maxStreams`, with `webrun-streams`'
+defaults: 64 KiB, 8 MiB, 256). `side` is fixed by the function you call — `"initiator"` for
+`connect`, `"responder"` for `serve` — and overrides `mux.side`.
+
+`serve` takes the `Peer` because it accepts many inbound connections; `connect` takes one
+connection you already opened.
+
+## Examples
+
+### Serving
 
 ```ts
-import Peer from "peerjs";
+import { Peer } from "peerjs";
 import { serve } from "@statewalker/webrun-streams-peerjs";
 
 const peer = new Peer("my-server-id");
-await new Promise((r) => peer.on("open", r));
+await new Promise((resolve) => peer.on("open", resolve));
 
 const stop = await serve({ peer }, async function* echo(input) {
   for await (const chunk of input) yield chunk;
 });
+
+// later: stop accepting, close every served connection's mux
+await stop();
 ```
 
-Caller — connect, then hand the open `DataConnection` to the adapter:
+### Calling
 
 ```ts
-import Peer from "peerjs";
+import { Peer } from "peerjs";
 import { connect } from "@statewalker/webrun-streams-peerjs";
 
 const peer = new Peer();
+await new Promise((resolve) => peer.on("open", resolve));
+
 const conn = peer.connect("my-server-id", { serialization: "raw" });
-await new Promise((r) => conn.on("open", r));
+await new Promise((resolve) => conn.on("open", resolve));
 
 const { call, close } = await connect({ conn });
 
@@ -75,10 +85,7 @@ for await (const chunk of call([new TextEncoder().encode("ping")])) {
 await close();
 ```
 
-Note the asymmetry: `serve` takes the `Peer` (it accepts many inbound
-connections), `connect` takes one already-open `DataConnection`.
-
-### Carrying HTTP over it
+### HTTP over the connection
 
 ```ts
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
@@ -86,65 +93,72 @@ import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
 const response = await fetchOverDuplex(call, new Request("http://peer/api/todo"));
 ```
 
-## API
+### Driving the mux yourself
 
-### `connect(params): Promise<{ call, close }>`
+```ts
+import { emulateMux } from "@statewalker/webrun-streams";
+import { byteChannelFromPeerJs } from "@statewalker/webrun-streams-peerjs";
 
-Type: `Connect<ConnectPeerJsParams>`.
+const channel = byteChannelFromPeerJs(conn); // conn opened with serialization: "raw"
+const mux = emulateMux(channel, { side: "initiator" });
+// mux.call(input), mux.serve(handler), mux.close()
+```
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `conn` | `DataConnection` | An already-open connection with `serialization: "raw"`. |
-| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"initiator"` regardless of `mux.side`. |
+## Internals
 
-Each `call(input)` opens a new logical stream over that connection. `close()`
-tears down the streams and the channel.
+```
+ handler / caller (Duplex)
+          │
+   emulateMux (webrun-streams): framed streams, credit flow control
+          │
+   byteChannelFromPeerJs: one ByteChannel per DataConnection
+          │  out: conn.send(bytes)        in: "data" events
+          ▼
+   PeerJS DataConnection (serialization: "raw") ── WebRTC data channel
+```
 
-### `serve(params, handler): Promise<() => Promise<void>>`
+### What the channel accepts, and what it drops
 
-Type: `Serve<ServePeerJsParams>`.
+Inbound `data` may be a `Uint8Array`, an `ArrayBuffer`, any `ArrayBufferView` or a `Blob` (read
+asynchronously); each is copied into a fresh `Uint8Array`. Anything else is ignored. Outbound
+`send` is a silent no-op while `conn.open` is false, so **wait for the connection's `open` event
+before `connect`**; bytes sent earlier are lost without an error.
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `peer` | `Peer` | A connected peer; the adapter listens for inbound `DataConnection`s. |
-| `mux` | `EmulateMuxOptions` | Flow-control tuning (`mtu`, `maxStreamBuffer`) forwarded to `emulateMux`. `side` is always `"responder"` regardless of `mux.side`. |
+### What closes the channel, and what you see
 
-Returns an idempotent teardown.
+The channel closes on the connection's `close` event or when its `close()` is called. In-flight
+and later calls then fail with `webrun-streams`' `TransportClosedError`. On the serving side each
+inbound connection gets its own mux, created when the connection opens and closed when the
+connection closes. A connection that arrives without `serialization: "raw"` makes the adapter
+throw the `TypeError` above inside the connection's `open` handler, and that connection is not
+served.
 
-### `byteChannelFromPeerJs(conn): ByteChannel`
+The serve teardown removes the `connection` listener and closes every mux it created. Muxes are
+kept in a list until then, including those whose connection already closed.
 
-Wraps one `DataConnection` as a `ByteChannel` (`send` / `recv` / `closed` /
-`close`) for driving `emulateMux` yourself.
-
-### `ConnectPeerJsParams` / `ServePeerJsParams`
-
-The two parameter types above.
-
-## Conformance
-
-Runs [`@statewalker/webrun-streams-conformance`](../webrun-streams-conformance)
-against a local broker (the [`peer`](https://www.npmjs.com/package/peer) server).
-
-The suite is **browser-gated**. `@roamhq/wrtc` covers the WebRTC primitives in
-Node, but the full PeerJS handshake hangs there, so
-`tests/conformance.test.ts` registers the suite only when a `window` global is
-present; the plain Node run reports it as skipped.
+### Conformance runs in a browser against a local broker
 
 ```sh
 pnpm --filter @statewalker/webrun-streams-peerjs test:browser   # runs the suite
 pnpm --filter @statewalker/webrun-streams-peerjs test           # reports it skipped
 ```
 
-## Dependencies
+The `@statewalker/webrun-streams-conformance` suite runs in headless Chromium through Playwright.
+A Vitest global setup starts the reference broker (the [`peer`](https://www.npmjs.com/package/peer)
+package's `PeerServer`) on a loopback port in a child process, so runs need no internet access.
+The broker runs out of process because, hosted in-process, it keeps the test run alive after the
+last test: its `close()` waits on the browser's WebSockets and it holds client-expiry timers with
+no public way to clear them. Under plain `pnpm test` (Node) the suite is skipped: the full PeerJS
+handshake hangs there.
 
-| Dependency | Kind | Why |
-| --- | --- | --- |
-| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | The `Duplex` / `ByteChannel` seam and `emulateMux`. |
-| `peerjs` | **peer** (`^1.5.5`) | You supply and own the `Peer`. |
-| `peer`, `@roamhq/wrtc` | dev | Local broker and WebRTC for the conformance run. |
+### Dependencies
 
-ESM only (`"type": "module"`).
+- `@statewalker/webrun-streams` (runtime): the `Duplex` / `Connect` / `Serve` / `ByteChannel`
+  types and `emulateMux`.
+- `peerjs` (peer): you supply and own the `Peer`.
+- Dev only: `peer` (the local broker), `@vitest/browser-playwright` and `playwright` (the browser
+  run), `@statewalker/webrun-streams-conformance` (the suite).
 
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT

@@ -1,146 +1,247 @@
 # @statewalker/webrun-streams-signaling
 
-Generic P2P signaling / connection-setup helpers — `PeerManager`, `QrSignaling`, `RoomManager` — that each yield a webrun-streams `ByteChannel`.
+## What it is
 
-## Overview
+Connection-setup helpers for peer-to-peer links. Each one runs a handshake and hands back an
+established `@statewalker/webrun-streams` `ByteChannel` (`send` / `recv` / `closed` / `close`).
+`PeerManager` runs WebRTC offer/answer/ICE over a signaling transport you supply; `QrSignaling`
+pairs two devices without a server by exchanging compact QR strings; `RoomManager` joins a
+LiveKit-style room and opens a channel per participant. What runs on the channel afterwards —
+typically `webrun-streams`' `emulateMux` — is up to you.
 
-Signaling here is **transport-setup only**: it runs the handshake (WebRTC offer/answer/ICE, or LiveKit room membership) that *establishes* a peer connection, then hands back an established `ByteChannel`. The byte transport and multiplexing on top of that channel is `@statewalker/webrun-streams`. These helpers were relocated out of the retired `@statewalker/vcs-port-*` packages and neutralised — nothing here is Git/VCS-specific — so a generic P2P concern lives in the webrun ecosystem. Vendor libraries (`livekit-client`) are optional peer-deps injected via a factory; native WebRTC is likewise injectable, so tests need no vendor install.
+## Why it exists
 
-**Out of scope:** the byte transport / multiplexing (`@statewalker/webrun-streams`), and the signaling *server* (STUN/TURN/rendezvous) — a deployment concern; these are clients.
+Every peer-to-peer transport needs the same preliminary step: find the peer, exchange session
+descriptions and ICE candidates, and wait for a data channel to open. That step is separate from
+moving bytes. This package does only that step and stops at a `ByteChannel`, so any byte protocol
+can run on the result. It contains no signaling server (STUN/TURN/rendezvous); these are clients.
+Vendor code stays out of the import graph: native WebRTC is reached through an injectable factory
+and LiveKit through a structural `RoomLike` interface and a `roomFactory`, so the package can be
+tested with in-memory mocks and `livekit-client` is only needed if you use `RoomManager`.
 
-## Installation
+## How to use
 
-```bash
+```sh
 pnpm add @statewalker/webrun-streams-signaling
+# only for RoomManager:
+pnpm add livekit-client
 ```
 
-## Quick Start
+`livekit-client` (`^2.18.3`) is an optional peer dependency; the package never imports it, you
+pass `() => new Room()`. One entry point, `.`, ESM only. It targets browsers: it uses
+`RTCPeerConnection` (unless you inject `rtc`), `crypto.getRandomValues`, `btoa` / `atob`. In Node,
+pass an `rtc` factory from a WebRTC implementation.
 
-`PeerManager` dials a peer over a `SignalingTransport` (your websocket / rendezvous side-channel) and resolves with a `ByteChannel`:
+### Exports
 
-```typescript
-import { PeerManager } from "@statewalker/webrun-streams-signaling";
+| Export | Purpose |
+| --- | --- |
+| `new PeerManager(signaling, options?)` | WebRTC connections keyed by peer id over a `SignalingTransport`. `connect(peerId): Promise<ByteChannel>`, `onConnection((peerId, ch) => void): () => void`, `close()`. |
+| `PeerManagerOptions` | Same as `WebRtcConnectionOptions`. |
+| `new QrSignaling(options?)` | Serverless pairing. `offer(): Promise<{ qr, accept(answerQr): Promise<ByteChannel> }>`, `answer(offerQr): Promise<{ qr, channel }>`, `getSessionId()`. |
+| `QrSignalingOptions` | `{ sessionId?: string; connection?: WebRtcConnectionOptions }`. |
+| `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
+| `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
+| `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`. |
+| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. |
+| `generateSessionId()`, `createCompressedSignal(...)`, `parseCompressedSignal(signal)`, `encodeSignal(signal)`, `decodeSignal(text)` | The pure QR payload functions. |
 
-// `signaling` is your SignalingTransport (localId + send + onMessage).
-// In production `PeerConnection` defaults to `new RTCPeerConnection(config)`;
-// pass `{ rtc }` only to inject a factory (tests, or a non-browser stack).
-const a = new PeerManager(signalingA);
-const b = new PeerManager(signalingB);
+Types and constants: `SignalingTransport` (`localId`, `send(to, msg)`,
+`onMessage(handler): () => void`), `SignalingMessage` (`offer` / `answer` / `candidate` /
+`ready`), `SessionDescription`, `IceCandidate`, `PeerRole`, `ConnectionState`,
+`PeerConnectionEvents` (`stateChange`, `signal`, `open`, `close`, `error`),
+`WebRtcConnectionOptions`, `RtcPeerConnectionFactory`, `DEFAULT_ICE_SERVERS` (two Google STUN
+servers), `CompressedSignal`, `RoomLike`, `RoomParticipantLike`, `RoomLocalParticipantLike`,
+`RoomManagerOptions` (`url`, `getToken(room)`, `roomFactory`), `ROOM_EVENT` (the three LiveKit
+event names used), `ParticipantInfo` (exported, not used by any API here).
 
-b.onConnection((peerId, ch) => {
-  ch.send(new Uint8Array([1, 2, 3]));
+`WebRtcConnectionOptions`:
+
+| option | default | meaning |
+| --- | --- | --- |
+| `iceServers` | `DEFAULT_ICE_SERVERS` | ICE servers. |
+| `connectionTimeout` | 30000 ms | How long `open()` waits for the data channel. |
+| `iceGatheringTimeout` | 5000 ms | How long `QrSignaling` waits for ICE gathering before using what it has. |
+| `channelLabel` | `"webrun-data"` | Data channel label. |
+| `ordered` | `true` | Ordered delivery. |
+| `maxRetransmits` | unset | Retransmit limit for unreliable mode. |
+| `rtc` | `new RTCPeerConnection(config)` | Factory for the peer connection. |
+
+## Examples
+
+### `PeerManager`: dial a peer over your signaling channel, then multiplex
+
+The `SignalingTransport` below is an in-memory bus, so both peers run in one page; in an
+application it wraps your WebSocket or other rendezvous channel.
+
+```ts
+import { emulateMux } from "@statewalker/webrun-streams";
+import {
+  PeerManager,
+  type SignalingMessage,
+  type SignalingTransport,
+} from "@statewalker/webrun-streams-signaling";
+
+function signalingBus() {
+  const handlers = new Map<string, (from: string, msg: SignalingMessage) => void>();
+  return (localId: string): SignalingTransport => ({
+    localId,
+    send: (to, msg) => queueMicrotask(() => handlers.get(to)?.(localId, msg)),
+    onMessage(handler) {
+      handlers.set(localId, handler);
+      return () => handlers.delete(localId);
+    },
+  });
+}
+
+const bus = signalingBus();
+const a = new PeerManager(bus("A"));
+const b = new PeerManager(bus("B"));
+
+b.onConnection((peerId, channel) => {
+  const mux = emulateMux(channel, { side: "responder" });
+  mux.serve(async function* echo(input) {
+    for await (const chunk of input) yield chunk;
+  });
 });
 
-const ch = await a.connect("B"); // Promise<ByteChannel>
-ch.send(new Uint8Array([9, 8]));
+const channel = await a.connect("B");
+const mux = emulateMux(channel, { side: "initiator" });
+for await (const chunk of mux.call([new TextEncoder().encode("ping")])) {
+  console.log(new TextDecoder().decode(chunk)); // "ping"
+}
+
+a.close();
+b.close();
 ```
 
-`QrSignaling` pairs two devices serverless, exchanging compact QR strings:
+### `QrSignaling`: pair two devices without a server
 
-```typescript
+```ts
 import { QrSignaling } from "@statewalker/webrun-streams-signaling";
 
+// Device A
 const deviceA = new QrSignaling();
-const deviceB = new QrSignaling();
+const { qr: offerQr, accept } = await deviceA.offer(); // show offerQr as a QR code
 
-const { qr: offerQr, accept } = await deviceA.offer();   // display offerQr
-const { qr: answerQr, channel: chB } = await deviceB.answer(offerQr); // scan + reply
-const chA = await accept(answerQr);                      // both sides now have a ByteChannel
+// Device B, after scanning offerQr
+const deviceB = new QrSignaling();
+const { qr: answerQr, channel: channelB } = await deviceB.answer(offerQr); // show answerQr
+
+// Device A, after scanning answerQr
+const channelA = await accept(answerQr);
 ```
 
-`RoomManager` joins a LiveKit-style room and opens a `ByteChannel` per participant:
+**This flow does not currently complete against a real WebRTC stack**; see
+[What `answer()` waits for](#what-answer-waits-for).
 
-```typescript
-import { RoomManager } from "@statewalker/webrun-streams-signaling";
+### `RoomManager`: one channel per participant
+
+```ts
 import { Room } from "livekit-client";
+import { RoomManager } from "@statewalker/webrun-streams-signaling";
 
-const room = new RoomManager({
-  url: "wss://my-livekit-host",
-  getToken: (name) => fetchToken(name),
+const rooms = new RoomManager({
+  url: "wss://livekit.example.com",
+  getToken: (room) => fetch(`/token?room=${room}`).then((r) => r.text()),
   roomFactory: () => new Room(),
 });
 
-await room.join("room1");
-for await (const peerId of room.participants()) {
-  const ch = await room.channelTo(peerId);
-  ch.send(new Uint8Array([5, 5]));
+await rooms.join("room1");
+for await (const peerId of rooms.participants()) {
+  const channel = await rooms.channelTo(peerId);
+  channel.send(new Uint8Array([5, 5]));
 }
-await room.leave();
+// participants() does not end until leave() is called
 ```
 
-## API
+## Internals
 
-### Managers
+```
+  SignalingTransport / QR strings / LiveKit room      (you provide)
+                │  offer, answer, ICE candidates
+                ▼
+  PeerConnection ── RTCPeerConnection (or your `rtc` factory)
+                │  data channel opens
+                ▼
+  ByteChannel  ── send / recv / closed / close
+                │
+                ▼
+  emulateMux or any byte protocol                      (you run)
+```
 
-- **`class PeerManager`** — `new PeerManager(signaling: SignalingTransport, options?: PeerManagerOptions)`. WebRTC peer discovery + connection over a signaling transport.
-  - `connect(peerId: string): Promise<ByteChannel>` — dial a peer; resolves with the established channel.
-  - `onConnection(handler: (peerId: string, ch: ByteChannel) => void): () => void` — accept inbound dials; returns an unsubscribe fn.
-  - `close(): void` — tear down all connections and stop listening.
-- **`class QrSignaling`** — `new QrSignaling(options?: QrSignalingOptions)`. Serverless offer/answer exchange via QR strings.
-  - `offer(): Promise<{ qr: string; accept(answerQr: string): Promise<ByteChannel> }>` — create an offer QR; `accept` finishes the handshake.
-  - `answer(offerQr: string): Promise<{ qr: string; channel: ByteChannel }>` — consume an offer QR, produce an answer QR + the channel.
-  - `getSessionId(): string`.
-- **`class RoomManager`** — `new RoomManager(options: RoomManagerOptions)`. LiveKit room membership + per-participant channels.
-  - `join(room: string): Promise<void>`, `participants(): AsyncIterable<string>`, `channelTo(peerId: string): Promise<ByteChannel>`, `leave(): Promise<void>`.
+### How `PeerManager` routes signals
 
-### ByteChannel adapters
+Each peer id maps to one `PeerConnection`. `connect(peerId)` creates an initiator, creates the
+data channel and offer, and resolves when the channel opens. An inbound `offer` from an unknown
+peer creates a responder; `onConnection` handlers are called when its channel opens. Answers and
+candidates from unknown peers are ignored. Candidates that arrive before the remote description
+is set are queued and applied after it. When ICE gathering completes, a `{ type: "ready" }`
+signal is sent; receivers ignore it. A connection is forgotten when its data channel closes.
 
-- **`byteChannelFromDataChannel(channel: RTCDataChannel): ByteChannel`** — wrap an established `RTCDataChannel`.
-- **`byteChannelFromRoom(room: RoomLike, peerId: string): ByteChannel`** — per-participant channel over a LiveKit-style `Room`.
+### What `answer()` waits for
 
-### Low-level
+`QrSignaling` sends everything in one payload: it waits for ICE gathering (up to
+`iceGatheringTimeout`), then packs the SDP and all gathered candidates. `offer()` returns the
+offer QR and an `accept` that applies the answer. `answer()`, however, awaits the responder's data
+channel before it returns the answer QR. With a real WebRTC stack that channel opens only after
+the initiator has applied the answer, which needs the answer QR. So `answer()` rejects with
+`Connection timeout after <connectionTimeout>ms` instead of returning, and the flow in the example
+above does not complete. The test suite uses a mock `RTCPeerConnection` that opens the channel as
+soon as both descriptions are set on one side, so it does not exercise this ordering.
 
-- **`class PeerConnection`** — single WebRTC connection lifecycle (offer/answer/ICE) that `PeerManager` and `QrSignaling` build on.
+`offer()` starts waiting for its channel immediately. If `accept` is never called, that wait
+rejects after `connectionTimeout` with nothing attached to it: an unhandled rejection, which
+terminates a Node process.
 
-### QR pure functions
+### How QR payloads stay small
 
-- **`generateSessionId(): string`** — short random session id.
-- **`createCompressedSignal(sessionId, role, description, candidates): CompressedSignal`** — build a compact QR payload from SDP + ICE.
-- **`parseCompressedSignal(signal): { sessionId, role, description, candidates }`** — reverse of the above.
-- **`encodeSignal(signal): string`** / **`decodeSignal(encoded): CompressedSignal`** — URL-safe base64 (de)serialisation for QR strings.
+`createCompressedSignal` keeps only the SDP lines needed to connect (`v=`, `o=`, `s=`, `t=`,
+`m=`, `c=`, `a=group:`, `a=ice-ufrag:`, `a=ice-pwd:`, `a=fingerprint:`, `a=setup:`, `a=mid:`,
+`a=sctp-port:`, `a=max-message-size:`) and packs each candidate into a `|`-separated string
+(unparseable candidates are kept raw, prefixed `R:`). `encodeSignal` is URL-safe base64 of the
+JSON, without padding. `parseCompressedSignal` throws `Unsupported protocol version: <v>` for any
+version other than 1, and a malformed packed candidate throws
+`Invalid compressed candidate: <text>`.
 
-### Types and constants
+### How the channels behave
 
-All re-exported from `./types` at the package root.
+- Both channels buffer inbound bytes from the moment they are created, so data that arrives
+  before your `for await` starts is not lost.
+- `byteChannelFromDataChannel` sets `binaryType = "arraybuffer"` and copies every inbound payload.
+  A non-byte message (a string) throws `TypeError: byte channel received a non-byte payload`
+  inside the channel's `message` listener. `closed` resolves on the data channel's `close` event
+  or on `close()`. A `send` on a closed channel is swallowed.
+- `byteChannelFromRoom` publishes with `reliable: true` to `destinationIdentities: [peerId]` and
+  accepts `dataReceived` events from that participant (or with no participant). Its `closed`
+  resolves only when you call `close()`; it does not watch for the participant leaving or the
+  room disconnecting.
 
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `SignalingTransport` | interface | The pluggable channel offers/answers travel over. |
-| `SignalingMessage` | union | Offer / answer / ICE-candidate envelopes. |
-| `SessionDescription` / `IceCandidate` | interface | Structural views of the WebRTC handshake payloads (no DOM types required). |
-| `PeerRole` | `"initiator" \| "responder"` | Which side of the handshake this peer plays. |
-| `ConnectionState` | union | Lifecycle state reported by `PeerConnection`. |
-| `PeerConnectionEvents` | interface | The event callbacks `PeerConnection` accepts. |
-| `WebRtcConnectionOptions` | interface | ICE configuration and the injected `rtc` factory. |
-| `RtcPeerConnectionFactory` | type | `(config: RTCConfiguration) => RTCPeerConnection` — the injection seam that keeps native WebRTC out of the import graph. |
-| `DEFAULT_ICE_SERVERS` | const | STUN servers used when none are supplied. |
-| `CompressedSignal` | interface | The compact offer/answer shape behind the QR helpers. |
-| `RoomLike` / `RoomParticipantLike` / `RoomLocalParticipantLike` | interface | Structural view of a LiveKit room, so `livekit-client` stays an optional peer dependency. |
-| `RoomManagerOptions` | interface | Includes `roomFactory`, the injection point for the real `Room`. |
-| `ParticipantInfo` | interface | Identity + metadata for a room participant. |
-| `ROOM_EVENT` | const | Room event-name constants used by `RoomManager`. |
+### What `RoomManager` tracks
 
-## Notes
+`participants()` yields the identities already in the room when `join` returns, then each one
+that joins, and ends at `leave()`. Departures are not reported. Only the most recently created
+`participants()` iterator receives new joiners. `channelTo()` before `join()` throws
+`channelTo() before join()`.
 
-- Each helper yields a webrun-streams **`ByteChannel`** (`send` / `recv` / `closed` / `close`), not a `MessagePort` — the byte transport and `emulateMux` run on top via `@statewalker/webrun-streams`.
-- **Vendor coupling stays behind optional peer-deps.** `livekit-client` is injected via `RoomManagerOptions.roomFactory` (the module keeps only a structural `RoomLike` view), and native WebRTC is injected via the optional `rtc` factory (defaulting to `new RTCPeerConnection`). So the tests use in-memory mocks and require no vendor install.
-- **`peerjs` is not a dependency.** These helpers use native WebRTC; the peerjs byte transport lives in `@statewalker/webrun-streams-peerjs`.
-- Built red/green TDD.
+### Failure modes
 
-## Dependencies
+- `PeerConnection.open()` rejects with `Connection timeout after <n>ms`, with the data channel's
+  error, or with `Connection failed` when the connection state becomes `failed`.
+- `connect()` on a responder throws `connect() should only be called by initiator`; an offer to an
+  initiator throws `Received offer but not in responder role`; an answer to a responder throws
+  `Received answer but not in initiator role`.
+- On the `PeerManager` responder side, a connection that never opens is never reported to
+  `onConnection`; its `open()` rejection has no handler attached and surfaces as an unhandled
+  rejection.
 
-| Dependency | Kind | Why |
-| --- | --- | --- |
-| [`@statewalker/webrun-streams`](../webrun-streams) | runtime | `ByteChannel`, and `emulateMux` for the transport built on top. |
-| `livekit-client` | **peer, optional** (`^2.18.3`) | Only for `RoomManager`. Injected via `RoomManagerOptions.roomFactory`; the module itself keeps a structural `RoomLike` view, so the dependency is avoidable. |
+### Dependencies
 
-Native WebRTC is likewise injected (the optional `rtc` factory, defaulting to
-`new RTCPeerConnection`), which is why the test suite needs no vendor install.
-`peerjs` is deliberately **not** a dependency — that transport lives in
-[`@statewalker/webrun-streams-peerjs`](../webrun-streams-peerjs).
-
-ESM only (`"type": "module"`).
+Zero runtime imports: the bundle imports nothing. `@statewalker/webrun-streams` is a dependency
+for the `ByteChannel` type only. `livekit-client` is an optional peer, used only through the
+`RoomLike` shape you inject. A neutrality test (`tests/neutrality.test.ts`) keeps the source from
+importing anything else.
 
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT

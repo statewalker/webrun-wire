@@ -1,57 +1,106 @@
 # @statewalker/webrun-streams
 
-Async-iterator and `ReadableStream` primitives: `collect` / `collectBytes` / `collectString`, text and JSONL codecs, line splitting/joining, a backpressure-aware queue-based generator, a chunk protocol for pushing iterators across transports, conversions between async iterators and WHATWG `ReadableStream<Uint8Array>`, and serialisable `Error` objects.
+## What it is
 
-It also defines the **`Duplex` seam** the whole `webrun-streams-*` transport family implements, and `emulateMux` — a stream multiplexer that turns any message-oriented byte channel into many concurrent `Duplex` calls.
+Async-iterator and `ReadableStream` primitives, plus the transport seam the
+`webrun-streams-*` adapters are written against. It contains collectors
+(`collect`, `collectBytes`, `collectString`), text, line and JSONL codecs, a
+backpressure-aware callback-to-generator bridge, a chunk protocol for moving an
+iterator across any message channel, conversions between async iterators and
+WHATWG `ReadableStream<Uint8Array>`, serialisable errors, the `Duplex` /
+`Connect` / `Serve` types, and `emulateMux`, which multiplexes many concurrent
+`Duplex` calls over one message-oriented byte channel.
 
 ## Why it exists
 
-Every higher-level package in the `webrun-*` family (and its consumers — scanners, indexers, chat pipelines) needs the same small set of building blocks:
+Code that moves bytes between a browser, a worker, a server and a peer needs
+the same small set of building blocks in every place:
 
-1. **Collectors** — turn any async iterable into a concrete array / `Uint8Array` / `string` without boilerplate; zero-copy short-circuit when a single chunk is produced.
-2. A **callback-to-async-iterator** bridge — turn incoming `{done, value, error}` callbacks into a `for await` loop, with backpressure so producers know when consumers have stopped listening.
-3. A **chunk protocol** — a tiny `{done, value?, error?}` envelope that can travel across any transport (MessagePort, WebSocket, IPC, in-memory) and rebuild the original iterator on the other side.
-4. **WHATWG ↔ async-iterator** conversions for body bytes, so code written against `fetch` (`ReadableStream<Uint8Array>`) can interoperate with `for await` code and back.
-5. **Error (de)serialisation** for passing exceptions across structured-clone / JSON boundaries without losing stacks or extra fields.
-6. **Line / JSONL / text codecs** so stream-processing code doesn't re-invent split/join/encode/decode in every consumer.
-
-The MessagePack codec that previously rode along here is split out to [`@statewalker/webrun-msgpack`](../webrun-msgpack) so consumers that don't need framing don't pull in a MessagePack implementation.
-
-## Install
-
-```sh
-npm install @statewalker/webrun-streams
-```
-
-Zero runtime dependencies, zero peer dependencies. ESM only
-(`"type": "module"`); runs in browsers, Node, Deno, Bun and Workers. This is the
-foundation package — everything else in the workspace depends on it.
+1. **Collectors** that turn an async iterable into an array, a `Uint8Array` or a
+   `string` without boilerplate.
+2. A **callback-to-async-iterator bridge** with backpressure, so a producer
+   knows when the consumer has taken a value or stopped listening.
+3. A **chunk protocol**: a `{ done, value?, error? }` envelope that crosses any
+   transport (MessagePort, WebSocket, IPC, in-memory) and rebuilds the iterator
+   on the other side, errors included.
+4. **WHATWG to async-iterator conversions** that carry cancellation, so code
+   written against `fetch` bodies interoperates with `for await` code.
+5. **Error serialisation** that keeps `message`, `stack` and custom fields across
+   JSON and structured-clone boundaries.
+6. **Line, JSONL and text codecs**, so stream code does not re-implement
+   split/join/encode/decode.
+7. **One seam for transports.** Every adapter exposes the same `Duplex` shape,
+   so code above the transport does not change when the transport does.
+   Message-oriented transports have no streams of their own; `emulateMux`
+   supplies them once, with credit-based flow control, instead of each adapter
+   writing its own.
 
 ## How to use
 
 ```sh
-npm install @statewalker/webrun-streams
+pnpm add @statewalker/webrun-streams
 ```
 
-| Export | Purpose |
+No runtime dependencies and no peer dependencies. ESM only. One entry point,
+`.` (the package root), which exports everything listed below. It uses only
+platform globals (`TextEncoder`, `TextDecoder`, `ReadableStream`, `Blob`), so it
+runs in browsers, workers and Node.
+
+| Export | What it does |
 | --- | --- |
-| `collect(it)` | Drain `AsyncIterable<T>` into `T[]`. |
-| `collectBytes(it)` | Concatenate `AsyncIterable<Uint8Array>` into one `Uint8Array` (zero-copy when a single chunk). |
+| `collect(it)` | Drain an `AsyncIterable<T>` into `T[]`. |
+| `collectBytes(it)` | Concatenate `AsyncIterable<Uint8Array>` into one `Uint8Array`. A single chunk is returned as is, without a copy. |
 | `collectString(it)` | Concatenate `AsyncIterable<string>` into one `string`. |
-| `encodeText(it)` / `decodeText(it)` | UTF-8 `AsyncIterable<string>` ↔ `AsyncIterable<Uint8Array>`. |
-| `splitLines(it)` / `joinLines(it)` | Line splitting over `string` streams (handles cross-chunk lines) and reverse. |
-| `encodeJsonl(it)` / `decodeJsonl(it)` | JSON values ↔ `\n`-delimited JSON string stream. |
-| `map(it, fn)` | Stream-map an `AsyncIterable<T>` through `fn: T => U \| Promise<U>`. |
-| `newAsyncGenerator(init, skipValues?)` | Bridge imperative `next/done` callbacks into an `AsyncGenerator<T>`; returns `Promise<boolean>` for backpressure. |
-| `sendIterator(send, iterable)` | Drain an (async) iterable into `send({done, value, error})` chunk calls; completes with one trailing `{done: true}` chunk. |
-| `recieveIterator(installer)` | Inverse of `sendIterator`: wire an installer's chunk callback into a new `AsyncGenerator<T>`. |
-| `toReadableStream(it)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
-| `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as `AsyncGenerator<Uint8Array>`. |
-| `emulateMux(channel, opts?)` | Multiplex many concurrent `Duplex` calls over one `ByteChannel`; returns `{ call, serve, close }`. |
-| `normalizeToUint8Array(value)` | Coerce a `ByteLike` (string, `ArrayBuffer`, typed array, `Blob`) to `Uint8Array`. Synchronous except for a `Blob`, which returns a `Promise`. |
-| `toChunks(size?)` | Curried: returns a transform that re-chunks an `AsyncIterable<Uint8Array>` into pieces of at most `size` bytes. `size` defaults to 16384. |
-| `serializeError(error)` | Turn an `Error` (or anything) into a plain `{message, stack, …}` object preserving subclass fields. |
-| `deserializeError(obj \| string)` | Reconstruct an `Error` from a serialised form, restoring extra fields. |
+| `encodeText(it)` / `decodeText(it)` | UTF-8 `AsyncIterable<string>` to `AsyncGenerator<Uint8Array>` and back. `decodeText` handles multi-byte characters split across chunks. |
+| `splitLines(it)` / `joinLines(it)` | Split string chunks on `\n` (lines may span chunks); append `\n` to each string. |
+| `encodeJsonl(it)` / `decodeJsonl(it)` | Values to `\n`-terminated JSON strings; string chunks to parsed values. `decodeJsonl` splits lines itself and skips blank lines. |
+| `map(it, fn)` | Map an `AsyncIterable<I>` through `fn: (item) => O \| Promise<O>`. |
+| `newAsyncGenerator(init, skipValues?)` | Bridge `next(value)` / `done(error?)` callbacks into an `AsyncGenerator<T>`. Both callbacks return `Promise<boolean>`. |
+| `sendIterator(send, iterable)` | Drain an iterable into `send({ done, value, error })` calls, ending with exactly one `{ done: true }` chunk. |
+| `recieveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. |
+| `toReadableStream(iterator)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
+| `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as an `AsyncGenerator<Uint8Array>`. |
+| `normalizeToUint8Array(value)` | Coerce a `ByteLike` (`Uint8Array`, `ArrayBuffer`, `ArrayBufferView`, `Blob`, `string`) to `Uint8Array`. Synchronous, except a `Blob`, which returns a `Promise<Uint8Array>`. |
+| `toChunks(size?)` | Curried. Returns a transform that splits `Uint8Array` chunks into pieces of at most `size` bytes (default 16384). |
+| `serializeError(error)` / `deserializeError(obj \| string)` | `Error` (or anything) to a plain `SerializedError` and back, keeping own enumerable fields. |
+| `emulateMux(channel, opts?)` | Many concurrent `Duplex` calls over one `ByteChannel`. Returns `{ call, serve, close }`. |
+| `newCreditLedger(initial?)` / `newCreditGrantor(window, threshold?)` | The sender and receiver halves of credit-based flow control, as pure state machines. |
+| `TransportClosedError` | Error class raised when a transport closes with calls in flight. |
+
+Types: `Duplex`, `Connect<P>`, `Serve<P>`, `ByteChannel`, `ByteLike`,
+`EmulateMuxOptions`, `CreditLedger`, `CreditGrantor`, `IteratorChunk<T>`,
+`ChunkSender<T>`, `ChunkReceiver<T>`, `ReceiverInstaller<T>`,
+`SerializedError`.
+
+### The `Duplex` seam
+
+```ts
+type Duplex = (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) => AsyncGenerator<Uint8Array>;
+type Connect<P> = (params: P) => Promise<{ call: Duplex; close: () => Promise<void> }>;
+type Serve<P> = (params: P, handler: Duplex) => Promise<() => Promise<void>>;
+```
+
+One `Duplex` invocation carries one logical call: the caller supplies input
+bytes, the peer yields output bytes. Caller and handler have the same shape, so
+an in-process test can set `const call = handler` and run with no transport.
+`Connect` stands up one transport and returns a `call`; each `call` opens a new
+sub-stream on it. `Serve` registers a handler and resolves to an idempotent
+teardown.
+
+Iterator semantics carry every signal, so there is no separate close or abort
+API:
+
+| Signal | Mechanism |
+| --- | --- |
+| Consumer is done early | `.return()` on the output; the producer's `finally` runs |
+| Producer failed | `throw`; the consumer's `for await` throws |
+| Either side finished normally | Normal exhaustion; matching end on the other side |
+
+**Caller obligation.** Either drain the returned generator or `.return()` it.
+Dropping the reference does neither: the consumer never acknowledges inbound
+data, the peer's outbound pump blocks waiting for credit, no end-of-stream is
+exchanged, and both peers hold the stream open. An unreferenced generator is
+not observable, so no transport can detect this for you.
 
 ## Examples
 
@@ -73,38 +122,40 @@ async function* strings() { yield "a"; yield "bc"; }
 await collectString(strings());        // "abc"
 ```
 
-### Text / JSONL / lines codecs
+### Text, JSONL and line codecs
 
 ```ts
 import {
+  collectString,
   decodeJsonl,
   decodeText,
   encodeJsonl,
   encodeText,
-  joinLines,
   splitLines,
 } from "@statewalker/webrun-streams";
 
 async function* chunks() {
-  yield new Uint8Array([0x7b, 0x22, 0x61]);  // partial
-  yield new Uint8Array([0x22, 0x3a, 0x31, 0x7d, 0x0a]);
+  yield new Uint8Array([0x7b, 0x22, 0x61]);              // '{"a'
+  yield new Uint8Array([0x22, 0x3a, 0x31, 0x7d, 0x0a]);  // '":1}\n'
 }
 
-// `decodeJsonl` splits lines itself — do not wrap it in `splitLines`, or a
-// stream carrying more than one value arrives as one concatenated line and
-// `JSON.parse` throws.
-const values = decodeJsonl<{ a: number }>(decodeText(chunks()));
-for await (const v of values) console.log(v); // { a: 1 }
+// `decodeJsonl` splits lines itself. Do not wrap its input in `splitLines`:
+// the lines lose their "\n", arrive concatenated, and `JSON.parse` throws.
+for await (const v of decodeJsonl<{ a: number }>(decodeText(chunks()))) {
+  console.log(v); // { a: 1 }
+}
 
-// inverse. `encodeJsonl` already terminates each value with "\n", so
-// `joinLines` here would emit a blank line between every record.
-const jsonl = encodeText(encodeJsonl([{ a: 1 }, { a: 2 }]));
+// The inverse. `encodeJsonl` already ends each value with "\n", so adding
+// `joinLines` would emit a blank line after every record.
+async function* records() { yield { a: 1 }; yield { a: 2 }; }
+await collectString(decodeText(encodeText(encodeJsonl(records())))); // '{"a":1}\n{"a":2}\n'
 
-// `splitLines` / `joinLines` are for plain string streams, with no JSON involved:
-for await (const line of splitLines(decodeText(byteStream))) console.log(line);
+// `splitLines` / `joinLines` are for plain string streams.
+async function* text() { yield "one\ntw"; yield "o\n"; }
+for await (const line of splitLines(text())) console.log(line); // "one", "two"
 ```
 
-### Callback → AsyncGenerator bridge
+### Callback to AsyncGenerator bridge
 
 ```ts
 import { newAsyncGenerator } from "@statewalker/webrun-streams";
@@ -119,7 +170,7 @@ function tickEverySecond(): AsyncGenerator<number> {
         clearInterval(id);
       }
     }, 1000);
-    return () => clearInterval(id); // cleanup if consumer breaks early
+    return () => clearInterval(id); // runs if the consumer stops early
   });
 }
 
@@ -129,30 +180,32 @@ for await (const n of tickEverySecond()) console.log(n); // 0 … 4
 ### Iterator chunk protocol
 
 ```ts
-import { collect, recieveIterator, sendIterator } from "@statewalker/webrun-streams";
+import {
+  type ChunkReceiver,
+  type IteratorChunk,
+  collect,
+  recieveIterator,
+  sendIterator,
+} from "@statewalker/webrun-streams";
 
-// Drain an iterable across any transport.
-async function transport<T>(chunk: { done: boolean; value?: T; error?: unknown }) {
-  await myChannel.send(chunk); // …however your channel sends
-}
+// Stand-in for a real channel: whatever is sent is delivered to the receiver.
+let deliver: ChunkReceiver<number> | undefined;
+const transport = async (chunk: IteratorChunk<number>) => {
+  await deliver?.(chunk);
+};
 
-// On the other side, rebuild the original iterator.
-const iter = recieveIterator<number>((deliver) => {
-  myChannel.onMessage = (chunk) => deliver(chunk);
+const iter = recieveIterator<number>((d) => {
+  deliver = d;
 });
 
-// Start consuming *before* (or concurrently with) draining the source.
-// `deliver` resolves only once the consumer has dequeued the chunk — that is
-// the backpressure — so awaiting `sendIterator` with nobody iterating `iter`
-// deadlocks both sides.
-const [, received] = await Promise.all([
-  sendIterator(transport, [1, 2, 3]),
-  collect(iter),
-]);
+// Consume while sending. `deliver` resolves only once the consumer has taken
+// the chunk (that is the backpressure), so awaiting `sendIterator` with nobody
+// iterating `iter` deadlocks.
+const [, received] = await Promise.all([sendIterator(transport, [1, 2, 3]), collect(iter)]);
 console.log(received); // [1, 2, 3]
 ```
 
-### WHATWG streams ↔ async iterators
+### WHATWG streams and async iterators
 
 ```ts
 import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
@@ -163,20 +216,28 @@ async function* encoded() {
   yield e.encode("world");
 }
 
-// Give an iterable a ReadableStream face for fetch / Response.
 const response = new Response(toReadableStream(encoded()));
-
-// …and the other way around.
-const reqBody = new Request("/x", { method: "POST", body: response.body }).body!;
-for await (const chunk of fromReadableStream(reqBody)) {
+for await (const chunk of fromReadableStream(response.body!)) {
   // chunk: Uint8Array
 }
 ```
 
-### Error roundtrip
+### Byte normalisation and re-chunking
 
 ```ts
-import { serializeError, deserializeError } from "@statewalker/webrun-streams";
+import { collect, normalizeToUint8Array, toChunks } from "@statewalker/webrun-streams";
+
+normalizeToUint8Array("ab");                      // Uint8Array [97, 98]
+await normalizeToUint8Array(new Blob(["ab"]));    // Blob input returns a Promise
+
+async function* big() { yield new Uint8Array(20_000); }
+(await collect(toChunks()(big()))).map((c) => c.byteLength); // [16384, 3616]
+```
+
+### Error round trip
+
+```ts
+import { deserializeError, serializeError } from "@statewalker/webrun-streams";
 
 class NotFoundError extends Error {
   status = 404;
@@ -186,242 +247,223 @@ const wire = serializeError(new NotFoundError("missing"));
 //    { message: "missing", stack: "…", status: 404 }
 
 const restored = deserializeError(wire) as Error & { status?: number };
-console.log(restored instanceof Error); // true
-console.log(restored.status);           // 404
+restored instanceof Error; // true (a plain Error, not NotFoundError)
+restored.status;           // 404
 ```
 
-## The `Duplex` seam
-
-Everything in the `webrun-streams-*` family speaks one shape:
+### `emulateMux`
 
 ```ts
-type Duplex = (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) => AsyncGenerator<Uint8Array>;
-```
+import { type ByteChannel, collectBytes, emulateMux } from "@statewalker/webrun-streams";
 
-One `Duplex` invocation carries **one logical call**: the caller emits bytes,
-the peer yields bytes back. Because both sides have the same shape, an
-in-process test can wire `const caller = handler` and run with no transport at
-all.
+declare const clientChannel: ByteChannel; // e.g. one end of a WebSocket
+declare const serverChannel: ByteChannel; // the other end
 
-Iterator semantics carry every signal, which is why no separate close/abort API
-exists:
+const client = emulateMux(clientChannel, { side: "initiator" });
+const server = emulateMux(serverChannel, { side: "responder" });
 
-| Signal | Mechanism |
-| --- | --- |
-| Consumer is done early | `.return()` on the output → producer's `finally` runs |
-| Producer failed | `throw` → consumer's `for await` throws |
-| Either side finished normally | Normal exhaustion → matching end on the other side |
-
-`Connect<P>` and `Serve<P>` are the adapter-side factories that stand up a
-transport and produce or register a `Duplex`.
-
-> **Caller obligation.** Either drain the returned generator or `.return()` it.
-> Dropping the reference without doing either emits no observable signal: the
-> abandoned consumer never acknowledges inbound data, so the peer's outbound
-> pump blocks awaiting that acknowledgement, no end-of-stream is exchanged, and
-> both peers hold the stream open. An unreferenced generator is not observable,
-> so no transport can detect this for you.
-
-## `emulateMux`
-
-Turns one `ByteChannel` — anything with `send` / `recv` / `closed` / `close` —
-into many concurrent `Duplex` calls. Used by the MessagePort, WebSocket,
-LiveKit, PeerJS and signaling adapters; transports with native multiplexing
-(libp2p) don't need it.
-
-```ts
-import { emulateMux } from "@statewalker/webrun-streams";
-
-const { call, serve, close } = emulateMux(channel, { side: "initiator" });
-
-// caller side
-const response = call([new TextEncoder().encode("ping")]);
-for await (const chunk of response) { /* … */ }
-
-// responder side
-const stop = serve(async function* handler(input) {
-  for await (const chunk of input) yield chunk; // echo
+const stop = server.serve(async function* echo(input) {
+  for await (const chunk of input) yield chunk;
 });
+
+const response = client.call([new TextEncoder().encode("ping")]);
+new TextDecoder().decode(await collectBytes(response)); // "ping"
+
+await stop();
+await client.close();
+await server.close();
 ```
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `side` | `"initiator"` | Id allocation: initiator uses even ids, responder odd. Pick one per peer so they cannot collide. |
-| `maxStreams` | `256` | Concurrent streams before new calls are refused. |
-| `mtu` | `65536` | Largest payload per DATA frame; bigger chunks are split. |
-| `maxStreamBuffer` | `8388608` | The credit this side advertises to the peer, in bytes, and the hard cap on inbound bytes one stream may hold undrained. A peer that honours credit never reaches the cap; one that ignores it has that stream torn down. |
-
-### Flow control
-
-Receiver-advertised credit. Each side puts its `maxStreamBuffer` in the frame it
-opens with — `OPEN` for the caller, the `ACK` answering it for the responder —
-and the sender may only send what it has been granted. Both sides start at zero,
-so a caller pays one round trip per stream before its first DATA frame and none
-thereafter. The receiver grants more once its consumer has actually drained,
-batched at half the window and flushed as soon as its queue empties. A sender
-therefore cannot overrun the receiver's buffer, and `maxStreamBuffer` bounds only
-peers that ignore the protocol.
-
-Backpressure is **per-stream**, so a stalled stream does not block the others,
-and it applies symmetrically in both directions.
-
-There is deliberately **no stall timeout**: a peer that never acknowledges
-blocks that producer indefinitely, exactly as a TCP receiver that never reads
-blocks its sender. `maxStreams` and `maxStreamBuffer` bound what that can cost.
-The bound is per stream and there is no mux-wide budget, so the worst case is
-`maxStreams × maxStreamBuffer` — 2 GiB at the defaults, against 16 MiB under the
-one-frame-in-flight rule this replaced. Lower `maxStreamBuffer` if that matters
-more than throughput.
-
-### Behaviour on hostile input
-
-A `ByteChannel` is message-oriented, so frames are discrete and a corrupt one
-cannot desync the next. A frame that cannot be parsed is therefore **dropped**
-rather than failing the connection — otherwise one malformed frame would tear
-down every stream sharing the mux. A stream that exceeds `maxStreamBuffer` is
-torn down on its own, with an error frame sent to the peer.
-
-## Exports
-
-Everything is exported from the package root.
-
-### Seam types
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `Duplex` | type | `(input) => AsyncGenerator<Uint8Array>` — one logical call. |
-| `Connect<P>` | type | `(params) => Promise<{ call: Duplex; close() }>`. |
-| `Serve<P>` | type | `(params, handler) => Promise<() => Promise<void>>`. |
-| `ByteChannel` | type | `{ send, recv, closed, close }` — the minimum a transport must expose. |
-| `ByteLike` | type | Accepted byte inputs before normalisation. |
-| `emulateMux(channel, opts?)` | function | Multi-stream over a single `ByteChannel`. |
-| `EmulateMuxOptions` | type | `maxStreams` (256), `mtu` (64 KiB), `maxStreamBuffer` (8 MiB), `side`. |
-| `TransportClosedError` | class | Thrown when the transport closes with calls in flight. Catch via `instanceof` or `error.name`. |
-
-The port multiplexing layer — `multiplexPort`, `PortMux`, `structuredCodec`,
-`PortEnvelope` and the `MessageTarget` family of types — lives in
-[`@statewalker/webrun-rpc`](../webrun-rpc#port-multiplexing), not here.
-
-### Credit
-
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `newCreditLedger(initial?)` | function | Sender-side credit: `reserve(upTo)` waits for any credit and returns how much it got (`upTo` must be >= 1; less rejects with a `RangeError`), `grant(units)` releases waiters in order, `fail(err)` unwinds them. Starts at zero unless told otherwise. |
-| `CreditLedger` | type | `{ available, reserve, grant, fail }`. |
-| `newCreditGrantor(window, threshold?)` | function | Receiver-side: `consumed(units, queueEmpty)` returns the credit to hand back, batched at `threshold` (default half the window) and flushed once the queue empties. |
-| `CreditGrantor` | type | `{ consumed(units, queueEmpty): number }`. |
-
-The unit is whatever the caller counts. `emulateMux` counts bytes; a value-
-oriented caller would count values. Nothing in this module interprets it.
-
-### Collectors and codecs
-
-| Export | Purpose |
-| --- | --- |
-| `collect` / `collectBytes` / `collectString` | Drain an async iterable to an array / `Uint8Array` / `string`. |
-| `encodeText` / `decodeText` | UTF-8 `string` ↔ `Uint8Array` streams. |
-| `splitLines` / `joinLines` | Cross-chunk-safe line splitting and rejoining. |
-| `encodeJsonl` / `decodeJsonl` | JSON values ↔ `\n`-delimited string stream. |
-| `map` | Stream-map over an `AsyncIterable<T>`. |
-| `toChunks` / `normalizeToUint8Array` | Coerce assorted byte-ish inputs into `Uint8Array` chunks. |
-
-### Iterator plumbing
-
-| Export | Purpose |
-| --- | --- |
-| `newAsyncGenerator` | Backpressure-aware queue turning `next`/`done` callbacks into an async generator. |
-| `sendIterator` / `recieveIterator` | Ship an async iterator across any transport. |
-| `IteratorChunk` | type — the `{ done, value, error }` chunk envelope they exchange. |
-| `ChunkSender` / `ChunkReceiver` / `ReceiverInstaller` | types — the transport-side callbacks those two are wired to. |
-| `toReadableStream` / `fromReadableStream` | `AsyncIterator<Uint8Array>` ↔ WHATWG `ReadableStream<Uint8Array>`. |
-
-### Errors
-
-| Export | Purpose |
-| --- | --- |
-| `serializeError` / `deserializeError` | Preserve `message`, `stack` and custom fields across JSON / structured-clone boundaries. |
-| `SerializedError` | type — the wire shape those two produce and consume. |
+| `side` | `"initiator"` | Stream-id allocation: initiator uses even ids (2, 4, …), responder odd ids (1, 3, …). Give the two peers different sides so ids cannot collide. |
+| `maxStreams` | `256` | Concurrent streams. Further calls, and further OPENs from the peer, are refused. |
+| `mtu` | `65536` | Largest payload per DATA frame. Larger chunks are split. |
+| `maxStreamBuffer` | `8388608` (8 MiB) | The credit this side advertises per stream, in bytes, and the hard cap on inbound bytes one stream may hold undrained. Must be at least 1. |
 
 ## Internals
 
-### `newAsyncGenerator` — backpressure queue
+### `emulateMux` frames
 
-A singly-linked queue of slots; each slot carries either a value or a
-terminal `{done: true, error?}`. Producers call `next(value)` or
-`done(error?)`, both returning `Promise<boolean>` that resolves once the
-consumer has dequeued the slot — so producers can apply backpressure by
-`await`ing.
+A `ByteChannel` is `{ send(bytes), recv: AsyncIterable<Uint8Array>, closed: Promise<void>, close() }`
+and is message-oriented: each `send` arrives as one `recv` item. `emulateMux`
+puts one frame in each message:
 
-If the consumer breaks out of the `for await` early, the finally block
-drains remaining slots and resolves each pending `next/done` promise
-with `false`, letting the producer observe that its value wasn't
-consumed and stop. Cleanup function (if the `init` returned one) runs
-on the same exit path.
+```
++----------------+--------+------------------+
+| stream id      | type   | payload          |
+| varint, LEB128 | 1 byte | rest of message  |
++----------------+--------+------------------+
 
-`skipValues: true` switches the queue into latest-only mode: pushing a
-new value drops any unconsumed older ones. Useful for "show the most
-recent state" scenarios (live previews, resizing, etc.) where missing
-values is fine but lagging isn't.
+OPEN  0x01  payload: uint32 BE credit the opener grants
+DATA  0x02  payload: bytes (at most mtu, at most the credit held)
+ACK   0x03  payload: uint32 BE credit granted (answer to OPEN, or more later)
+END   0x04  sender finished this direction
+ERROR 0x05  payload: JSON of serializeError(err); tears the stream down
+CLOSE 0x06  receiver no longer wants this stream; tears it down
+```
+
+```
+caller                                     responder
+  | OPEN id=2, credit=8 MiB  ------------>  |  handler(input) starts
+  |  <----------------  ACK id=2, credit=8 MiB
+  | DATA id=2 ... (spends credit) ------->  |
+  |  <------------------- ACK id=2, credit=n   (after the consumer drained)
+  | END id=2  --------------------------->  |
+  |  <----------------------------- DATA / END
+```
+
+### Why credit flows from the receiver
+
+The sender cannot know how much the receiver can buffer unless the receiver
+says so. Each side therefore advertises its `maxStreamBuffer` in the frame it
+opens with (OPEN for the caller, the ACK that answers it for the responder),
+and a sender may only put on the wire what it has been granted. Both ledgers
+start at zero, so a caller pays one round trip per stream before its first DATA
+frame and none after that. A uint32 cannot carry more than `2^32 - 1`, so a
+larger window is advertised as `2^32 - 1` rather than wrapping (a wrapped
+`2^32` would advertise zero credit and hang the peer).
+
+The receiver grants more only for bytes its consumer actually took. Grants are
+batched until half the window has drained (`newCreditGrantor`'s default
+`threshold` of `0.5`) and flushed as soon as the receive queue is empty, so the
+receiver never sits on credit it owes. `reserve(upTo)` on the sender side
+resolves with whatever is available, at least 1 and at most `upTo`, and waiters
+are released strictly in order; a peer whose window is smaller than one `mtu`
+still makes progress, one short piece at a time.
+
+Backpressure is per stream: a stalled stream does not block the others, and it
+applies in both directions. Inbound frames are pushed to the stream's queue
+without waiting for the consumer, because the inbound loop must keep processing
+ACKs for this side's own senders; blocking it on a slow consumer would deadlock
+the two directions against each other.
+
+The unit is opaque to `newCreditLedger` and `newCreditGrantor`. `emulateMux`
+counts bytes; a value-oriented caller can count values.
+
+### Why there is no stall timeout
+
+A peer that never drains blocks that stream's producer indefinitely, as a TCP
+receiver that never reads blocks its sender. `maxStreams` and `maxStreamBuffer`
+bound the cost. The bound is per stream and there is no mux-wide budget, so the
+worst case is `maxStreams × maxStreamBuffer`: 2 GiB at the defaults. Lower
+`maxStreamBuffer` if memory matters more than throughput.
+
+### What a hostile or broken peer can and cannot do
+
+- A frame that cannot be parsed (truncated or over-long varint id, no type
+  byte) is **dropped**. Frames are discrete messages, so a corrupt one cannot
+  desync the next, and failing the connection would let one bad frame tear down
+  every stream sharing it.
+- A peer that ignores credit and floods DATA has that one stream torn down when
+  it holds more than `maxStreamBuffer` undrained bytes. The peer receives an
+  ERROR frame: `emulateMux: stream <id> buffered <n> bytes past maxStreamBuffer=<max> without being drained`.
+- An OPEN for a stream id that is already live is ignored. An OPEN past the
+  limit is answered with ERROR `emulateMux: maxStreams=<n> exceeded`; an OPEN
+  with no handler registered, with ERROR `emulateMux: no handler registered`.
+- An ACK without a 4-byte credit payload is ignored rather than granting an
+  arbitrary amount.
+
+### How streams end
+
+A stream holds a slot until both directions finish (END sent and END
+received), so a normally completed call releases its slot. Cancellation
+releases it at once:
+
+- The caller calling `.return()` on the response sends CLOSE and returns the
+  caller's input iterator, so the input's `finally` runs. The return is not
+  awaited: `.return()` on a generator parked in its own `next()` is queued
+  behind that `next()`, and awaiting it would hang teardown.
+- When a handler's output finishes before it has read all of its input, the
+  mux sends CLOSE for the request body. A handler must therefore consume
+  `input` within its generator's lifetime; reading it from a detached task
+  looks the same as not reading it.
+- When the channel's `recv` ends or `closed` resolves, every live stream fails
+  with `TransportClosedError` (message `transport closed`). `call` after
+  `close()` returns a generator that throws the same error. `call` past
+  `maxStreams` returns a generator that throws
+  `RangeError: emulateMux: maxStreams=<n> exceeded`.
+- `emulateMux` throws `RangeError: emulateMux: maxStreamBuffer must be at least 1, got <n>`
+  at construction, because a zero window authorises nothing and would stall the
+  first call forever.
+
+### `newAsyncGenerator` is a backpressure queue
+
+A singly linked queue of slots, each holding a value or a terminal
+`{ done: true, error? }`. `next(value)` and `done(error?)` return a
+`Promise<boolean>` that resolves `true` once the consumer has dequeued the slot,
+so a producer applies backpressure by awaiting. When the consumer exits early,
+the cleanup function returned by `init` runs and every pending slot resolves
+`false`, telling the producer its value was not consumed.
+
+`skipValues: true` keeps only the newest value: pushing a value drops any
+unconsumed older ones, whose promises resolve `false`. Use it where only the
+latest state matters (live previews, resize events). A producer cannot tell
+"skipped" from "consumer left"; both mean "not consumed".
 
 ### Chunk protocol
 
-One object per message:
-
 ```
-{ done: false, value: T }   — a value
-{ done: true,  error?: E }  — termination (error if present rethrows)
+{ done: false, value: T }   a value
+{ done: true,  error?: E }  termination; an error is rethrown by the receiver
 ```
 
-`sendIterator` guarantees exactly one `done` chunk and never throws
-itself — errors from the source iterator end up in the trailing chunk's
-`error` field. `recieveIterator` rethrows them into the `for await`
-loop on the other side.
+`sendIterator` always sends exactly one `done` chunk. An error thrown by the
+source iterable is caught and travels in that chunk's `error` field;
+`recieveIterator` rethrows it into the consumer's `for await`. An error thrown
+by `send` itself propagates out of `sendIterator`. `recieveIterator` treats a
+falsy `error` as no error, so a source that throws `0`, `""` or `null` ends the
+stream normally on the receiving side.
 
-### `readable-streams`
+The exported name `recieveIterator` is spelled that way, and dependents import
+it under that name.
 
-`toReadableStream` uses the default (non-byte) ReadableStream type to
-sidestep the strict `ArrayBuffer`-not-`SharedArrayBuffer` typing the
-byte-controller requires in recent TS libs. Both functions are
-strict one-way converters: no queuing strategy tricks, no transform.
+### Why the `ReadableStream` adapters carry cancellation
 
-### Design notes
+A response body can leave a handler as a `ReadableStream`, cross a transport
+as an iterator, and become a `ReadableStream` again at the caller. When the
+caller walks away, the only way back to the producer runs through these two
+functions. So:
 
-- **Zero runtime dependencies.** Only platform builtins
-  (`Promise`, `ReadableStream`, `TextEncoder`/`Decoder` if needed,
-  `setTimeout` via `newAsyncGenerator` consumers).
-- **British/American spelling kept.** `recieveIterator` uses the
-  historical misspelling to stay wire-compatible with `webrun-ports`
-  consumers.
-- **No tight coupling to any transport.** `ByteChannel` is the only
-  transport-facing type, and it is an interface — nothing here mentions
-  `MessagePort`, `WebSocket`, `fetch`, `Worker`, etc. Those belong to the
-  `webrun-streams-*` adapters, each of which supplies a `ByteChannel` and lets
-  `emulateMux` do the rest.
+- `toReadableStream` pulls one chunk per `pull`, which keeps the stream's own
+  backpressure and leaves a point between chunks where cancellation can act.
+  `cancel(reason)` calls the iterator's `return(reason)` without awaiting it,
+  for the queued-behind-`next()` reason above. It uses a default (non-byte)
+  stream.
+- `fromReadableStream` cancels the source when the consumer stops early
+  (`break`, `.return()`, an error) and only releases the lock when the stream
+  ended on its own.
 
-### Constraints
+Both assume `Uint8Array` chunks.
 
-- `toReadableStream` / `fromReadableStream` assume `Uint8Array` chunks —
-  the usual shape for HTTP bodies. Generic byte-agnostic use isn't
-  supported.
-- `newAsyncGenerator`'s backpressure Promise resolves with `false` both
-  on early break and on skip; consumers can't distinguish the two.
-  That's intentional — both mean "wasn't consumed".
+### Other edge cases
+
+- `serializeError` copies own enumerable properties; `deserializeError` returns
+  a plain `Error` with those fields assigned, not an instance of the original
+  subclass. `name` is restored only if it was an own property.
+- `toChunks(size)` throws `RangeError: toChunks: size must be a positive integer, got <size>`.
+  Empty input chunks are skipped; oversized ones are split with zero-copy
+  `subarray` views.
+- `normalizeToUint8Array` throws `TypeError: normalizeToUint8Array: unsupported input <type>; expected Uint8Array, ArrayBuffer, ArrayBufferView, Blob, or string`.
+- `newCreditLedger().reserve(upTo)` rejects with
+  `RangeError: newCreditLedger: reserve(<upTo>) — upTo must be at least 1`;
+  after `fail(err)`, every pending and future `reserve` rejects with `err`.
+
+### Who uses `emulateMux`
+
+The message-oriented adapters supply a `ByteChannel` and let `emulateMux` do
+the rest: `@statewalker/webrun-streams-ws`, `@statewalker/webrun-streams-peerjs`,
+`@statewalker/webrun-streams-livekit`, `@statewalker/webrun-streams-signaling`
+and `@statewalker/webrun-http-streams`. Transports with native multiplexing
+(`@statewalker/webrun-streams-webrtc`, `@statewalker/webrun-streams-libp2p`) do
+not use it. Nothing in this package names a concrete transport; `ByteChannel`
+is the only transport-facing type.
 
 ### Dependencies
 
-**Zero runtime dependencies.**
-
-Dev: TypeScript, vitest, rolldown, rimraf, `@types/node`
-(catalog versions from the monorepo root).
-
-## Scripts
-
-```sh
-pnpm test        # vitest run
-pnpm run build   # rolldown + tsc --emitDeclarationOnly (ships src + dist)
-pnpm lint        # biome check
-```
+Zero runtime dependencies and zero peer dependencies. Only platform globals are
+used.
 
 ## License
 
-MIT © statewalker — see [LICENSE](../../LICENSE).
+MIT

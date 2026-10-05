@@ -1,413 +1,181 @@
 # webrun-wire
 
-**Move `Request`, `Response`, and async iterators over any byte channel —
-MessagePort, WebSocket, WebRTC, libp2p, LiveKit, ServiceWorker, in-process pipe,
-real HTTP — with the same handler code on both ends.**
+This repository holds packages that move bytes, `Request`/`Response` pairs, RPC calls and async
+iterators over any channel that can carry bytes: a MessagePort, a WebSocket, a WebRTC data channel,
+a libp2p stream, a LiveKit room, a PeerJS connection, a ServiceWorker, an in-process pipe or real
+HTTP. The same handler code runs on both ends whatever the channel. All packages are published to
+npm under `@statewalker/`.
 
-`webrun-wire` is a pnpm workspace that builds up, layer by layer, the ability to
-write ordinary `(Request) ⇒ Response` handlers and RPC service objects and run
-them anywhere bytes can flow. The "server" can live in the same tab, in a
-sibling tab, inside a relay iframe, behind a MessagePort, over a WebSocket, on
-the far side of a peer-to-peer link, or on a real HTTP endpoint — callers use
-standard `fetch()` and don't know the difference.
+## The shape: one seam, adapters below it, protocols above it
 
-## Why it exists
-
-The web platform gives browsers everything they need to *be* an HTTP server:
-`Request`, `Response`, `ReadableStream`, `ServiceWorker`. What's missing from the
-raw APIs is:
-
-1. **A portable wire format** so you can move HTTP semantics over any byte
-   channel (MessagePort, WebSocket, WebRTC, IPC, in-memory).
-2. **ServiceWorker plumbing** — URL routing, MessageChannel wiring, recovery
-   after SW restarts — and a way to use a SW from a page that isn't on the SW's
-   origin.
-3. **Stream primitives** (backpressure-aware iterators, WHATWG
-   `ReadableStream` ↔ async iterator) shared across all the above without
-   duplication.
-4. **A service-RPC layer** that takes a plain object and exposes its methods as
-   HTTP endpoints — the same code running over real HTTP, an in-browser SW, a
-   MessagePort, or a WebSocket.
-
-This workspace solves all four as small, composable packages, each publishable
-on its own.
-
-## Typical use cases
-
-- **In-browser full-stack prototypes** — back-end and client live in the same
-  page, no external services to start.
-- **Notebook / Observable / unpkg demos** — ship a working app where the reader
-  doesn't have to install anything.
-- **Local-disk or OPFS servers** — expose File System Access API content as a
-  plain HTTP site you can `<iframe>` or `fetch()`.
-- **Offline-first apps** — your back-end is literally a JS function; it works
-  without network.
-- **Browser-to-browser apps** — two tabs on two machines exchange HTTP and SSE
-  over WebRTC, libp2p or a LiveKit room, with no server in the data path.
-- **WebSocket-backed services** — write ordinary HTTP handlers, run them over a
-  persistent socket.
-- **Portable handlers** — the same async `(Request) ⇒ Response` function runs
-  here today and in Deno / Cloudflare Workers / Node tomorrow.
-
-## Install
-
-Every package is published independently under the `@statewalker/` scope. Take
-only the layers you need:
-
-```sh
-# stream primitives — the foundation everything else builds on
-npm install @statewalker/webrun-streams
-
-# HTTP over any Duplex, plus a transport to carry it
-npm install @statewalker/webrun-http-streams @statewalker/webrun-streams-ws
-
-# compose a site, host it in a browser ServiceWorker
-npm install @statewalker/webrun-site-builder @statewalker/webrun-site-host @statewalker/webrun-files
-```
-
-All packages are ESM-only (`"type": "module"`). See
-[Packaging](#packaging) for what the published artifacts actually contain.
-
-## The seam
-
-One type ties the whole workspace together, defined in
-[`webrun-streams`](./packages/webrun-streams#the-duplex-seam):
+Everything meets at one type, defined in `@statewalker/webrun-streams`:
 
 ```ts
 type Duplex = (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) => AsyncGenerator<Uint8Array>;
 ```
 
-Bytes in, bytes out. A handler is a `Duplex`; a transport adapter produces one.
-Because both sides have the same shape, an in-process test can wire
-`const caller = handler` and run with no transport at all — and the same handler
-then moves to a WebSocket, a WebRTC data channel or a libp2p stream by changing
-one import. Iterator semantics carry every signal: consumer `.return()` runs the
-producer's `finally`, a producer `throw` surfaces in the consumer's `for await`,
-and normal exhaustion ends the other side.
-
-Transports that are message-oriented (WebSocket, MessagePort, LiveKit, PeerJS)
-supply a `ByteChannel` and let `emulateMux` provide many concurrent streams over
-the one pipe. Transports that multiplex natively (WebRTC data channels, libp2p)
-skip `emulateMux` entirely.
-
-## Dependency graph
+Bytes in, bytes out. A handler is a `Duplex`, and a transport adapter produces one, so an in-process
+test can use the handler itself as the caller, and the same handler then moves to a WebSocket or a
+WebRTC channel by changing the adapter. Iterator semantics carry every signal: a consumer's
+`.return()` runs the producer's `finally`, a producer's `throw` surfaces in the consumer's
+`for await`, and exhaustion ends the other side.
 
 ```
-webrun-streams        (foundation — the Duplex seam, emulateMux, iterator/stream/error/text/jsonl primitives)
-webrun-msgpack        (foundation — MessagePack: serialize/deserialize, stream and port codecs)
-    ▲
-    ├── transport adapters — each supplies a Duplex over a concrete transport
-    │     webrun-rpc                 (ports + RPC: MessagePort, workers, iframes)
-    │     webrun-streams-ws          (WebSocket)
-    │     webrun-streams-livekit     (LiveKit data channel)
-    │     webrun-streams-peerjs      (PeerJS DataConnection)
-    │     webrun-streams-webrtc      (RTCDataChannel — native multi-stream, no mux)
-    │     webrun-streams-libp2p      (libp2p streams — native multi-stream, no mux)
-    │     webrun-streams-signaling   (P2P connection setup: PeerManager, QrSignaling, RoomManager)
-    │     webrun-streams-conformance (the suite every adapter must pass)
-    │
-    ├── webrun-http-streams       (HTTP/1.1 request/response over a Duplex)
-    │       ▲
-    │       ├── webrun-http-browser   (ServiceWorker hosting, relay mode)
-    │       └── webrun-rpc-http       (service-RPC on top of standard Request/Response)
-    │
-    └── webrun-site-builder       (files + endpoints + auth → (Request)⇒Response)
-            ▲
-            └── webrun-site-host  (SiteBuilder + SwHttpAdapter wired up in one call)
-                (peer: @statewalker/webrun-files for the FilesApi interface)
+           protocols:  webrun-http-streams   webrun-rpc   webrun-msgpack   webrun-http-browser
+                                  \              |              /                /
+                                   v             v             v                v
+  seam:                         webrun-streams  (Duplex, Connect, Serve, ByteChannel, emulateMux)
+                                   ^             ^             ^                ^
+                                  /              |              \                \
+           adapters:  webrun-streams-ws  -webrtc  -libp2p  -livekit  -peerjs   (+ -signaling to set up P2P)
+
+  standalone:  webrun-rpc-http (needs only webrun-streams)   webrun-http-events, webrun-http-proxy (no deps)
+  testing:     webrun-streams-conformance (the suite every adapter passes)
 ```
 
-Every arrow is a `workspace:*` dep. Runtime dependencies outside the workspace
-are rare and listed per package below.
+Message-oriented transports (WebSocket, MessagePort, LiveKit, PeerJS) supply a `ByteChannel`, and
+`emulateMux` runs many concurrent streams over it. Transports that multiplex natively (WebRTC data
+channels, libp2p) skip `emulateMux`.
 
-## Packages
+### Packages
 
-### Foundations
-
-| Package | Version | Summary |
+| Package | What it gives | Depends on |
 | --- | --- | --- |
-| [`@statewalker/webrun-streams`](./packages/webrun-streams) | 0.2.0 | The `Duplex` / `ByteChannel` / `Connect` / `Serve` seam, `emulateMux`, and async-iterator primitives. **Zero dependencies.** |
-| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | 0.3.0 | MessagePack with no runtime dependencies: `serialize` / `deserialize`, a length-prefixed **stream** codec for iterables, and `msgpackCodec`, a `PortCodec` carrying `webrun-rpc` port envelopes over a byte transport. |
+| [`@statewalker/webrun-streams`](./packages/webrun-streams) | The `Duplex` seam, `emulateMux`, async-iterator, stream, text/JSONL and error primitives | nothing |
+| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | Port multiplexing and typed request/response and streaming RPC over any `MessageTarget` | webrun-streams |
+| [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | MessagePack, length-prefixed stream codecs, a byte codec for `webrun-rpc` ports | webrun-rpc |
+| [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams) | HTTP/1.1 request/response over a `Duplex` | webrun-streams |
+| [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser) | A ServiceWorker-based HTTP server for browsers, same-origin and relay modes | webrun-http-streams, webrun-rpc, webrun-streams, `idb-keyval` |
+| [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http) | Object methods as a `(Request) => Response` handler, called with `fetch` | webrun-streams |
+| [`@statewalker/webrun-http-events`](./packages/webrun-http-events) | Publish/subscribe over Server-Sent Events: a fetch handler and a client | nothing |
+| [`@statewalker/webrun-http-proxy`](./packages/webrun-http-proxy) | Re-issue a request to an outside origin safely | nothing |
+| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | WebSocket adapter | webrun-streams |
+| [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | WebRTC data channel adapter, one channel per call | webrun-streams |
+| [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | libp2p stream adapter | webrun-streams; peers `@libp2p/interface`, `@multiformats/multiaddr`, optional `libp2p` |
+| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | LiveKit data channel adapter | webrun-streams; peer `livekit-client` |
+| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | PeerJS `DataConnection` adapter | webrun-streams; peer `peerjs` |
+| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | P2P connection setup (`PeerManager`, `QrSignaling`, `RoomManager`) yielding `ByteChannel`s | webrun-streams; optional peer `livekit-client` |
+| [`@statewalker/webrun-streams-conformance`](./packages/webrun-streams-conformance) | The Vitest suite every adapter must pass | webrun-streams, `vitest` |
 
-#### [`@statewalker/webrun-streams`](./packages/webrun-streams)
+Every package is public on npm (`https://www.npmjs.com/package/@statewalker/<name>`), ESM-only,
+and ships built JavaScript with type declarations in `dist/` plus its TypeScript sources in `src/`.
+`tools/consumer-install` is a private test harness (see its README).
 
-The foundation every other package depends on, and the only one with no
-dependencies at all. It defines the seam described above and the primitives
-that make it usable:
+## How to run it
 
-- **Seam** — `Duplex`, `Connect`, `Serve`, `ByteChannel`, `TransportClosedError`,
-  and `emulateMux` (multi-stream over a single channel, with receiver-advertised
-  credit flow control, a 64 KiB default MTU and an 8 MiB per-stream credit
-  window).
-- **Collectors** — `collect` / `collectBytes` / `collectString`.
-- **Codecs** — `encodeText` / `decodeText`, `splitLines` / `joinLines`,
-  `encodeJsonl` / `decodeJsonl`, `map`, `toChunks`.
-- **Iterator plumbing** — `newAsyncGenerator` (backpressure-aware queue),
-  `sendIterator` / `recieveIterator` (ship an iterator across any transport),
-  `toReadableStream` / `fromReadableStream`.
-- **Errors** — `serializeError` / `deserializeError`, preserving stack and
-  custom fields across JSON and structured-clone boundaries.
+1. Use Node.js 24 and enable corepack, which provides the pinned pnpm (`packageManager:
+   pnpm@10.16.1`):
 
-#### [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack)
+   ```sh
+   corepack enable
+   ```
 
-Streams-safe MessagePack framing: `encodeMsgpack` / `decodeMsgpack` move
-arbitrary values as `[4-byte BE length][msgpack payload]` frames, with a decoder
-that buffers across chunk boundaries and never yields a partial trailing frame.
-`encodeFloat32Arrays` / `decodeFloat32Arrays` specialise it for embedding
-pipelines, and `msgpackCodec` carries `webrun-rpc` port envelopes over a byte
-transport. Underneath is `serialize` / `deserialize`, exported too: a TypeScript
-port of Yves Goergen's [msgpack.js](https://github.com/ygoe/msgpack.js) (MIT),
-with fixes for truncated input, timestamps, UTF-8 and `__proto__` keys found by
-running the conformance cases of
-[msgpack-test-suite](https://github.com/kawanet/msgpack-test-suite),
-[msgpack-javascript](https://github.com/msgpack/msgpack-javascript) and
-[msgpackr](https://github.com/kriszyp/msgpackr) against it — credits and the
-full list of changes are in the package README. No runtime dependencies.
+2. Install and test:
 
-### HTTP
+   ```sh
+   pnpm install
+   pnpm test        # every package's tests, plus tools/consumer-install
+   ```
 
-| Package | Version | Summary |
-| --- | --- | --- |
-| [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams) | 0.2.2 | HTTP/1.1 request/response over a `Duplex`, in three layers. |
-| [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser) | 0.5.0 | ServiceWorker-based HTTP server for browsers, same-origin and relay modes. |
-| [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http) | 0.1.2 | Expose object methods as HTTP endpoints; call them with `fetch`. |
+3. Build when you need `dist/` (publishing, the browser demos, the consumer-install harness):
 
-#### [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams)
+   ```sh
+   pnpm build
+   ```
 
-Moves real HTTP semantics across any `Duplex`, in three layers you can enter at
-any level — `httpFetch` / `httpServe` on envelopes, `fetchOverDuplex` /
-`serveFetchOverDuplex` on standard `Request` / `Response`, and
-`DuplexSiteBuilder` for hosting a whole site over a `Connect`/`Serve` pair.
+4. Before pushing, run what CI runs:
 
-The wire format is conforming **HTTP/1.1**, verified against `node:http` in both
-directions, behind a `MessageCodec` seam that also retains the legacy JSON
-envelope so two peers can be upgraded in either order. The codec is deliberately
-strict: every ambiguity is a refusal rather than a guess. See
-[ADR-0006](./docs/adr/0006-http1-as-wire-format.md).
+   ```sh
+   pnpm lint:check
+   pnpm format:check
+   pnpm typecheck
+   ```
 
-#### [`@statewalker/webrun-http-browser`](./packages/webrun-http-browser)
+5. Browser tests are separate scripts in the packages that have them, for example
+   `pnpm --filter @statewalker/webrun-http-browser test:browser`.
 
-A ServiceWorker-based HTTP server that runs entirely in the browser. Register
-handlers in JavaScript, call them with standard `fetch()`. Two operating modes:
+## Why it is the way it is
 
-- **Same-origin** (`/sw` subpath) — your app registers its own SW next to its
-  pages and mounts handlers under `<scope>/<key>/…`.
-- **Relay** (main entry) — a SW at a shared relay origin handles requests for
-  any page that embeds a hidden relay iframe. Cross-origin friendly; works from
-  notebooks, Observable, unpkg and third-party hosts.
+**One seam instead of one API per transport.** Every transport is reduced to a `Duplex` (or a
+`ByteChannel` that `emulateMux` turns into one). Protocols above it (HTTP, RPC) never see the
+transport, and a new transport only has to pass `webrun-streams-conformance` to work with all of
+them.
 
-Start-up never hangs: a page its worker does not control — a hard reload loads
-one — is claimed on request, and every wait is bounded by a `timeout` that
-rejects with an actionable `ServiceWorkerControlError`. Verified in Chromium and
-Firefox by the package's Playwright suite.
+**Bundles keep their dependencies external.** Each package's `rolldown.config.js` takes its
+externals from its own `package.json` through `rolldown.preset.js`: everything declared as a
+dependency or peer stays external, nothing else does. The package manager installs those for the
+consumer anyway, so inlining them would ship a second copy, and a second copy of
+`@statewalker/webrun-streams` means a second `TransportClosedError` class, which breaks
+`instanceof` across package boundaries. Deriving the list from the manifest keeps it from drifting.
 
-Its [README](./packages/webrun-http-browser/README.md) covers architecture, the
-full export surface, design notes, constraints, and runnable demos. One runtime
-dependency outside the workspace: `idb-keyval` (≈1 KB), to survive SW restarts.
+**`webrun-http-browser` is the one exception.** Its shipped HTML (`public-relay/relay.html`,
+`demo/*.html`) imports `../dist/index.js` from a static host with no import map, and its two IIFE
+service-worker runtimes are loaded with `importScripts(...)`, which cannot resolve a bare
+specifier. So every output of that package is one self-contained file, at the cost of a duplicated
+copy of `webrun-streams` inside it. Don't rely on `instanceof` across that package's boundary.
 
-#### [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http)
+**Tooling inside the repository reads `src`, not `dist`.** `tsconfig.base.json` maps
+`@statewalker/webrun-*` to `packages/*/src` through `paths`, and `vitest.config.ts` builds the
+matching `resolve.alias` list from the `packages/` directory. Without that, the `exports` maps
+would send tests to `dist/` and they would run against the last build instead of the working tree.
+Published consumers only ever see `dist`.
 
-Service RPC with nothing but standard HTTP types:
+## What will surprise you
 
-- `newRpcServer(services, { path? })` → a `(Request) ⇒ Response` handler routing
-  `GET /`, `GET /{service}`, `GET|POST /{service}/{method}` into method calls.
-- `newRpcClient({ baseUrl, fetch? })` → `{ loadService<T>(name) }` with lazy
-  descriptor caching and typed method proxies.
+- **`pnpm test` packs and installs with npm.** `tools/consumer-install` runs `pnpm pack` on
+  `webrun-http-browser` and its workspace dependencies (each pack runs a `prepack` build) and then a
+  real `npm install` of the tarballs from the npm registry. It needs network access and takes
+  minutes; its timeouts are 15 minutes per test.
+- **`pnpm demo:p2p` fails** with `No projects matched the filters`: the root script filters
+  `@statewalker/p2p-demo`, which is not a package of this workspace.
+- **Tests stay green against a broken build.** Because tests read `src/`, a change that breaks the
+  bundle or the declarations only shows up in `pnpm build`, `pnpm typecheck` or the
+  consumer-install harness.
+- **A dropped generator holds a stream open.** A caller of a `Duplex` must drain the returned
+  generator or call `.return()` on it. An unreferenced generator sends no signal, so the peer waits
+  for an acknowledgement that never comes and both sides keep the stream's slot.
+- **`emulateMux` refuses a zero window.** A window of 0 would authorise the peer to send nothing,
+  forever, so it throws `RangeError: emulateMux: maxStreamBuffer must be at least 1, got 0` at
+  construction instead of deadlocking on the first call.
 
-Because the server is a plain handler and the client takes an injectable
-`fetch`, the same RPC code runs unchanged over real HTTP, an in-browser
-ServiceWorker, a MessagePort bridge or a WebSocket — including
-`fetch: (req) => handler(req)` for tests with no network at all.
+## Reference
 
-### Sites
+### Commands
 
-| Package | Version | Summary |
-| --- | --- | --- |
-| [`@statewalker/webrun-site-builder`](./packages/webrun-site-builder) | 0.1.2 | Compose files + endpoints + auth into a `(Request) ⇒ Response` site. |
-| [`@statewalker/webrun-site-host`](./packages/webrun-site-host) | 0.1.6 | Host such a site behind a same-origin ServiceWorker in one call. |
-
-#### [`@statewalker/webrun-site-builder`](./packages/webrun-site-builder)
-
-Composes a site from three ingredients: static files mounted from any `FilesApi`
-(memory / Node FS / S3 / browser FSAA / composite), dynamic endpoints with
-URLPattern routing, and pluggable auth hooks.
-
-```ts
-new SiteBuilder()
-  .setFiles("/", files)
-  .setAuth("/admin/*", newBasicAuth({ tom: "!jerry!" }))
-  .setEndpoint("/api/todo/:id", "GET", handler)
-  .build(); // ⇒ (Request) ⇒ Response
-```
-
-Deliberately framework-free: URLPattern for routing, a small MIME map, and
-`Range` / `HEAD` support driven by `FilesApi.stats()` + `read({start, length})`.
-Peer dependency on `@statewalker/webrun-files`.
-
-#### [`@statewalker/webrun-site-host`](./packages/webrun-site-host)
-
-Owns *where* a site runs, while `SiteBuilder` owns *what* it does.
-`HostedSiteBuilder` registers the same-origin ServiceWorker via `SwHttpAdapter`,
-mounts the handler under a site key, and rewrites incoming URLs to site-relative
-form:
-
-```ts
-const handler = new SiteBuilder()
-  .setFiles("/client", clientFiles)
-  .setEndpoint("/api", newServerRunner("/server/api/index.js", () => baseUrl))
-  .build();
-
-const site = await new HostedSiteBuilder()
-  .setSiteKey("demo")
-  .setHandler(handler)
-  .build();
-// site.baseUrl → http://localhost:5173/demo/
-// site.stop()  → unhooks the handler
-```
-
-`newServerRunner(modulePath, getBaseUrl, env?)` covers the common "my `/api`
-endpoint is a JS module served by my own site" pattern: it dynamic-imports the
-module per request and calls its default export with `(request, env)`.
-
-### Transport adapters
-
-Each adapter binds the `Duplex` / `ByteChannel` seam to a concrete transport, so
-the same handler runs over any of them. Most supply a `ByteChannel` and let
-`emulateMux` provide concurrency; `webrun-streams-webrtc` opens one data channel
-per `Duplex` and `webrun-streams-libp2p` uses libp2p's own multiplexing, so
-neither needs it.
-
-| Package | Version | Transport | Peer deps |
-| --- | --- | --- | --- |
-| [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | 0.4.0 | Ports and RPC over them: `multiplexPort` and `transferPortMux`; `duplexOverPort`, which runs one `Duplex` over one port with window-of-one backpressure; and typed request/response primitives (`callPort` / `listenPort` / `callBidi` / `ioSend`) over any `MessageTarget`. | — |
-| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | 0.2.0 | WebSocket. Browser-native, or Node via an injected constructor. | — |
-| [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | 0.1.2 | WebRTC data channels — one per call, with a 1-byte DATA/END/ERROR frame for half-close and error propagation. | — |
-| [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | 0.1.2 | libp2p streams, with an authenticated `remotePeer` available to handlers via `serveConnections`. | `libp2p`, `@libp2p/interface`, `@multiformats/multiaddr` |
-| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | 0.2.0 | LiveKit reliable data channel — an SFU for when direct P2P won't connect. | `livekit-client` |
-| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | 0.2.0 | PeerJS `DataConnection` — the shortest path to a browser-to-browser link. | `peerjs` |
-| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | 0.1.2 | Not a transport but the *setup* for one: `PeerManager` (WebRTC discovery), `QrSignaling` (serverless offer/answer via QR), `RoomManager` (LiveKit membership). Yields `ByteChannel`s. | `livekit-client` (optional) |
-
-### Testing
-
-#### [`@statewalker/webrun-streams-conformance`](./packages/webrun-streams-conformance)
-
-The shared, executable definition of "a correct adapter". Every adapter above
-ships a one-line test file calling `describeDuplexAdapter(name, makePair)`, and
-the suite asserts seven levels: envelope round-trip up to 10 MiB (L0), concurrent
-calls (L1), half-close (L2), mid-stream cancellation running the handler's
-`finally` (L3), error propagation with stack and custom fields intact (L4),
-idempotent teardown (L5), and flow control against a slow consumer at a small
-advertised window (L6). `makeLoopbackPair()` is the reference in-process pair
-the suite self-tests against.
-
-## Putting it together
-
-| Use case | Stack |
+| Command | What it runs |
 | --- | --- |
-| In-browser service RPC with offline-capable `fetch()` | `webrun-rpc-http` + `webrun-http-browser` (same-origin mode) |
-| Cross-origin RPC from an embed (Observable, unpkg) | `webrun-rpc-http` + `webrun-http-browser` (relay mode) |
-| Static site + dynamic API + auth, served from anywhere | `webrun-site-builder` + any `FilesApi` + a transport of your choice |
-| In-browser static site + dynamic API with zero SW boilerplate | `webrun-site-host` — builder + SW adapter in one `.build()` |
-| Node ↔ browser RPC over a WebSocket | `webrun-streams-ws` on each end; pipe `webrun-http-streams` through it |
-| Browser ↔ browser HTTP + SSE, no server in the data path | `webrun-streams-signaling` to connect, `webrun-streams-webrtc` to carry, `webrun-http-streams` on top |
-| The same, but through an SFU when P2P won't connect | `webrun-streams-livekit` in place of `-webrtc` |
-| Unit tests for an RPC service | `webrun-rpc-http` with `fetch: (req) => handler(req)` — no network |
-| A new transport | `webrun-streams-conformance` — make L0–L6 pass |
-| Deploying the same handler to a real edge runtime | `webrun-rpc-http` handler drops straight into Deno / Workers / Bun |
+| `pnpm build` | `pnpm -r run build`: rolldown (tsdown for `webrun-http-events`) and declarations per package |
+| `pnpm test` | `pnpm -r run test` (Vitest), including `tools/consumer-install` |
+| `pnpm typecheck` | `pnpm -r run typecheck` in the packages that define it |
+| `pnpm lint` / `pnpm lint:check` | `biome check --write .` / `biome check .` |
+| `pnpm lint:fix`, `pnpm format:fix` | `biome check --write --unsafe .` |
+| `pnpm format` / `pnpm format:check` | `biome format --write .` / `biome format .` |
+| `pnpm changeset` | add a changeset to your pull request |
 
-## Runnable demos
+### Files
 
-| Demo | Path | What it shows |
-| --- | --- | --- |
-| **site-builder-demo** | [`apps/site-builder-demo`](./apps/site-builder-demo) | Vite + TypeScript app; `HostedSiteBuilder` mounts a full site (static client + `/api` dynamic-import endpoint + iframe preview) in ~40 lines. |
-| **p2p cross-app HTTP demo** | [`apps/p2p-demo`](./apps/p2p-demo) | Node libp2p Circuit Relay v2 + a server page + a client page. Pages find each other through relay-mediated group discovery — no peer-id paste step — then exchange HTTP (including SSE) over a direct WebRTC link. `pnpm demo:p2p` boots all three. |
-| **livekit cross-app HTTP demo** | [`apps/livekit-demo`](./apps/livekit-demo) | The same shape with a LiveKit room replacing the libp2p relay + WebRTC link. Boots a dev LiveKit server (Docker), a JWT token service, and two Vite pages. |
-| site-builder + JSPM | [`apps/site-builder-jspm-demo`](./apps/site-builder-jspm-demo) | Bare import specifiers resolved in-browser via `@jspm/generator` and served from the in-browser site. |
-| site-builder TSX spike | [`apps/site-builder-tsx-spike`](./apps/site-builder-tsx-spike) | `ServeFilesOptions.transform` as a per-mount response filter: sucrase transpiles `.ts` / `.tsx` on the fly. |
-| Hono dynamic site | [`packages/webrun-http-browser/demo/demo-1.html`](./packages/webrun-http-browser/demo/demo-1.html) | A Hono router running in the browser as the back-end for a relay-SW-hosted site. |
-| Local-disk file server | [`packages/webrun-http-browser/demo/demo-2.html`](./packages/webrun-http-browser/demo/demo-2.html) | `showDirectoryPicker` + a ~20-line handler exposing a local folder as a browsable HTTP site. |
-| Minimal same-origin SW | [`packages/webrun-http-browser/public/index.html`](./packages/webrun-http-browser/public/index.html) | The unwrapped `SwHttpAdapter` pattern in ~40 lines. Good baseline for debugging the SW lifecycle. |
-
-Each demo has a "Why it's interesting" blurb in its own README.
-
-## Workspace
-
-```sh
-pnpm install
-pnpm test              # turbo runs `test` in every package
-pnpm run build         # turbo runs `build` in every package
-pnpm lint              # biome check .
-pnpm format:fix        # biome check --write --unsafe .
-```
-
-Tooling: **pnpm workspace**, **turborepo**, **biome**, **vitest**, **rolldown**,
-**TypeScript**. Every package builds the same way — `rolldown -c` for the bundle,
-`tsc --emitDeclarationOnly` for the types. No eslint / prettier / rollup / mocha.
-
-## Packaging
-
-All fifteen packages are ESM-only and resolve identically:
-
-```json
-"exports": {
-  ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
-}
-```
-
-Consumers get a built ESM bundle plus generated `.d.ts` — no TypeScript-aware
-build step required on their side, and `node16` / `nodenext` resolution works.
-Both `src` and `dist` ship in `files`, so sources remain available for
-debugging and source maps.
-
-**Bundle externals** are derived from each package's own manifest by
-[`rolldown.preset.js`](./rolldown.preset.js): everything declared as a
-`dependency` or `peerDependency` stays external, and nothing else does. npm
-installs those for the consumer, so inlining them would only ship a second
-copy — and a second copy of `@statewalker/webrun-streams` means a second
-`TransportClosedError` class, quietly breaking `instanceof` across package
-boundaries. Deriving the list from the manifest also stops it drifting, which
-is what had happened: a deleted `@statewalker/webrun-ports`, a `peerjs` that
-was never imported, a missing `@multiformats/multiaddr`, and four packages
-inlining their workspace dependencies by omission.
-
-**One documented exception:** `webrun-http-browser` inlines everything. Its own
-shipped HTML loads the bundle straight from a static host with no import map
-(`public-relay/relay.html` and both `demo/*.html` do
-`import … from "../dist/index.js"`), and its two IIFE service-worker runtimes
-are loaded through classic `importScripts(...)`, which cannot resolve a bare
-specifier at all. The trade-off is a duplicated copy of `webrun-streams` inside
-that bundle. It also ships IIFE bundles for those two SW runtimes
-(`/relay-sw`, `/sw-worker`).
-
-**Inside the workspace**, tooling short-circuits to source rather than `dist`:
-`tsconfig.base.json` maps every `@statewalker/webrun-*` to `packages/*/src` via
-`paths`, and [`vitest.config.ts`](./vitest.config.ts) builds the matching
-`resolve.alias` list. Without that, tests would resolve through the `exports`
-map into `dist` and silently run against the last build instead of the working
-tree. Published consumers are unaffected — they only ever see `dist`.
-
-## Publishing
-
-Via [Changesets](./PUBLISHING.md).
-
-## Cross-repo dependencies
-
-| Repository | Packages used |
+| Path | Role |
 | --- | --- |
-| [`webrun-files`](https://github.com/statewalker/webrun-files) | `@statewalker/webrun-files`, `@statewalker/webrun-files-mem` |
+| `rolldown.preset.js` | `externalsFrom(import.meta.url)`: bundle externals from a package's manifest |
+| `vitest.config.ts` | shared test config; aliases `@statewalker/webrun-*` to `src` |
+| `tsconfig.base.json` | shared compiler options and `paths` to `src` |
+| `biome.json` | lint and format rules |
+| `CONTEXT.md` | glossary of the domain terms |
+| `tools/consumer-install/` | pack-and-install harness for published manifests |
 
-Cross-repo dependencies are declared `workspace:*` rather than `catalog:`. This
-is deliberate: turbo derives its task graph from `workspace:` specifiers and does
-**not** resolve `catalog:`, so a `catalog:` cross-repo dependency is invisible to
-the scheduler and its consumer can be built before it.
+### CI and releases
 
-## Documentation
+CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on pull requests: a frozen install,
+dependency-reference checks (`workspace:^` inside the repository, `catalog:` for everything else),
+`lint:check`, `format:check`, build, typecheck, tests, and checks of export targets, dist imports
+and packed manifests.
 
-- [`CONTEXT.md`](./CONTEXT.md) — domain model and bounded-context notes.
-- [`docs/adr/`](./docs/adr) — architecture decision records.
-- [`PUBLISHING.md`](./PUBLISHING.md) — release process.
-- [`CHANGELOG.md`](./CHANGELOG.md) — release history.
+Packages are published to npm from CI with changesets. After CI passes on `main`, a job adds a
+changeset for each package whose packed contents differ from npm and opens a
+"chore: version packages" pull request; merging it publishes with provenance. To choose the bump or
+the changelog text yourself, run `pnpm changeset` in your pull request. Renovate opens the
+dependency updates. See [PUBLISHING.md](./PUBLISHING.md).
 
-## License
+### License
 
-MIT © statewalker — see [LICENSE](./LICENSE).
+MIT, see [LICENSE](./LICENSE).
