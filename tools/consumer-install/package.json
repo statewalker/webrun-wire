@@ -1,6 +1,15 @@
 {
   "name": "@statewalker/consumer-install-tests",
   "version": "0.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-wire.git",
+    "directory": "tools/consumer-install"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire/tree/main/tools/consumer-install#readme",
   "private": true,
   "type": "module",
   "scripts": {
