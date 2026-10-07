@@ -191,9 +191,11 @@ declare const self: ServiceWorkerGlobalScope & { RELAY_OPTIONS?: RelayServiceWor
 </script>
 ```
 
-Pass `swUrl` explicitly. Its default is `index-sw.js` next to the module, a
-file the build does not produce. `timeout` bounds the wait for the worker to
-activate. If the worker cannot start, every call the parent makes on the port
+Without `swUrl` the handler registers the bundle's own `dist/relay-sw.js`,
+and without `scopeUrl` the scope is that worker's directory, `dist/`: the
+widest scope a script there may claim without a `Service-Worker-Allowed`
+header. A relay page that serves services anywhere else passes both, as above.
+`timeout` bounds the wait for the worker to activate. If the worker cannot start, every call the parent makes on the port
 is answered with that error, so the parent's `initHttpService` /
 `callHttpService` reject instead of hanging.
 
@@ -229,7 +231,7 @@ importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `key` | required | First URL segment under the scope that the worker routes to this page. |
-| `serviceWorkerUrl` | none; pass it | Resolved against `location.href`. An unresolvable value throws `Invalid serviceWorkerUrl: "<value>" (relative to <href>)`. |
+| `serviceWorkerUrl` | `sw-worker.js` at the scope | Resolved against `location.href`. An unresolvable value throws `Invalid serviceWorkerUrl: "<value>" (relative to <href>)`. |
 | `scope` | directory of `serviceWorkerUrl` | Registration scope. |
 | `timeout` | `30_000` | Upper bound, in ms, for activation, control and the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError`. |
 | `reloadIfUncontrolled` | `false` | Reload the page once instead of rejecting when it stays uncontrolled. |
@@ -392,8 +394,9 @@ The worker keeps the claimed keys and client ids in IndexedDB (`claimedKeys`,
 relay keeps its registry under `clientsIds` as `{ clientId, path }` entries and
 still reads the older bare-client-id shape.
 
-`SwPortHandler.stop()` unregisters every ServiceWorker registration of the
-origin, not only its own.
+`SwPortHandler.stop()` unregisters only the registration its own `start()`
+made; other workers on the origin stay registered. After a `start()` that
+rejected, `stop()` unregisters nothing, since that attempt kept the worker.
 
 ### A page can load uncontrolled although its worker is active
 
@@ -439,11 +442,12 @@ message size limit. `sendHttpRequest` and `handleHttpRequests` are marked
 this package still use the deprecated pair internally. A caller that stops
 reading early does tell the peer to stop producing.
 
-### Defaults that point at a file the build does not produce
+### The adapter's default worker url follows the scope
 
-`getRelayWindowMessageHandler`'s default `swUrl` and `SwPortHandler`'s default
-worker URL both resolve to `index-sw.js` next to the module. No such file is
-built. Pass `swUrl` / `serviceWorkerUrl` explicitly. Constructing a
+Without `serviceWorkerUrl`, `SwPortHandler` (and so `SwHttpAdapter`) uses
+`sw-worker.js` at its scope, the scope resolved against the bundle's url. With
+`scope: "/dist/"` that is the shipped `dist/sw-worker.js`; with `scope: "/"` it
+is `/sw-worker.js`, a loader the host must serve there. Constructing a
 `SwHttpAdapter` with neither `serviceWorkerUrl` nor `scope` fails with
 `RangeError: Maximum call stack size exceeded`, because each default is
 computed from the other.

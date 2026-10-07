@@ -110,6 +110,15 @@ describe("newRpcServer", () => {
     expect(outside.status).toBe(404);
   });
 
+  it("matches the path prefix on a segment boundary only", async () => {
+    const handler = newRpcServer(services, { path: "/api/v1" });
+    expect((await handler(new Request("http://x/api/v1"))).status).toBe(200);
+    expect((await handler(new Request("http://x/api/v1?a=1"))).status).toBe(200);
+    expect((await handler(new Request("http://x/api/v1/math"))).status).toBe(200);
+    expect((await handler(new Request("http://x/api/v1x"))).status).toBe(404);
+    expect((await handler(new Request("http://x/api/v1x/math"))).status).toBe(404);
+  });
+
   it("picks up methods from class prototypes", async () => {
     class Greeter {
       async hello(params: { name: string }) {

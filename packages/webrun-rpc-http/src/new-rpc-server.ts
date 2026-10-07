@@ -79,7 +79,7 @@ interface ParsedPath {
 
 function splitRequestPath(request: Request, prefix: string): ParsedPath | null {
   const pathname = new URL(request.url).pathname;
-  if (prefix && !pathname.startsWith(prefix)) return null;
+  if (prefix && pathname !== prefix && !pathname.startsWith(`${prefix}/`)) return null;
   const rest = pathname.substring(prefix.length + 1);
   const [serviceName = "", methodName = "", ...tail] = rest.split("/");
   return {
