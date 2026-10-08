@@ -44,6 +44,7 @@ export class SwPortHandler {
   private _serviceWorkerUrl?: string;
   private _serviceWorker?: ServiceWorker;
   private _registrationPromise?: Promise<void>;
+  private _registration?: ServiceWorkerRegistration;
   private _cleanupRegistrations?: () => void;
 
   constructor(options: SwPortHandlerOptions) {
@@ -65,7 +66,7 @@ export class SwPortHandler {
    * own url when one is given, not against this module's: a bundle that is
    * not an ES module (an IIFE, Theia's frontend) has no `import.meta.url`, and
    * `new URL(scope, undefined)` threw `Invalid URL` there. Only without a
-   * worker url does the module's location decide (its default `index-sw.js`
+   * worker url does the module's location decide (its default `sw-worker.js`
    * sits next to it).
    */
   get rootUrl(): URL {
@@ -82,7 +83,7 @@ export class SwPortHandler {
           // use — `"/sw-worker.js"` — threw a bare `Invalid URL` naming
           // neither the option nor the value.
           resolveWorkerUrl(this.options.serviceWorkerUrl)
-        : new URL("./index-sw.js", this.rootUrl);
+        : new URL("./sw-worker.js", this.rootUrl);
       this._serviceWorkerUrl = `${url}`;
     }
     return this._serviceWorkerUrl;
@@ -133,7 +134,7 @@ export class SwPortHandler {
         const registration = await navigator.serviceWorker.register(this.serviceWorkerUrl, {
           scope: this.scope,
         });
-        register(() => registration.unregister());
+        this._registration = registration;
 
         const stopListening = handleChannelCalls(
           navigator.serviceWorker,
@@ -170,6 +171,7 @@ export class SwPortHandler {
           // that is not controlled, and other pages may be using the worker.
           stopListening();
           this._cleanupRegistrations = undefined;
+          this._registration = undefined;
           this._registrationPromise = undefined;
           throw error;
         }
@@ -180,13 +182,12 @@ export class SwPortHandler {
 
   async stop(): Promise<void> {
     this._cleanupRegistrations?.();
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    for (const registration of registrations) {
-      try {
-        await registration.unregister();
-      } catch (error) {
-        console.log("Service Worker registration failed: ", error);
-      }
+    const registration = this._registration;
+    this._registration = undefined;
+    try {
+      await registration?.unregister();
+    } catch (error) {
+      console.log("Service Worker unregistration failed: ", error);
     }
   }
 }

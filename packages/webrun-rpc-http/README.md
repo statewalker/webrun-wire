@@ -201,9 +201,9 @@ it.
 - **`baseUrl` takes no trailing slash.** The client builds
   `${baseUrl}/${service}/${method}`; a trailing slash doubles it and the call
   fails with `Not found`.
-- **The prefix check is a plain string prefix.** With `path: "/api/v1"`, a
-  request to `/api/v1x/math` is also handled (here, as the descriptor). Put the
-  handler behind a router that matches on segment boundaries if that matters.
+- **The prefix matches whole path segments.** With `path: "/api/v1"`, the
+  handler serves `/api/v1` and everything under `/api/v1/`; `/api/v1x/math`
+  is outside the prefix and gets `404 Not found`.
 - **No content negotiation.** JSON or multipart in, JSON or binary out.
 
 ### Design notes

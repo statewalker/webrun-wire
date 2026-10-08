@@ -135,8 +135,8 @@ export interface RelayWindowHandlerOptions {
  * parent's `initHttpService` / `callHttpService` reject instead of waiting.
  */
 export function getRelayWindowMessageHandler({
-  swUrl = `${new URL("./index-sw.js", moduleUrl)}`,
-  scopeUrl = `${new URL("../", moduleUrl)}`,
+  swUrl = `${new URL("./relay-sw.js", moduleUrl)}`,
+  scopeUrl = `${new URL("./", moduleUrl)}`,
   timeout,
 }: RelayWindowHandlerOptions = {}): (ev: MessageEvent) => Promise<void> {
   let externalPort: MessagePort | undefined;
