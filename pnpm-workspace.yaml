@@ -16,7 +16,7 @@ catalog:
   "@vitest/browser-playwright": "^5.0.3"
   "esbuild": "^0.28.2"
   "libp2p": ^3.3.11
-  "livekit-client": "^2.22.3"
+  "livekit-client": "^2.18.3"
   "livekit-server-sdk": "^2.19.1"
   "peer": "^1.0.2"
   "peerjs": "^1.5.5"
