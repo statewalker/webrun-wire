@@ -19,7 +19,7 @@ catalogs:
       specifier: ^3.0.3
       version: 3.0.3
     '@libp2p/interface':
-      specifier: ^3.3.0
+      specifier: ^3.0.0
       version: 3.3.0
     '@libp2p/tcp':
       specifier: ^11.0.28
@@ -58,7 +58,7 @@ catalogs:
       specifier: ^6.3.0
       version: 6.3.0
     libp2p:
-      specifier: ^3.3.11
+      specifier: ^3.0.0
       version: 3.3.11
     livekit-client:
       specifier: ^2.18.3

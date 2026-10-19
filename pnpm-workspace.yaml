@@ -7,7 +7,7 @@ catalog:
   "@chainsafe/libp2p-noise": ^17.0.0
   "@chainsafe/libp2p-yamux": ^8.0.1
   "@changesets/cli": "^3.0.3"
-  "@libp2p/interface": ^3.3.0
+  "@libp2p/interface": ^3.0.0
   "@libp2p/tcp": ^11.0.28
   "@libp2p/utils": ^7.4.1
   "@multiformats/multiaddr": ^13.0.3
@@ -15,7 +15,7 @@ catalog:
   "@types/ws": "^8.18.2"
   "@vitest/browser-playwright": "^5.0.3"
   "esbuild": "^0.28.2"
-  "libp2p": ^3.3.11
+  "libp2p": ^3.0.0
   "livekit-client": "^2.18.3"
   "livekit-server-sdk": "^2.19.1"
   "peer": "^1.0.2"
