@@ -119,28 +119,51 @@ describe("streams (#32)", () => {
     expect(result.cancelled).toBe(1);
   });
 
-  it("backpressure: a page's fetch stays bounded by the browser's own buffer", async () => {
-    const page = await open();
-    const leads = await run<number[]>(
+  it("backpressure: a page that stops reading stops the handler; only Chromium buffers", async () => {
+    // Between a ServiceWorker's `respondWith` and the page, Chromium buffers
+    // a fixed amount by itself (~55 MiB in Chromium 14x, the same for a plain
+    // worker with no library). The fixture worker counts what it hands to
+    // Chromium (?count), which splits the lead into two parts:
+    // - produced - delivered: held by this package; must stay a few chunks;
+    // - delivered - read: Chromium's buffer; must stop growing.
+    const page = await open("?sw=count");
+    const samples = await run<Array<{ produced: number; delivered: number; read: number }>>(
       page,
       `
+      const CHUNK = 65536;
+      const delivered = () =>
+        new Promise((resolve) => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (event) => resolve(event.data);
+          navigator.serviceWorker.controller.postMessage({ type: "delivered" }, [channel.port2]);
+        });
       const reader = (await fetch("./page/stream")).body.getReader();
-      const leads = [];
       let read = 0;
-      for (let i = 1; i <= 600; i++) {
-        read += (await reader.read()).value.byteLength;
-        if (i % 200 === 0) {
-          await new Promise((r) => setTimeout(r, 300));
-          leads.push(window.pageStats.produced - Math.round(read / 65536));
-        }
+      while (read < 64 * CHUNK) read += (await reader.read()).value.byteLength;
+      // The reader stops here. Sample until the producer has been still for 2 s.
+      const samples = [];
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        samples.push({ produced: window.pageStats.produced * CHUNK, delivered: await delivered(), read });
+        const n = samples.length;
+        if (n >= 3 && samples[n - 1].produced === samples[n - 3].produced) break;
       }
       await reader.cancel();
-      return leads;
+      return samples;
     `,
     );
-    // Chromium alone keeps up to ~900 chunks of 64 KiB in flight between a
-    // ServiceWorker and a page; this package must add nothing unbounded.
-    for (const lead of leads) expect(lead).toBeLessThan(1200);
+    const CHUNK = 65536;
+    const last = samples[samples.length - 1];
+    const twoBefore = samples[samples.length - 3];
+    // The producer stopped: no growth over the last two seconds.
+    expect(samples.length).toBeGreaterThanOrEqual(3);
+    expect(last?.produced).toBe(twoBefore?.produced);
+    for (const { produced, delivered } of samples) {
+      // What this package holds: the one-chunk windows of the hops, no more.
+      expect(produced - delivered).toBeLessThanOrEqual(4 * CHUNK);
+    }
+    // Chromium's buffer is bounded too (it took ~55 MiB when measured).
+    expect((last?.delivered ?? 0) - (last?.read ?? 0)).toBeLessThan(256 * 1024 * 1024);
   });
 
   it("cancellation: an aborted fetch reaches the handler", async () => {

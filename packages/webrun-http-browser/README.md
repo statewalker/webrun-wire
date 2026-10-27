@@ -638,8 +638,11 @@ never more than a few chunks ahead of whoever reads it through this package's
 links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
 the producer. Between a ServiceWorker's `respondWith` and the page, though,
 Chromium buffers by itself, tens of megabytes of a fast stream: a page reading
-slowly sees the handler run that far ahead before backpressure reaches it. A
-worker reading through `service.fetch` has no such buffer.
+slowly sees the handler run that far ahead before backpressure reaches it
+(about 55 MiB, the same for a plain ServiceWorker with no library). A worker
+reading through `service.fetch` has no such buffer. `links.browser.ts` pins
+the split: once a page stops reading, the handler is never more than a few
+chunks ahead of what the ServiceWorker handed to Chromium, and stops.
 
 `sendStream` / `handleStreams`, and the `sendHttpRequest` /
 `handleHttpRequests` pair built on them, are version 1's transport, kept for
