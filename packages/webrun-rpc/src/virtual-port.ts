@@ -1,3 +1,4 @@
+import { setPortCloseSignal } from "./close-signal.js";
 import type { MessageListener, MessageTarget } from "./message-target.js";
 
 export interface VirtualPortHandle {
@@ -5,8 +6,12 @@ export interface VirtualPortHandle {
   port: MessageTarget;
   /** Multiplexer-only: hand an inbound payload to the consumer's listeners. */
   deliver(payload: unknown): void;
-  /** Multiplexer-only: the port is finished; drop listeners and go inert. */
-  markClosed(): void;
+  /**
+   * Multiplexer-only: the port is finished; drop listeners and go inert.
+   * `reason` becomes the reason of the port's close signal (see
+   * `getPortCloseSignal`), which is what fails the calls still waiting on it.
+   */
+  markClosed(reason?: unknown): void;
   isClosed(): boolean;
 }
 
@@ -23,6 +28,16 @@ export function newVirtualPort(
 ): VirtualPortHandle {
   const listeners = new Set<MessageListener>();
   let closed = false;
+  // A virtual port knows when it is finished, unlike a raw `MessagePort`. Its
+  // close signal is what lets the calls still waiting on it — `callPort`, and
+  // the streams of `duplexOverPort` — fail at once instead of hanging on a
+  // port that has gone inert. Without it, closing a multiplexer left every call
+  // in flight on it pending forever.
+  const closing = new AbortController();
+  const abort = (reason?: unknown) => {
+    if (closing.signal.aborted) return;
+    closing.abort(reason ?? new Error("webrun-rpc: the port was closed"));
+  };
 
   const port: MessageTarget = {
     addEventListener(_type, listener) {
@@ -41,8 +56,10 @@ export function newVirtualPort(
       const notify = requestClose;
       listeners.clear();
       notify();
+      abort();
     },
   };
+  setPortCloseSignal(port, closing.signal);
 
   return {
     port,
@@ -60,9 +77,10 @@ export function newVirtualPort(
         }
       }
     },
-    markClosed() {
+    markClosed(reason) {
       closed = true;
       listeners.clear();
+      abort(reason);
     },
     isClosed() {
       return closed;

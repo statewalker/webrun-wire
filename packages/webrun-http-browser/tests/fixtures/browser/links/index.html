@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>links fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for handler links (see tests/browser/links.browser.ts).
+      // Query: sw=<worker script query>, e.g. ?sw=route%3Dslot
+      import * as lib from "/dist/sw.js";
+      import { newHandler } from "./handler.js";
+
+      const params = new URLSearchParams(location.search);
+      const swQuery = params.get("sw");
+      window.lib = lib;
+      window.ready = (async () => {
+        const adapter = new lib.SwHttpAdapter({
+          key: "page",
+          serviceWorkerUrl: `./sw-worker.js${swQuery ? `?${swQuery}` : ""}`,
+          timeout: 10_000,
+        });
+        await adapter.start();
+        const page = newHandler("page");
+        window.pageStats = page.stats;
+        await adapter.register("page/", page.handler);
+        window.adapter = adapter;
+        window.workers = {};
+        // Starts a worker named `name` and attaches it under `key`.
+        window.attach = async (name, options = {}) => {
+          const worker = new Worker(`./worker.js?name=${name}`, { type: "module" });
+          const link = await adapter.attachWorker(worker, { key: "app", ...options });
+          window.workers[name] = { worker, link };
+          return { id: link.id, owner: link.owner };
+        };
+        // Sends a test command to a worker and waits for its answer.
+        window.command = (name, message) =>
+          new Promise((resolve) => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = (event) => resolve(event.data);
+            window.workers[name].worker.postMessage(message, [channel.port2]);
+          });
+        return true;
+      })();
+    </script>
+  </body>
+</html>

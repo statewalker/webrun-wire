@@ -21,7 +21,7 @@ export * from "./io-send.js";
 export * from "./listen-bidi.js";
 export * from "./listen-port.js";
 export * from "./message-target.js";
-export { DEFAULT_MAX_PORTS, multiplexPort } from "./multiplex-port.js";
+export { DEFAULT_MAX_PORTS, MUX_CLOSED_MESSAGE, multiplexPort } from "./multiplex-port.js";
 export type { PortCodec, PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
 export * from "./recieve.js";
 export * from "./send.js";

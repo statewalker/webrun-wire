@@ -36,7 +36,7 @@ describe("the package's exports map", () => {
 
   it("ships the relay worker runtime as a typed subpath", async () => {
     const { exports } = await manifest();
-    expect(exports["./relay-worker"]).toEqual({
+    expect(exports["./relay-worker"]).toMatchObject({
       types: "./dist/relay-worker.d.ts",
       import: "./dist/relay-worker.js",
     });
@@ -49,5 +49,16 @@ describe("the package's exports map", () => {
     expect(declaration).toMatch(/RelayServiceWorkerOptions/);
     expect(declaration).toMatch(/MountSpec/);
     expect(declaration).toMatch(/startRelayServiceWorker/);
+  });
+
+  it("ships the Dedicated Worker runtime as a typed subpath", async () => {
+    const { exports } = await manifest();
+    expect(exports["./worker"]).toMatchObject({
+      types: "./dist/worker.d.ts",
+      import: "./dist/worker.js",
+    });
+    const declaration = await readFile(new URL("dist/worker.d.ts", packageRoot), "utf8");
+    expect(declaration).toMatch(/serveHttpInWorker/);
+    expect(declaration).toMatch(/upgradeWebSocket/);
   });
 });

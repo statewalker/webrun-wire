@@ -22,11 +22,25 @@ export type HttpDataOptions = {
 export interface HttpFetchResult {
   envelope: ResponseEnvelope;
   body: AsyncIterable<Uint8Array>;
+  /**
+   * Abandons the call: the peer's producer is released (its `finally` runs).
+   * Leaving `body` early — `break`, `.return()`, a cancelled stream — does
+   * the same; this is for a caller that never starts reading it, such as a
+   * bodyless response.
+   */
+  release(): Promise<void>;
 }
 
 export interface HttpDataHandlerResult {
   envelope: ResponseEnvelope;
   body?: ByteSource;
+  /**
+   * Called when the caller abandons the response before its end. A body the
+   * codec never started pulling cannot be released through the iterator
+   * protocol (`.return()` on a generator in suspended start does nothing), so
+   * a producer that holds resources says here how to let them go.
+   */
+  release?: () => unknown;
 }
 
 /**
@@ -152,9 +166,45 @@ export async function httpFetch(
 ): Promise<HttpFetchResult> {
   const codec = options.codec ?? defaultCodec;
   const output = call(codec.encodeRequest(env, body));
-  const result = await codec.decodeResponse(output, { method: env.method });
+  const decoded = await codec.decodeResponse(output, { method: env.method });
+  const release = async () => {
+    try {
+      await output.return?.(undefined);
+    } catch {
+      /* the call is being abandoned; nothing to report */
+    }
+  };
+  const result: HttpFetchResult = {
+    envelope: decoded.envelope,
+    body: releasingOnExit(decoded.body, release),
+    release,
+  };
   await throwIfPeerError(result, output);
   return result;
+}
+
+/**
+ * `body`, but leaving it before its end releases the call.
+ *
+ * The body the codec hands back is a generator of its own over a `ByteReader`,
+ * and `.return()` on it never reaches the call's `output` (see
+ * `throwIfPeerError` for why the codec must not do that itself). So a caller
+ * that stopped reading — an aborted `fetch`, a cancelled response stream —
+ * left the peer's producer parked forever, holding its handler open. Safe here
+ * for the same reason it is safe in `throwIfPeerError`: `output` is this
+ * call's own response-only generator, and the request was fully sent.
+ */
+async function* releasingOnExit(
+  body: AsyncIterable<Uint8Array>,
+  release: () => Promise<void>,
+): AsyncGenerator<Uint8Array> {
+  let completed = false;
+  try {
+    yield* body;
+    completed = true;
+  } finally {
+    if (!completed) await release();
+  }
 }
 
 /**
@@ -197,8 +247,20 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
       yield* encodeErrorResponse(replyCodec, error, decoded.envelope.method);
       return;
     }
-    yield* replyCodec.encodeResponse(result.envelope, result.body, {
-      method: decoded.envelope.method,
-    });
+    let completed = false;
+    try {
+      yield* replyCodec.encodeResponse(result.envelope, result.body, {
+        method: decoded.envelope.method,
+      });
+      completed = true;
+    } finally {
+      if (!completed) {
+        try {
+          await result.release?.();
+        } catch {
+          /* already released through the body, or nothing to release */
+        }
+      }
+    }
   };
 }

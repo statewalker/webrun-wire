@@ -9,6 +9,7 @@ import {
   toChunks,
 } from "@statewalker/webrun-streams";
 import { callPort, NO_TIMEOUT } from "./call-port.js";
+import { getPortCloseSignal } from "./close-signal.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 import { throughAbort } from "./through-abort.js";
@@ -82,6 +83,7 @@ export function serveDuplexOverPort(
 ): () => void {
   const controller = new AbortController();
   const notice = installAbortNotice(port, controller);
+  abortOnPortClose(port, controller);
   const clock = installStreamTimeout(controller, options.timeout);
   const inbound = receiveChunks(port, CHANNEL_IN, controller, clock.touch);
   let output: AsyncGenerator<Uint8Array>;
@@ -166,6 +168,7 @@ function runCallerSide(
 ): AsyncGenerator<Uint8Array> {
   const controller = new AbortController();
   const notice = installAbortNotice(port, controller);
+  abortOnPortClose(port, controller);
   const clock = installStreamTimeout(controller, options.timeout);
   const inbound = receiveChunks(port, CHANNEL_OUT, controller, clock.touch);
   const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal, clock.touch);
@@ -232,6 +235,30 @@ function installAbortNotice(
       port.removeEventListener("message", onMessage);
     },
   };
+}
+
+/**
+ * Aborts the stream when its port closes underneath it — the multiplexer was
+ * closed, or the peer closed the port — for ports that report it (see
+ * `getPortCloseSignal`). Without this a stream waiting for the peer's next
+ * chunk would wait forever on a port that can no longer deliver one: the
+ * outbound half's `callPort` already fails on the close signal, but nothing
+ * failed the inbound half.
+ */
+function abortOnPortClose(port: MessageTarget, controller: AbortController): void {
+  const closed = getPortCloseSignal(port);
+  if (!closed) return;
+  const onClose = () => {
+    if (!controller.signal.aborted) controller.abort(closed.reason);
+  };
+  if (closed.aborted) {
+    onClose();
+    return;
+  }
+  closed.addEventListener("abort", onClose, { once: true });
+  controller.signal.addEventListener("abort", () => closed.removeEventListener("abort", onClose), {
+    once: true,
+  });
 }
 
 /**

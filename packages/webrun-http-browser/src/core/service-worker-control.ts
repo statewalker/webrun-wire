@@ -26,8 +26,14 @@ export const CLAIM_CALL = "CLAIM";
  * - `uncontrolled`: the worker is active but the page is not controlled by it.
  * - `unresponsive`: the page is controlled, but the worker did not answer the
  *   adapter's handshake in time.
+ * - `incompatible`: the worker answered, but runs another version of this
+ *   package's link protocol.
  */
-export type ServiceWorkerControlFailure = "activation-timeout" | "uncontrolled" | "unresponsive";
+export type ServiceWorkerControlFailure =
+  | "activation-timeout"
+  | "uncontrolled"
+  | "unresponsive"
+  | "incompatible";
 
 /**
  * Why a page could not get a working ServiceWorker. `reason` says which wait
