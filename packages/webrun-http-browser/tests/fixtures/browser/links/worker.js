@@ -1,6 +1,7 @@
 // A Dedicated Worker serving HTTP and WebSockets through the ServiceWorker.
 import { serveHttpInWorker } from "/dist/worker.js";
 import { newHandler } from "./handler.js";
+import { readPaced } from "./paced.js";
 
 const name = new URL(self.location.href).searchParams.get("name") ?? "worker";
 let service;
@@ -38,6 +39,15 @@ self.addEventListener("message", async (event) => {
     if (cmd === "up") {
       const response = await service.fetch(url);
       reply.postMessage({ ok: true, status: response.status, text: await response.text() });
+    } else if (cmd === "pace") {
+      // Reads `url` through the router at `rate` bytes/s, reporting progress
+      // on the reply port as it goes, then the result.
+      const response = await service.fetch(url);
+      const result = await readPaced(response.body, {
+        rate: event.data.rate,
+        onSample: (read) => reply.postMessage({ progress: true, read }),
+      });
+      reply.postMessage({ ok: true, ...result });
     } else if (cmd === "read-up") {
       // Reads `n` chunks of a stream through the router, slowly, then stops.
       const reader = (await service.fetch(url)).body.getReader();

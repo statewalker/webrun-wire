@@ -1,9 +1,10 @@
 // One handler, used both in the page (`register`) and in workers
 // (`serveHttpInWorker`), so every scenario can run on either side.
 import { isWebSocketUpgrade, requestedProtocols, upgradeWebSocket } from "/dist/worker.js";
+import { patternByte } from "./paced.js";
 
 export function newHandler(name, extra = {}) {
-  const stats = { produced: 0, cancelled: 0, finished: 0, bodies: [] };
+  const stats = { produced: 0, producedBytes: 0, cancelled: 0, finished: 0, bodies: [] };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function handler(request) {
@@ -40,6 +41,31 @@ export function newHandler(name, extra = {}) {
               },
               cancel() {
                 stats.cancelled++;
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        );
+      }
+      case "big": {
+        // A finite body of `mb` MiB in 64 KiB chunks, patterned so the reader
+        // can check every byte; `producedBytes` counts what was pulled.
+        const total = Number(url.searchParams.get("mb") ?? 1) * 1048576;
+        let offset = 0;
+        stats.producedBytes = 0;
+        return new Response(
+          new ReadableStream(
+            {
+              pull(controller) {
+                if (offset >= total) {
+                  controller.close();
+                  return;
+                }
+                const chunk = new Uint8Array(Math.min(65536, total - offset));
+                for (let i = 0; i < chunk.length; i++) chunk[i] = patternByte(offset + i);
+                offset += chunk.length;
+                stats.producedBytes = offset;
+                controller.enqueue(chunk);
               },
             },
             { highWaterMark: 0 },

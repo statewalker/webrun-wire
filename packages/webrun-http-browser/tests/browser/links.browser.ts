@@ -166,6 +166,99 @@ describe("streams (#32)", () => {
     expect((last?.delivered ?? 0) - (last?.read ?? 0)).toBeLessThan(256 * 1024 * 1024);
   });
 
+  it("pace: a 200 MiB page fetch is produced at the reader's pace, intact", async () => {
+    // Bigger than Chromium's own buffer (~55 MiB), so once that is full the
+    // handler can only go as fast as the page reads: 20 MiB/s here.
+    const MiB = 1048576;
+    const RATE = 20 * MiB;
+    const page = await open("?sw=count");
+    const { result, samples } = await run<{
+      result: { read: number; corrupt: number; ms: number };
+      samples: Array<{ t: number; read: number; produced: number; delivered: number }>;
+    }>(
+      page,
+      `
+      const delivered = () =>
+        new Promise((resolve) => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (event) => resolve(event.data);
+          navigator.serviceWorker.controller.postMessage({ type: "delivered" }, [channel.port2]);
+        });
+      const pending = [];
+      const response = await fetch("./page/big?mb=200");
+      const result = await window.readPaced(response.body, {
+        rate: ${RATE},
+        onSample: (read) => {
+          const t = performance.now();
+          const produced = window.pageStats.producedBytes;
+          pending.push(delivered().then((d) => ({ t, read, produced, delivered: d })));
+        },
+      });
+      return { result, samples: await Promise.all(pending) };
+    `,
+    );
+    expect(result.read).toBe(200 * MiB);
+    expect(result.corrupt).toBe(0);
+    // The consumer set the pace: 200 MiB at 20 MiB/s takes about 10 s.
+    expect(result.ms).toBeGreaterThan(9_000);
+    for (const { produced, delivered } of samples) {
+      // This package holds a few chunks at most; the rest is Chromium's.
+      expect(produced - delivered).toBeLessThanOrEqual(4 * 65536);
+    }
+    // Steady state: Chromium's buffer is full and the producer not done yet.
+    const steady = samples.filter((x) => x.read > 80 * MiB && x.produced < 200 * MiB);
+    expect(steady.length).toBeGreaterThanOrEqual(4);
+    const leads = steady.map((x) => x.produced - x.read);
+    // The lead is bounded and stays put: the producer follows the reader.
+    expect(Math.max(...leads)).toBeLessThan(80 * MiB);
+    expect(Math.max(...leads) - Math.min(...leads)).toBeLessThan(8 * MiB);
+    const first = steady[0] as (typeof steady)[number];
+    const last = steady[steady.length - 1] as (typeof steady)[number];
+    const producerRate = ((last.produced - first.produced) / (last.t - first.t)) * 1000;
+    expect(producerRate / RATE).toBeGreaterThan(0.75);
+    expect(producerRate / RATE).toBeLessThan(1.25);
+  });
+
+  it("pace: a 128 MiB stream read by a worker through the router follows its pace, a few chunks ahead", async () => {
+    // page handler → ServiceWorker → worker: no browser buffer on the way,
+    // so the producer is never more than the links' one-chunk windows ahead.
+    const MiB = 1048576;
+    const RATE = 20 * MiB;
+    const page = await open();
+    await run(page, `await window.attach("A");`);
+    const { result, samples } = await run<{
+      result: { ok: boolean; read: number; corrupt: number; ms: number };
+      samples: Array<{ t: number; read: number; produced: number }>;
+    }>(
+      page,
+      `
+      const samples = [];
+      const url = new URL("./page/big?mb=128", location.href).href;
+      const result = await window.commandWithProgress(
+        "A",
+        { cmd: "pace", url, rate: ${RATE} },
+        ({ read }) =>
+          samples.push({ t: performance.now(), read, produced: window.pageStats.producedBytes }),
+      );
+      return { result, samples };
+    `,
+    );
+    expect(result).toMatchObject({ ok: true, read: 128 * MiB, corrupt: 0 });
+    expect(result.ms).toBeGreaterThan(5_800);
+    const running = samples.filter((x) => x.produced < 128 * MiB);
+    expect(running.length).toBeGreaterThanOrEqual(8);
+    for (const { produced, read } of running) {
+      // A progress message is read a moment after it was posted, so allow
+      // what the reader took meanwhile on top of the windows.
+      expect(produced - read).toBeLessThanOrEqual(2 * MiB);
+    }
+    const first = running[0] as (typeof running)[number];
+    const last = running[running.length - 1] as (typeof running)[number];
+    const producerRate = ((last.produced - first.produced) / (last.t - first.t)) * 1000;
+    expect(producerRate / RATE).toBeGreaterThan(0.75);
+    expect(producerRate / RATE).toBeLessThan(1.25);
+  });
+
   it("cancellation: an aborted fetch reaches the handler", async () => {
     const page = await open();
     const cancelled = await run<number>(
