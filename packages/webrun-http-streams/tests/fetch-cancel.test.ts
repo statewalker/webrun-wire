@@ -74,7 +74,7 @@ describe("leaving a response body early releases the producer", () => {
   it("release() without reading", async () => {
     const { state, call } = endless();
     const { release } = await httpFetch(call, { url: "http://x/", method: "GET", headers: [] });
-    await release();
+    await release?.();
     await settle();
     expect(state.cancelled).toBe(true);
   });

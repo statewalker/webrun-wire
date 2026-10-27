@@ -3,6 +3,7 @@ import { serializeError } from "@statewalker/webrun-streams";
 import {
   type ChannelCallHandler,
   callChannel,
+  callChannelWithin,
   unwrapTransfer,
   withTransfer,
 } from "../core/data-calls.js";
@@ -227,19 +228,28 @@ export async function sendOverConnection(
 export async function callWebSocketService(
   url: string | URL,
   protocols: string[],
-  { key, port }: Pick<ServiceOptions, "key" | "port">,
+  { key, port, timeout = 15_000 }: Pick<ServiceOptions, "key" | "port"> & { timeout?: number },
 ): Promise<WebSocketConnection> {
   const httpUrl = new URL(`${url}`, globalThis.location?.href);
   if (httpUrl.protocol === "ws:") httpUrl.protocol = "http:";
   else if (httpUrl.protocol === "wss:") httpUrl.protocol = "https:";
   const channel = new MessageChannel();
   try {
-    return await callChannel<WebSocketConnection>(
+    // Bounded: a relay worker or a service of version 1 cannot answer a
+    // socket request (the first fails to pass the port on, the second
+    // answers `true`), and the caller must not wait for ever.
+    const reply = await callChannelWithin<unknown>(
+      timeout,
       port,
       "CONNECT",
       { type: "ws", key, url: `${httpUrl}`, protocols } satisfies WebSocketConnectParams,
       channel.port2,
     );
+    const connection = reply as Partial<WebSocketConnection> | null;
+    if (!(connection?.port instanceof MessagePort)) {
+      throw new Error(`The service "${key}" does not accept WebSockets (an older version?)`);
+    }
+    return { port: connection.port, protocol: connection.protocol ?? "" };
   } finally {
     channel.port1.close();
   }

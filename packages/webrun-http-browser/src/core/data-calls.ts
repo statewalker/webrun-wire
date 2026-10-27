@@ -1,4 +1,5 @@
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
+import { withDeadline } from "./deadline.js";
 import type { MessageSink, MessageSource } from "./message-target.js";
 
 export type ChannelCallHandler = (
@@ -73,4 +74,23 @@ export function handleChannelCalls(
   target.addEventListener("message", listener);
   target.start?.();
   return () => target.removeEventListener("message", listener);
+}
+
+/**
+ * `callChannel`, failing after `ms` instead of waiting for ever: a peer that
+ * died (a ServiceWorker stopped mid-call) or that does not know `callType` (an
+ * older version) never answers.
+ */
+export function callChannelWithin<T = unknown>(
+  ms: number,
+  target: MessageSink,
+  callType: string,
+  params: unknown,
+  ...transfers: Transferable[]
+): Promise<T> {
+  return withDeadline(
+    Date.now() + ms,
+    callChannel<T>(target, callType, params, ...transfers),
+    () => new Error(`No answer to ${callType} within ${ms} ms`),
+  );
 }

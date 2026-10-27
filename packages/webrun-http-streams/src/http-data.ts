@@ -26,9 +26,10 @@ export interface HttpFetchResult {
    * Abandons the call: the peer's producer is released (its `finally` runs).
    * Leaving `body` early — `break`, `.return()`, a cancelled stream — does
    * the same; this is for a caller that never starts reading it, such as a
-   * bodyless response.
+   * bodyless response. Optional, so that results built elsewhere (mocks,
+   * custom transports) still type-check; `httpFetch` always sets it.
    */
-  release(): Promise<void>;
+  release?(): Promise<void>;
 }
 
 export interface HttpDataHandlerResult {

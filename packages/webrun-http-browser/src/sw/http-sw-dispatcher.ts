@@ -365,7 +365,9 @@ export class SwHttpDispatcher {
 
     if (params.wire === undefined) {
       // A page of version 1 (before #32): its own stream transport, no
-      // backpressure. Served as it was, until the page reloads.
+      // backpressure. Served as it was, until the page reloads; after a
+      // restart it is asked for a port the way version 1 asked
+      // (`_askLegacyPage`).
       const link = trackedLink(
         (request) => sendHttpRequest(down, request),
         () => down.close(),
@@ -555,8 +557,11 @@ export class SwHttpDispatcher {
     const windows = await this.self.clients.matchAll({ type: "window", includeUncontrolled: true });
     this.log("[need-links]", key, windows.length);
     const params: NeedLinksParams = { routerLock: this.routerLock };
+    const pending = new Set(windows);
     const answered = Promise.allSettled(
-      windows.map((client) => callChannel(client, NEED_LINKS_CALL, params)),
+      windows.map((client) =>
+        callChannel(client, NEED_LINKS_CALL, params).then(() => pending.delete(client)),
+      ),
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<void>((resolve) => {
@@ -566,13 +571,47 @@ export class SwHttpDispatcher {
     // package never answers, which is what the timeout is for.
     await Promise.race([answered, timedOut]);
     clearTimeout(timer);
+    // The windows that did not answer may run version 1 of this package,
+    // which re-links when asked the way version 1's worker asked.
+    for (const client of pending) this._askLegacyPage(client);
+  }
+
+  /** Asks a version-1 page for a fresh port, as version 1's worker did. */
+  private _askLegacyPage(client: Client): void {
+    const channel = new MessageChannel();
+    callChannel<AttachParams>(client, ATTACH_CALL, {}, channel.port2).then(
+      (info) => {
+        if (!info?.key || info.wire !== undefined) return;
+        const link = trackedLink(
+          (request) => sendHttpRequest(channel.port1, request),
+          () => channel.port1.close(),
+        );
+        this._add(
+          new HandlerEntry(
+            info.key,
+            client.id,
+            client.id,
+            undefined,
+            link,
+            undefined,
+            client.id,
+            undefined,
+          ),
+        );
+      },
+      () => channel.port1.close(),
+    );
   }
 
   private _onControl(entry: HandlerEntry, message: ControlMessage): void {
     if (!message || typeof message !== "object") return;
     switch (message.t) {
       case "ws-accept":
-        entry.sockets.settle(message.id, { port: message.port, protocol: message.protocol });
+        // Too late (the caller gave up): close the port, or the handler's
+        // socket lingers until its heartbeat notices.
+        if (!entry.sockets.settle(message.id, { port: message.port, protocol: message.protocol })) {
+          message.port.close();
+        }
         return;
       case "ws-refuse":
         entry.sockets.fail(message.id, new Error(message.message));

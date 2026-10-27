@@ -10,3 +10,9 @@ ServiceWorker HTTP over webrun-rpc, handlers in Dedicated Workers, restarts, and
 - **WebSockets over MessagePorts (#35).** `createWebSocketClass(connect)` (a WHATWG `WebSocket` class), `upgradeWebSocket(request)` / `ServerWebSocket` (the handler's end), heartbeat, and acknowledgements that make `bufferedAmount` real and give the server end `whenDrained()`.
 - **Opening sockets (#36).** `adapter.connectWebSocket` / `adapter.WebSocket`, `serviceWorkerWebSocketClass()` for any controlled page, `service.WebSocket` in workers (worker to worker through the router), and `callWebSocketService` / `relayWebSocketClass` through a relay; the relay worker also brokers sockets for content on its own origin.
 - **Relay registration (#13).** `canRegister(client, key, path)` sees where a key would be mounted; `UNREGISTER` is accepted only from the key's holder (or, once it is gone, a client `canRegister` allows); the cleanup of `initHttpService` / `registerConnectionsHandler` returns a promise that settles once the relay acknowledged.
+
+API changes to know about:
+
+- `SwHttpAdapter` and `SwHttpDispatcher` no longer extend `SwPortHandler` / `SwPortDispatcher` (both still exported, for subclasses of version 1): `instanceof` those bases, overrides of `_setCommunicationPort`, `loadChannelInfo` and `handlersIndex` are gone. The adapter's `bindPort` option is ignored. `start()`, `stop()`, `register()`, `rootUrl`, `scope`, `serviceWorkerUrl` and `startHttpDispatcher` are unchanged.
+- `initHttpService` and `registerConnectionsHandler` resolve `() => Promise<void>` (still callable as `() => void`).
+

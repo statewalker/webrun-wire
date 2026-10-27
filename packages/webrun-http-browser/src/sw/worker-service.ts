@@ -1,4 +1,4 @@
-import { holdLock, newLockName } from "../link/locks.js";
+import { holdLock, locksAvailable, newLockName } from "../link/locks.js";
 import {
   createWebSocketClass,
   type PortWebSocketClass,
@@ -89,7 +89,10 @@ export function serveHttpInWorker(
       }
     };
     void held.then(() =>
-      control.postMessage({ type: "ready", ownerLock } satisfies WorkerControlMessage),
+      control.postMessage({
+        type: "ready",
+        ownerLock: locksAvailable() ? ownerLock : undefined,
+      } satisfies WorkerControlMessage),
     );
   };
   scope.addEventListener("message", onMessage);

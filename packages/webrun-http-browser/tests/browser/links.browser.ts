@@ -386,6 +386,46 @@ describe("ServiceWorker restarts and handler deaths (#34)", () => {
     expect(names).toEqual(["A:slow", "B:slow"]);
   });
 
+  it("restart: a replaced worker does not take its slot back", async () => {
+    const page = await open();
+    await run(
+      page,
+      `await window.attach("A", { id: "slot" }); await window.attach("B", { id: "slot" });`,
+    );
+    await stopServiceWorkers(page);
+    const names = await run<string[]>(
+      page,
+      `
+      const names = [];
+      for (let i = 0; i < 5; i++) names.push(await (await fetch("./app/who")).text());
+      return names;
+    `,
+    );
+    expect(names).toEqual(["B", "B", "B", "B", "B"]);
+  });
+
+  it("restart: a terminated worker is not attached again", async () => {
+    const page = await open();
+    await run(
+      page,
+      `await window.attach("A", { id: "a" }); await window.attach("B", { id: "b" });`,
+    );
+    await run(page, `window.workers.A.worker.terminate();`);
+    await stopServiceWorkers(page);
+    const statuses = await run<string[]>(
+      page,
+      `
+      const out = [];
+      for (let i = 0; i < 10; i++) {
+        const response = await fetch("./app/who");
+        out.push(response.status + ":" + (await response.text()));
+      }
+      return [...new Set(out)];
+    `,
+    );
+    expect(statuses).toEqual(["200:B"]);
+  });
+
   it("wake: a call through the router after a stop completes, with no fetch event", async () => {
     const page = await open();
     await run(page, `await window.attach("A");`);

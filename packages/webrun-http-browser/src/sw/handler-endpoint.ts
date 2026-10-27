@@ -27,6 +27,12 @@ export interface HandlerEndpointOptions extends HttpLinkOptions {
   relinkTimeoutMs?: number;
   /** How long a socket waits for the far handler's answer, in ms. Default 15 s. */
   wsConnectTimeoutMs?: number;
+  /**
+   * How long a link replaced by a newer one of the same router keeps serving
+   * what it has, in ms. The ServiceWorker closes it first, once its requests
+   * are done; this only bounds a link it forgot. Default 30 s.
+   */
+  supersededLinkMs?: number;
 }
 
 export interface EndpointLinkPorts {
@@ -42,6 +48,8 @@ interface LiveLink {
   up?: HttpLink;
   closeDown: () => Promise<void>;
   stopWatch: () => void;
+  /** A newer link of the same key took over: finish, take nothing new. */
+  superseded?: boolean;
 }
 
 /** The message calls through a lost ServiceWorker fail with. */
@@ -96,11 +104,17 @@ export class HandlerEndpoint {
     // Each watch drops only the links made for its own router, so a link made
     // by the next router is never dropped by the death of the previous one.
     if (routerLock) link.stopWatch = watchLock(routerLock, () => this._routerLost(routerLock));
-    // A link of the same key made for another router belongs to a dead
-    // ServiceWorker, whatever its lock watch has not noticed yet.
     for (const old of [...this._links]) {
-      if (old.key === key && old.routerLock !== routerLock) {
+      if (old.key !== key) continue;
+      if (old.routerLock !== routerLock) {
+        // Made for another router: it belongs to a dead ServiceWorker,
+        // whatever its lock watch has not noticed yet.
         void this._drop(old, new LinkLostError(ROUTER_LOST_MESSAGE));
+      } else if (!old.superseded) {
+        // Same router: the ServiceWorker lets it finish its requests in
+        // flight, so it keeps serving them; it only stops being picked.
+        old.superseded = true;
+        setTimeout(() => void this._drop(old), this.options.supersededLinkMs ?? 30_000);
       }
     }
     this._links.add(link);
@@ -173,6 +187,7 @@ export class HandlerEndpoint {
   private async _linkWith(port: "up" | "ctl"): Promise<LiveLink> {
     const find = () =>
       [...this._links]
+        .filter((link) => !link.superseded)
         .reverse()
         .find((link) => (port === "up" ? link.up && !link.up.closed : link.ctl));
     const found = find();
@@ -215,7 +230,9 @@ export class HandlerEndpoint {
         void this._acceptSocket(link, message);
         return;
       case "ws-opened":
-        this._sockets.settle(message.id, { port: message.port, protocol: message.protocol });
+        if (!this._sockets.settle(message.id, { port: message.port, protocol: message.protocol })) {
+          message.port.close();
+        }
         return;
       case "ws-failed":
         this._sockets.fail(message.id, new Error(message.message));

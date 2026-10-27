@@ -140,7 +140,7 @@ export async function fetchOverDuplex(
     request.method === "OPTIONS" ||
     NULL_BODY_STATUSES.has(envelope.status)
   ) {
-    await release();
+    await release?.();
     return new Response(null, responseInit);
   }
   return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);

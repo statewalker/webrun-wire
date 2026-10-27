@@ -190,6 +190,15 @@ describe("createWebSocketClass: closing", () => {
     expect(ws.readyState).toBe(ws.CLOSED);
   });
 
+  it("a connection that is not one (an older peer answered `true`) fails, not hangs", async () => {
+    const WS = createWebSocketClass(async () => true as never);
+    const ws = new WS(URL_);
+    const events: string[] = [];
+    ws.addEventListener("error", () => events.push("error"));
+    expect((await next<CloseEvent>(ws, "close")).code).toBe(1006);
+    expect(events).toEqual(["error"]);
+  });
+
   it("an unrequested subprotocol is a failure", async () => {
     const WS = createWebSocketClass(connector(echo({ protocol: "other" })));
     const ws = new WS(URL_, ["v1"]);

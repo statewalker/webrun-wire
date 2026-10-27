@@ -111,7 +111,9 @@ export function createWebSocketClass(
     private _binaryType: BinaryType = "blob";
     private _handlers: Record<string, Listener> = {};
     private _heartbeat: unknown;
-    private _lastPong = 0;
+    /** When the oldest ping still waiting for its pong was sent. */
+    private _unansweredSince?: number;
+    private _onVisibility?: () => void;
     /** Sends waiting for a Blob ahead of them to be read, so order is kept. */
     private _chain?: Promise<void>;
 
@@ -128,7 +130,13 @@ export function createWebSocketClass(
       Promise.resolve()
         .then(() => connect(this.url, list))
         .then(
-          (connection) => this._opened(connection, list),
+          (connection) => {
+            try {
+              this._opened(connection, list);
+            } catch {
+              this._failed();
+            }
+          },
           () => this._failed(),
         );
     }
@@ -218,16 +226,28 @@ export function createWebSocketClass(
     }
 
     protected _onPong(): void {
-      this._lastPong = Date.now();
+      this._unansweredSince = undefined;
     }
 
     protected _onClosed(): void {
       if (this._heartbeat !== undefined) this._timers.clearInterval(this._heartbeat);
       this._heartbeat = undefined;
+      if (this._onVisibility) {
+        globalThis.document?.removeEventListener("visibilitychange", this._onVisibility);
+      }
+    }
+
+    private _ping(hb = heartbeatMs): void {
+      this._unansweredSince ??= Date.now();
+      this._post({ t: "p", hb });
     }
 
     private _opened(connection: WebSocketConnection, requested: string[]): void {
-      const { port, protocol = "" } = connection;
+      const { port, protocol = "" } = (connection ?? {}) as Partial<WebSocketConnection>;
+      if (!port || typeof port.postMessage !== "function") {
+        this._failed();
+        return;
+      }
       if (this._state !== CONNECTING) {
         // Closed while connecting.
         try {
@@ -245,15 +265,29 @@ export function createWebSocketClass(
       this._protocol = protocol;
       this._attach(port);
       this._state = OPEN;
-      this._lastPong = Date.now();
-      this._post({ t: "p", hb: heartbeatMs });
+      this._ping();
       this._heartbeat = this._timers.setInterval(() => {
-        if (Date.now() - this._lastPong > 2 * heartbeatMs) {
+        // Only a ping that went unanswered counts. In a background tab this
+        // timer may run once a minute; time alone is no sign of a dead peer.
+        const since = this._unansweredSince;
+        if (since !== undefined && Date.now() - since > 2 * heartbeatMs) {
           this._finish(1006, "", false, true);
           return;
         }
-        this._post({ t: "p", hb: heartbeatMs });
+        this._ping();
       }, heartbeatMs);
+      // A hidden page's timers are throttled to once a minute (Chromium's
+      // intensive throttling): tell the server to expect pings that rarely,
+      // so it does not take a backgrounded tab for a dead one.
+      const doc = globalThis.document;
+      if (doc) {
+        this._onVisibility = () =>
+          this._ping(
+            doc.visibilityState === "hidden" ? Math.max(heartbeatMs, 70_000) : heartbeatMs,
+          );
+        doc.addEventListener("visibilitychange", this._onVisibility);
+        if (doc.visibilityState === "hidden") this._onVisibility();
+      }
       this.dispatchEvent(new Event("open"));
     }
 

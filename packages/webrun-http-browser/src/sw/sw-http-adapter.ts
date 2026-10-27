@@ -1,5 +1,5 @@
 import type { HttpHandler } from "@statewalker/webrun-http-streams";
-import { callChannel, handleChannelCalls } from "../core/data-calls.js";
+import { callChannel, callChannelWithin, handleChannelCalls } from "../core/data-calls.js";
 import { withDeadline } from "../core/deadline.js";
 import {
   awaitServiceWorkerControl,
@@ -7,7 +7,7 @@ import {
   ServiceWorkerControlError,
 } from "../core/service-worker-control.js";
 import { HTTP_LINK_PROTOCOL } from "../link/http-link.js";
-import { holdLock, newLockName } from "../link/locks.js";
+import { heldLockNames, holdLock, locksAvailable, newLockName } from "../link/locks.js";
 import {
   createWebSocketClass,
   type PortWebSocketClass,
@@ -25,7 +25,7 @@ import {
   KEEPALIVE_MESSAGE,
   NEED_LINKS_CALL,
   type NeedLinksParams,
-  type WAKE_MESSAGE,
+  WAKE_MESSAGE,
   WORKER_HELLO,
   type WorkerControlMessage,
   WS_CONNECT_CALL,
@@ -287,29 +287,50 @@ export class SwHttpAdapter {
    */
   async attachWorker(worker: Worker, options: AttachWorkerOptions = {}): Promise<WorkerLink> {
     await this.start();
-    const control = new MessageChannel();
-    const ready = new Promise<{ ownerLock?: string }>((resolve, reject) => {
-      const timer = setTimeout(
-        () =>
+    // The hello is repeated until the worker answers: a worker that calls
+    // `serveHttpInWorker` only after an `await` has no listener yet, and a
+    // message to a worker with no listener is lost.
+    const controls: MessagePort[] = [];
+    let retry: ReturnType<typeof setInterval> | undefined;
+    const answered = new Promise<{ control: MessagePort; ownerLock?: string }>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          clearInterval(retry);
+          for (const port of controls) port.close();
           reject(
             new Error(
               "The worker did not answer within the timeout. Does it call serveHttpInWorker()?",
             ),
-          ),
-        this.options.timeout ?? DEFAULT_SERVICE_WORKER_TIMEOUT,
-      );
-      control.port1.onmessage = (event) => {
-        const message = event.data as WorkerControlMessage;
-        if (message?.type !== "ready") return;
-        clearTimeout(timer);
-        resolve(message);
-      };
-    });
-    worker.postMessage({ type: WORKER_HELLO }, [control.port2]);
-    const { ownerLock } = await ready;
-    const link = new WorkerLinkImpl(this, control.port1, {
-      key: options.key ?? this.key,
-      id: options.id ?? `worker:${crypto.randomUUID()}`,
+          );
+        }, this.options.timeout ?? DEFAULT_SERVICE_WORKER_TIMEOUT);
+        const hello = () => {
+          const channel = new MessageChannel();
+          controls.push(channel.port1);
+          channel.port1.onmessage = (event) => {
+            const message = event.data as WorkerControlMessage;
+            if (message?.type !== "ready") return;
+            clearTimeout(timer);
+            clearInterval(retry);
+            for (const port of controls) if (port !== channel.port1) port.close();
+            resolve({ control: channel.port1, ownerLock: message.ownerLock });
+          };
+          worker.postMessage({ type: WORKER_HELLO }, [channel.port2]);
+        };
+        hello();
+        retry = setInterval(hello, 500);
+      },
+    );
+    const { control, ownerLock } = await answered;
+    const key = options.key ?? this.key;
+    const id = options.id ?? `worker:${crypto.randomUUID()}`;
+    // Attaching a slot replaces whoever held it: the ServiceWorker lets the old
+    // one finish its requests, and this page must not attach it again later.
+    for (const old of [...this._workers]) {
+      if (old.key === key && old.id === id) old.retire();
+    }
+    const link = new WorkerLinkImpl(this, control, {
+      key,
+      id,
       owner: crypto.randomUUID(),
       meta: options.meta,
       ownerLock,
@@ -340,10 +361,12 @@ export class SwHttpAdapter {
       return { port: result.port, protocol: result.protocol };
     }
     await this.start();
-    return await callChannel<WebSocketConnection>(this._worker(), WS_CONNECT_CALL, {
-      url: `${httpUrl}`,
-      protocols,
-    });
+    return await callChannelWithin<WebSocketConnection>(
+      this._callTimeout(),
+      this._worker(),
+      WS_CONNECT_CALL,
+      { url: `${httpUrl}`, protocols },
+    );
   };
 
   /**
@@ -393,6 +416,11 @@ export class SwHttpAdapter {
     this._workers.delete(link);
   }
 
+  /** @internal How long a call to the ServiceWorker may take. */
+  _callTimeout(): number {
+    return this.options.timeout ?? DEFAULT_SERVICE_WORKER_TIMEOUT;
+  }
+
   private _attachPage(): Promise<void> {
     this._attaching ??= (async () => {
       try {
@@ -403,11 +431,14 @@ export class SwHttpAdapter {
           key: this.key,
           id: this._id,
           owner: this._owner,
-          ownerLock: this._releaseOwner ? this._ownerLock : undefined,
+          // Sent only when held for real: without Web Locks the ServiceWorker
+          // falls back to `clients.get()`, which an owner lock would skip.
+          ownerLock: this._releaseOwner && locksAvailable() ? this._ownerLock : undefined,
           meta: this.options.meta,
           ctl: true,
         };
-        const reply = await callChannel<AttachReply>(
+        const reply = await callChannelWithin<AttachReply>(
+          this._callTimeout(),
           this._worker(),
           ATTACH_CALL,
           params,
@@ -415,7 +446,8 @@ export class SwHttpAdapter {
           ctl.port1,
         );
         checkReply(reply, this._worker());
-        await this._endpoint.unlink();
+        // The previous link is not dropped here: the endpoint lets it finish
+        // what it serves (see `HandlerEndpoint.link`).
         await this._endpoint.link(this.key, { down: down.port2, ctl: ctl.port2 }, reply.routerLock);
         this._routerLock = reply.routerLock;
       } finally {
@@ -461,9 +493,22 @@ class WorkerLinkImpl implements WorkerLink {
     this._ownerLock = init.ownerLock;
     _control.onmessage = (event) => {
       const message = event.data as WorkerControlMessage;
-      if (message?.type === "relink") void this.attach().catch(() => {});
-      else if (message?.type === "keepalive") this._adapter._poke(KEEPALIVE_MESSAGE);
+      if (message?.type === "relink") {
+        // Starts the ServiceWorker if it was stopped; the attach follows.
+        this._adapter._poke(WAKE_MESSAGE);
+        void this.attach().catch(() => {});
+      } else if (message?.type === "keepalive") this._adapter._poke(KEEPALIVE_MESSAGE);
     };
+  }
+
+  /**
+   * Forgets this link without telling the ServiceWorker: another attachment
+   * took its slot, and the ServiceWorker retires it by itself.
+   */
+  retire(): void {
+    this._detached = true;
+    this._adapter._forget(this);
+    this._control.onmessage = null;
   }
 
   /** Makes fresh channels and attaches them; the worker gets its ends. */
@@ -471,6 +516,15 @@ class WorkerLinkImpl implements WorkerLink {
     if (this._detached) return Promise.resolve();
     this._attaching ??= (async () => {
       try {
+        // A worker that was terminated holds no owner lock any more: attaching
+        // it again would route requests to it until the ServiceWorker noticed.
+        if (this._ownerLock) {
+          const held = await heldLockNames();
+          if (held && !held.has(this._ownerLock)) {
+            this.retire();
+            return;
+          }
+        }
         const down = new MessageChannel();
         const ctl = new MessageChannel();
         const up = new MessageChannel();
@@ -485,7 +539,8 @@ class WorkerLinkImpl implements WorkerLink {
           up: true,
         };
         const sw = this._adapter._worker();
-        const reply = await callChannel<AttachReply>(
+        const reply = await callChannelWithin<AttachReply>(
+          this._adapter._callTimeout(),
           sw,
           ATTACH_CALL,
           params,
@@ -514,13 +569,16 @@ class WorkerLinkImpl implements WorkerLink {
     if (this._detached) return;
     this._detached = true;
     this._adapter._forget(this);
-    await callChannel(this._adapter._worker(), DRAIN_CALL, {
-      key: this.key,
-      id: this.id,
-      owner: this.owner,
-      ms,
-    });
-    this._unlink();
+    try {
+      await callChannel(this._adapter._worker(), DRAIN_CALL, {
+        key: this.key,
+        id: this.id,
+        owner: this.owner,
+        ms,
+      });
+    } finally {
+      this._unlink();
+    }
   }
 
   async detach(): Promise<void> {
