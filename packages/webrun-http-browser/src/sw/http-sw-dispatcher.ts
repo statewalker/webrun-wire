@@ -13,7 +13,7 @@ import {
   serveHttpLink,
   trackedLink,
 } from "../link/http-link.js";
-import { holdLock, locksAvailable, newLockName, watchLock } from "../link/locks.js";
+import { heldLockNames, holdLock, locksAvailable, newLockName, watchLock } from "../link/locks.js";
 import { PortRendezvous } from "../link/rendezvous.js";
 import type { WebSocketConnection } from "../ws/client.js";
 import { newWebSocketUpgradeRequest } from "../ws/upgrade.js";
@@ -65,6 +65,11 @@ export interface SwHttpDispatcherOptions {
   wsConnectTimeoutMs?: number;
   /** Per-stream inactivity timeout of the links (webrun-rpc's). Default none. */
   streamTimeout?: number;
+  /**
+   * Period of the backup liveness check, in ms: handlers whose owner lock is
+   * no longer held are dropped. Default 5 s; 0 turns it off.
+   */
+  livenessCheckMs?: number;
 }
 
 /** One attached handler link, as the ServiceWorker holds it. */
@@ -138,6 +143,7 @@ export class SwHttpDispatcher {
   private _restored: Promise<void> = Promise.resolve();
   private _restoreSettled = false;
   private _cleanup: Array<() => void> = [];
+  private _livenessTimer?: ReturnType<typeof setInterval>;
   private readonly _relinkRounds = new Map<string, { at: number; done: Promise<void> }>();
   /** Keys whose last handler was drained: until the time stored, requests wait for the next. */
   private readonly _vacant = new Map<string, number>();
@@ -247,6 +253,8 @@ export class SwHttpDispatcher {
 
   async stop(): Promise<void> {
     for (const cleanup of this._cleanup.splice(0)) cleanup();
+    if (this._livenessTimer) clearInterval(this._livenessTimer);
+    this._livenessTimer = undefined;
     for (const entry of this.table.entries()) {
       this._close(entry, new LinkLostError("The ServiceWorker dispatcher stopped"));
     }
@@ -414,6 +422,33 @@ export class SwHttpDispatcher {
       void this._retire(replaced, this.options.handoverMs ?? 5_000, false);
     }
     void this._claim(entry.key);
+    if (entry.ownerLock) this._watchLiveness();
+  }
+
+  /**
+   * The backup of the owner-lock watches: every `livenessCheckMs`, drops the
+   * handlers whose owner lock is no longer held. Runs only while some handler
+   * has an owner lock, and keeps nothing awake: a timer is not an event.
+   */
+  private _watchLiveness(): void {
+    const period = this.options.livenessCheckMs ?? 5_000;
+    if (this._livenessTimer || period <= 0) return;
+    this._livenessTimer = setInterval(async () => {
+      const watched = this.table.entries().filter((entry) => entry.ownerLock);
+      if (watched.length === 0) {
+        clearInterval(this._livenessTimer);
+        this._livenessTimer = undefined;
+        return;
+      }
+      const held = await heldLockNames();
+      if (!held) return;
+      for (const entry of watched) {
+        if (entry.ownerLock && !held.has(entry.ownerLock) && this.table.remove(entry)) {
+          this.log("[owner gone]", entry.key, entry.id);
+          this._close(entry, new LinkLostError(HANDLER_LOST_MESSAGE), false);
+        }
+      }
+    }, period);
   }
 
   /** The entry a drain or detach names, if its owner token still matches. */

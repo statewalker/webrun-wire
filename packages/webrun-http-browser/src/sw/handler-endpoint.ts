@@ -96,6 +96,13 @@ export class HandlerEndpoint {
     // Each watch drops only the links made for its own router, so a link made
     // by the next router is never dropped by the death of the previous one.
     if (routerLock) link.stopWatch = watchLock(routerLock, () => this._routerLost(routerLock));
+    // A link of the same key made for another router belongs to a dead
+    // ServiceWorker, whatever its lock watch has not noticed yet.
+    for (const old of [...this._links]) {
+      if (old.key === key && old.routerLock !== routerLock) {
+        void this._drop(old, new LinkLostError(ROUTER_LOST_MESSAGE));
+      }
+    }
     this._links.add(link);
     for (const wake of this._waiters.splice(0)) wake();
   }

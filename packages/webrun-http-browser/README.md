@@ -341,6 +341,7 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | `handoverMs` | `5_000` | How long a replaced handler may finish its requests. |
 | `wsConnectTimeoutMs` | `15_000` | How long a socket waits for its handler's answer. |
 | `streamTimeout` | none | Per-stream inactivity timeout of the links. |
+| `livenessCheckMs` | `5_000` | Period of the backup liveness check (`navigator.locks.query()`); `0` turns it off. |
 
 `link.drain({ ms })` hands a slot over: no new requests reach the handler (they
 wait for the next owner of the key, up to `attachTimeoutMs`), and those in

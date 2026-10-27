@@ -17,6 +17,7 @@
  */
 
 interface LockManagerLike {
+  query?(): Promise<{ held?: Array<{ name?: string }> }>;
   request(
     name: string,
     options: { signal?: AbortSignal; mode?: "exclusive" | "shared" },
@@ -77,4 +78,20 @@ export function watchLock(name: string, onLost: () => void): () => void {
       // Aborted by the returned function: not a loss.
     });
   return () => controller.abort();
+}
+
+/**
+ * The names of the locks held right now in this origin, or `undefined` where
+ * that cannot be asked. A backup for `watchLock`: a grant can be late, a query
+ * cannot.
+ */
+export async function heldLockNames(): Promise<Set<string> | undefined> {
+  const locks = lockManager();
+  if (!locks?.query) return undefined;
+  try {
+    const { held = [] } = await locks.query();
+    return new Set(held.map((lock) => lock.name ?? ""));
+  } catch {
+    return undefined;
+  }
 }
