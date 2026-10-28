@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-browser",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "private": false,
   "type": "module",
   "description": "ServiceWorker-based HTTP and WebSocket server for browsers: handlers in pages and Dedicated Workers, same-origin and relay modes, streams with backpressure",
