@@ -374,6 +374,16 @@ port it held dies with it. Nothing reports that on the other end, so:
   in flight, the worker asks its page every 20 s to post a keep-alive message
   to the ServiceWorker.
 
+Measured in Chromium with a ServiceWorker that may idle out
+(`tests/browser/lifetime.browser.ts`, which drives Chromium over raw CDP:
+Playwright keeps every ServiceWorker running):
+
+- without the keep-alive, a 45 s call over `service.fetch` fails at about 30 s
+  with the loss error; with it, the call completes;
+- a response streaming through the ServiceWorker keeps it alive by itself: a
+  60 s event stream arrives whole in the test, and a 6-minute one did in a
+  one-off run.
+
 Without Web Locks, a page handler's liveness falls back to `clients.get()`, and
 worker deaths are not noticed until a request times out.
 
