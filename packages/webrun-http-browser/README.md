@@ -595,7 +595,10 @@ than falling through to the network: a dev server's SPA fallback would
 otherwise serve the app shell for every site URL. (After a restart, the first
 such request first asks the pages to link again; see above.) A URL outside the
 scope, or of a key never served, is not answered at all: the worker does not
-call `respondWith`, so the browser performs the request as without a worker. On
+call `respondWith`, so the browser performs the request as without a worker.
+Navigations under the scope are the exception: they are passed through with
+`fetch(request)`, because Firefox can leave a page uncontrolled when its worker
+did not answer the navigation. On
 the page, a request matching no registered prefix gets
 `404 Error 404: Not found`.
 
@@ -649,7 +652,10 @@ links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
 the producer. Between a ServiceWorker's `respondWith` and the page, though,
 Chromium buffers by itself, tens of megabytes of a fast stream: a page reading
 slowly sees the handler run that far ahead before backpressure reaches it
-(about 55 MiB, the same for a plain ServiceWorker with no library). A worker
+(about 55 MiB, the same for a plain ServiceWorker with no library). Firefox
+sets no such bound: it keeps reading a ServiceWorker's response while the page
+does not, so there a handler streaming to a page that stopped reading keeps
+producing (this package still holds only a few chunks of it). A worker
 reading through `service.fetch` has no such buffer. `links.browser.ts` pins
 the split: once a page stops reading, the handler is never more than a few
 chunks ahead of what the ServiceWorker handed to Chromium, and stops.

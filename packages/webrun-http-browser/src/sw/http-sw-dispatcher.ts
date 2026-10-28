@@ -337,8 +337,15 @@ export class SwHttpDispatcher {
     // request exactly as it would without a worker.
     if (key === undefined) return;
     if (this._restoreSettled) {
-      if (!this.serves(key)) return;
-      event.respondWith(this.dispatch(request));
+      if (this.serves(key)) {
+        event.respondWith(this.dispatch(request));
+      } else if (request.mode === "navigate") {
+        // A navigation under the scope is answered even when it is nobody's,
+        // by passing it through: Firefox can leave a page uncontrolled when
+        // its worker did not answer the navigation, and an uncontrolled page's
+        // `fetch()` never reaches this worker. Everything else is left alone.
+        event.respondWith(fetch(request));
+      }
       return;
     }
     // Before the stored keys are read there is nothing to decide on, and
