@@ -8,3 +8,31 @@ on:
 jobs:
   ci:
     uses: statewalker/.github/.github/workflows/ci.yml@main
+
+  # The shared CI runs the Node suites only. webrun-http-browser's browser
+  # suites (ServiceWorkers, workers, relays, WebSockets) need real browsers:
+  # Chromium and Firefox, installed by Playwright on the runner.
+  browser:
+    name: Browser tests (webrun-http-browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the package and its dependencies
+        run: pnpm --filter "@statewalker/webrun-http-browser..." run build
+
+      - name: Browsers
+        run: pnpm --filter @statewalker/webrun-http-browser exec playwright install --with-deps chromium firefox
+
+      - name: Test
+        run: pnpm --filter @statewalker/webrun-http-browser run test:browser

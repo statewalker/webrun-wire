@@ -28,7 +28,10 @@ const { handler } = newHandler(name, {
     return new Response(`${name} got ${reply}`);
   },
 });
-service = serveHttpInWorker(handler);
+// ?keepalive=<ms>: the keep-alive period (the lifetime tests turn it off with a
+// period longer than the call).
+const keepAliveMs = Number(new URL(self.location.href).searchParams.get("keepalive") ?? 20000);
+service = serveHttpInWorker(handler, { keepAliveMs });
 
 // Test commands straight from the page, so that no fetch event is involved.
 self.addEventListener("message", async (event) => {

@@ -26,8 +26,8 @@
         window.adapter = adapter;
         window.workers = {};
         // Starts a worker named `name` and attaches it under `key`.
-        window.attach = async (name, options = {}) => {
-          const worker = new Worker(`./worker.js?name=${name}`, { type: "module" });
+        window.attach = async (name, options = {}, query = "") => {
+          const worker = new Worker(`./worker.js?name=${name}${query}`, { type: "module" });
           const link = await adapter.attachWorker(worker, { key: "app", ...options });
           window.workers[name] = { worker, link };
           return { id: link.id, owner: link.owner };

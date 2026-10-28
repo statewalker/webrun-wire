@@ -89,6 +89,26 @@ export function newHandler(name, extra = {}) {
           { headers: { "content-type": "text/event-stream" } },
         );
       }
+      case "events": {
+        // `n` server-sent events, `ms` apart: a long response body.
+        const n = Number(url.searchParams.get("n") ?? 3);
+        const ms = Number(url.searchParams.get("ms") ?? 1000);
+        const encoder = new TextEncoder();
+        let i = 0;
+        return new Response(
+          new ReadableStream({
+            async pull(controller) {
+              if (i === n) {
+                controller.close();
+                return;
+              }
+              if (i > 0) await sleep(ms);
+              controller.enqueue(encoder.encode(`data: ${i++}\n\n`));
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
       case "echo-body": {
         let bytes = 0;
         let chunks = 0;

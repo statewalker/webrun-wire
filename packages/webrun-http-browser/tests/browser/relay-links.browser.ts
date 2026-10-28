@@ -1,7 +1,7 @@
 /**
  * The relay over webrun-rpc + webrun-http-streams (#32), WebSockets through
- * it (#36), and its registration rules (#13), in Chromium against the BUILT
- * bundles.
+ * it (#36), and its registration rules (#13), in Chromium and Firefox against
+ * the BUILT bundles.
  *
  * The host page runs on `localhost`, the relay on `127.0.0.1`: two origins,
  * as in a real deployment, so everything crosses the relay iframe.
@@ -12,7 +12,14 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Browser, type BrowserContext, chromium, type Frame, type Page } from "playwright";
+import {
+  type Browser,
+  type BrowserContext,
+  chromium,
+  type Frame,
+  firefox,
+  type Page,
+} from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -52,7 +59,6 @@ beforeAll(async () => {
   const port = (server.address() as AddressInfo).port;
   hostOrigin = `http://localhost:${port}`;
   relayOrigin = `http://127.0.0.1:${port}`;
-  browser = await chromium.launch();
 });
 
 afterAll(async () => {
@@ -91,12 +97,25 @@ async function relayFrame(page: Page): Promise<Frame> {
   return frame;
 }
 
-describe("relay", () => {
-  it("callHttpService streams with backpressure, and cancels the producer", async () => {
-    const page = await open();
-    const result = await run<{ produced: number; cancelled: number }>(
-      page,
-      `
+const browsers = { chromium, firefox };
+
+for (const [browserName, browserType] of Object.entries(browsers)) {
+  describe(browserName, () => {
+    beforeAll(async () => {
+      browser = await browserType.launch();
+    });
+    afterAll(async () => {
+      await context?.close();
+      context = undefined;
+      await browser?.close();
+    });
+
+    describe("relay", () => {
+      it("callHttpService streams with backpressure, and cancels the producer", async () => {
+        const page = await open();
+        const result = await run<{ produced: number; cancelled: number }>(
+          page,
+          `
       const response = await window.lib.callHttpService(new Request(window.base + "stream"), {
         key: "K",
         port: window.connection.port,
@@ -114,25 +133,25 @@ describe("relay", () => {
       }
       return { produced, cancelled: window.stats.cancelled };
     `,
-    );
-    expect(result.produced - 40).toBeLessThanOrEqual(6);
-    expect(result.cancelled).toBe(1);
-  });
+        );
+        expect(result.produced - 40).toBeLessThanOrEqual(6);
+        expect(result.cancelled).toBe(1);
+      });
 
-  it("a fetch on the relay origin reaches the service over the new transport", async () => {
-    const page = await open();
-    const text = await run<string>(
-      await relayFrame(page),
-      `return await (await fetch("${FIXTURE}svc/who")).text();`,
-    );
-    expect(text).toBe("relay");
-  });
+      it("a fetch on the relay origin reaches the service over the new transport", async () => {
+        const page = await open();
+        const text = await run<string>(
+          await relayFrame(page),
+          `return await (await fetch("${FIXTURE}svc/who")).text();`,
+        );
+        expect(text).toBe("relay");
+      });
 
-  it("a page on another origin opens a socket to the service", async () => {
-    const page = await open();
-    const result = await run<{ protocol: string; text: string; bytes: number[] }>(
-      page,
-      `
+      it("a page on another origin opens a socket to the service", async () => {
+        const page = await open();
+        const result = await run<{ protocol: string; text: string; bytes: number[] }>(
+          page,
+          `
       const WS = window.lib.relayWebSocketClass({ key: "K", port: window.connection.port });
       const ws = new WS(window.base + "chat", ["v1"]);
       ws.binaryType = "arraybuffer";
@@ -145,15 +164,15 @@ describe("relay", () => {
       ws.close();
       return { protocol: ws.protocol, text, bytes };
     `,
-    );
-    expect(result).toEqual({ protocol: "v1", text: "relay:hi", bytes: [7, 8] });
-  });
+        );
+        expect(result).toEqual({ protocol: "v1", text: "relay:hi", bytes: [7, 8] });
+      });
 
-  it("a refused socket fails with error and 1006", async () => {
-    const page = await open();
-    const events = await run<string[]>(
-      page,
-      `
+      it("a refused socket fails with error and 1006", async () => {
+        const page = await open();
+        const events = await run<string[]>(
+          page,
+          `
       const WS = window.lib.relayWebSocketClass({ key: "K", port: window.connection.port });
       const ws = new WS(window.base + "ws-refuse");
       const events = [];
@@ -161,15 +180,15 @@ describe("relay", () => {
       await new Promise((resolve) => { ws.onclose = (e) => { events.push("close:" + e.code); resolve(); }; });
       return events;
     `,
-    );
-    expect(events).toEqual(["error", "close:1006"]);
-  });
+        );
+        expect(events).toEqual(["error", "close:1006"]);
+      });
 
-  it("content on the relay origin opens a socket through the relay worker", async () => {
-    const page = await open();
-    const text = await run<string>(
-      await relayFrame(page),
-      `
+      it("content on the relay origin opens a socket through the relay worker", async () => {
+        const page = await open();
+        const text = await run<string>(
+          await relayFrame(page),
+          `
       const lib = await import("/dist/index.js");
       const WS = lib.serviceWorkerWebSocketClass();
       const ws = new WS("${FIXTURE}svc/chat");
@@ -179,17 +198,17 @@ describe("relay", () => {
       ws.close();
       return reply;
     `,
-    );
-    expect(text).toBe("relay:from-relay");
-  });
-});
+        );
+        expect(text).toBe("relay:from-relay");
+      });
+    });
 
-describe("relay registration (#13)", () => {
-  it("canRegister sees the path a key asks for", async () => {
-    const page = await open();
-    const result = await run<string>(
-      page,
-      `
+    describe("relay registration (#13)", () => {
+      it("canRegister sees the path a key asks for", async () => {
+        const page = await open();
+        const result = await run<string>(
+          page,
+          `
       try {
         await window.lib.initHttpService(async () => new Response("x"), {
           key: "evil",
@@ -201,17 +220,17 @@ describe("relay registration (#13)", () => {
         return error.message;
       }
     `,
-    );
-    expect(result).toMatch(/may not register "evil" at/);
-  });
+        );
+        expect(result).toMatch(/may not register "evil" at/);
+      });
 
-  it("UNREGISTER from another client is refused", async () => {
-    const page = await open();
-    const other = await (context as BrowserContext).newPage();
-    await other.goto(`${relayOrigin}${FIXTURE}relay.html`);
-    const result = await run<string>(
-      other,
-      `
+      it("UNREGISTER from another client is refused", async () => {
+        const page = await open();
+        const other = await (context as BrowserContext).newPage();
+        await other.goto(`${relayOrigin}${FIXTURE}relay.html`);
+        const result = await run<string>(
+          other,
+          `
       const lib = await import("/dist/index.js");
       const channel = new MessageChannel();
       window.postMessage({ type: "CONNECT" }, "*", [channel.port1]);
@@ -222,28 +241,30 @@ describe("relay registration (#13)", () => {
         return error.message;
       }
     `,
-    );
-    expect(result).toMatch(/served by another client/);
-    // The service still answers.
-    const text = await run<string>(
-      await relayFrame(page),
-      `return await (await fetch("${FIXTURE}svc/who")).text();`,
-    );
-    expect(text).toBe("relay");
-  });
+        );
+        expect(result).toMatch(/served by another client/);
+        // The service still answers.
+        const text = await run<string>(
+          await relayFrame(page),
+          `return await (await fetch("${FIXTURE}svc/who")).text();`,
+        );
+        expect(text).toBe("relay");
+      });
 
-  it("stop() resolves once the relay has dropped the service", async () => {
-    const page = await open();
-    const frame = await relayFrame(page);
-    expect(await run(frame, `return await (await fetch("${FIXTURE}svc/who")).text();`)).toBe(
-      "relay",
-    );
-    await run(page, `await window.stop();`);
-    // The mount is gone the moment stop() resolves: the url is the network's again.
-    const text = await run<string>(
-      frame,
-      `return await (await fetch("${FIXTURE}svc/who")).text();`,
-    );
-    expect(text).toBe("not found");
+      it("stop() resolves once the relay has dropped the service", async () => {
+        const page = await open();
+        const frame = await relayFrame(page);
+        expect(await run(frame, `return await (await fetch("${FIXTURE}svc/who")).text();`)).toBe(
+          "relay",
+        );
+        await run(page, `await window.stop();`);
+        // The mount is gone the moment stop() resolves: the url is the network's again.
+        const text = await run<string>(
+          frame,
+          `return await (await fetch("${FIXTURE}svc/who")).text();`,
+        );
+        expect(text).toBe("not found");
+      });
+    });
   });
-});
+}
