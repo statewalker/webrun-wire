@@ -2,6 +2,12 @@ import type { MessageTarget } from "./message-target.js";
 import type { PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
 
+/**
+ * The message of the error that fails the calls still in flight on a
+ * multiplexer when it is closed (`PortMux.close()`).
+ */
+export const MUX_CLOSED_MESSAGE = "webrun-rpc: the multiplexer was closed";
+
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
 export const DEFAULT_MAX_PORTS = 1024;
 
@@ -70,7 +76,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       }
       if (!accepted) {
         open.delete(envelope.id);
-        handle.markClosed();
+        handle.markClosed(new Error("webrun-rpc: the port was rejected"));
         post({ type: "close", id: envelope.id, reason: "rejected" });
       }
       return;
@@ -89,7 +95,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
     if (!handle) return;
     open.delete(envelope.id);
-    handle.markClosed();
+    handle.markClosed(new Error("webrun-rpc: the peer closed the port"));
   };
 
   const listener = (event: MessageEvent): void => {
@@ -124,7 +130,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       for (const [id, handle] of [...open]) {
         post({ type: "close", id });
         open.delete(id);
-        handle.markClosed();
+        handle.markClosed(new Error(MUX_CLOSED_MESSAGE));
       }
       muxClosed = true;
       port.removeEventListener("message", listener);

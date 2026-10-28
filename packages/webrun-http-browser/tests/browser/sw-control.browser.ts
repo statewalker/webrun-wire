@@ -267,6 +267,8 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         // The hard reload, then exactly one reload of the library's own: a
         // normal reload is a controlled navigation, so the page recovers.
         expect(navigations.length).toBe(2);
+        // The whole outcome in the failure message, so a failure says why.
+        expect(result.ok, JSON.stringify(result)).toBe(true);
         expect(result).toMatchObject({ ok: true, controlled: true });
       });
 

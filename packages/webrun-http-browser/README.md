@@ -2,16 +2,23 @@
 
 ## What it is
 
-A ServiceWorker-based HTTP server for the browser. You write ordinary
-`(Request) => Response` handlers in page JavaScript; a ServiceWorker intercepts
-`fetch()` calls and routes them to those handlers over a `MessagePort`, with no
-network round-trip and no external server. It has two modes:
+A ServiceWorker-based HTTP and WebSocket server for the browser. You write
+ordinary `(Request) => Response` handlers in a page or in a Dedicated Worker; a
+ServiceWorker intercepts `fetch()` calls and routes them to those handlers over
+`MessagePort`s, with no network round-trip and no external server. Bodies
+stream with backpressure in both directions, and an aborted `fetch` reaches the
+handler as a cancellation. It has two modes:
 
-- **Same-origin** (`./sw` + `./sw-worker`): your app registers its own worker
-  next to its pages and mounts handlers under URL prefixes.
+- **Same-origin** (`./sw` + `./sw-worker`, and `./worker` in Dedicated
+  Workers): your app registers its own worker next to its pages and mounts
+  handlers under URL prefixes, in the page itself or in workers the page
+  attaches.
 - **Relay** (`.` + `./relay-sw` or `./relay-worker`): a worker hosted on a relay
   origin serves requests for any page that embeds a hidden relay iframe. The
   page never registers a worker of its own.
+
+In both modes a handler can also accept WebSockets: a socket is carried by a
+`MessagePort`, and the caller gets a class with the browser's `WebSocket` API.
 
 ## Why it exists
 
@@ -42,9 +49,10 @@ pnpm add @statewalker/webrun-http-browser
 
 | Subpath | Format | Runs in | What it gives |
 | --- | --- | --- | --- |
-| `.` | ESM, `dist/index.js` + `.d.ts` | page, relay iframe | Relay page API (`newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `getRelayWindowMessageHandler`, `splitServiceUrl`), ServiceWorker lifecycle helpers (`initServiceWorker`, `newServiceWorkerPort`, `awaitActiveServiceWorker`, `awaitServiceWorkerControl`, `handleClaimRequests`, `ServiceWorkerControlError`), the `MessagePort` call primitives, and everything re-exported from `@statewalker/webrun-streams` and `@statewalker/webrun-http-streams`. |
-| `./sw` | ESM, `dist/sw.js` + `.d.ts` | page and worker | Same-origin classes: `SwHttpAdapter` (page), `SwHttpDispatcher` and `startHttpDispatcher` (worker), and their bases `SwPortHandler` / `SwPortDispatcher`. |
-| `./sw-worker` | IIFE, `dist/sw-worker.js`, no types | ServiceWorker | Prebuilt same-origin worker: calls `startHttpDispatcher({ self, log: console.log })`. Load it with `importScripts`. |
+| `.` | ESM, `dist/index.js` + `.d.ts` | page, relay iframe | Relay page API (`newRemoteRelayChannel`, `initHttpService`, `callHttpService`, `callWebSocketService`, `relayWebSocketClass`, `getRelayWindowMessageHandler`, `splitServiceUrl`), ServiceWorker lifecycle helpers (`initServiceWorker`, `newServiceWorkerPort`, `awaitActiveServiceWorker`, `awaitServiceWorkerControl`, `handleClaimRequests`, `ServiceWorkerControlError`), everything `./sw` exports, the `MessagePort` call primitives, and everything re-exported from `@statewalker/webrun-streams` and `@statewalker/webrun-http-streams`. |
+| `./sw` | ESM, `dist/sw.js` + `.d.ts` | page and worker | Same-origin classes: `SwHttpAdapter` (page), `SwHttpDispatcher` and `startHttpDispatcher` (worker), the WebSocket module (`createWebSocketClass`, `upgradeWebSocket`, ...), `serviceWorkerWebSocketClass`, the HTTP link layer (`connectHttpLink`, `serveHttpLink`), and the version-1 bases `SwPortHandler` / `SwPortDispatcher`. |
+| `./worker` | ESM, `dist/worker.js` + `.d.ts` | Dedicated Worker | `serveHttpInWorker(handler)`, and the WebSocket helpers a handler needs (`upgradeWebSocket`, `isWebSocketUpgrade`, `requestedProtocols`, `createWebSocketClass`). |
+| `./sw-worker` | IIFE, `dist/sw-worker.js`, no types | ServiceWorker | Prebuilt same-origin worker: calls `startHttpDispatcher({ self, log: console.log, ...self.HTTP_DISPATCHER_OPTIONS })`. Load it with `importScripts`. |
 | `./relay-sw` | IIFE, `dist/relay-sw.js`, no types | ServiceWorker | Prebuilt relay worker: calls `startRelayServiceWorker(self, self.RELAY_OPTIONS ?? {})`. Load it with `importScripts`. |
 | `./relay-worker` | ESM, `dist/relay-worker.js` + `.d.ts` | ServiceWorker | The relay worker runtime as a typed module, for a host that bundles its own worker: `startRelayServiceWorker`, `RelayServiceWorkerOptions`, `MountSpec`. Not re-exported from `.`, because it only runs inside a worker. |
 
@@ -80,7 +88,8 @@ const connection = await newRemoteRelayChannel({
   url: new URL("https://my-relay.example/relay.html"),
 });
 
-// 2. Register a handler for service "FS". Returns a cleanup that unregisters it.
+// 2. Register a handler for service "FS". Resolves a function that unregisters
+//    it; that function's promise settles once the relay has dropped the service.
 const unregister = await initHttpService(
   async (request) => new Response(`Hello ${new URL(request.url).pathname}`),
   { key: "FS", port: connection.port },
@@ -120,6 +129,28 @@ prefix is not stripped: a handler mounted at `/peers/` receives
 `/peers/12D3Koo/llm`. A handler that routes relative to its mount strips the
 prefix itself.
 
+### Relay mode: WebSockets
+
+The same handler accepts sockets: on a `GET` with `Upgrade: websocket` it
+answers with `upgradeWebSocket` (see [WebSockets](#websockets)). A caller on
+any origin opens one through the relay connection:
+
+```ts
+import { relayWebSocketClass } from "@statewalker/webrun-http-browser";
+
+const WS = relayWebSocketClass({ key: "FS", port: connection.port });
+const ws = new WS("https://my-relay.example/~FS/chat", ["v1"]);
+ws.onmessage = (event) => console.log(event.data);
+```
+
+`callWebSocketService(url, protocols, { key, port })` is the lower level: it
+resolves `{ port, protocol }` once the service accepted. The relay worker only
+brokers the port; after that the socket runs between the caller and the
+serving page directly. Content served on the relay origin itself opens sockets
+through the relay worker with `serviceWorkerWebSocketClass()`, routed by its url
+like a fetch. The relay's `canRegister` and `takeover` rules apply to sockets
+as to requests, since both go to the service that holds the key.
+
 ### Relay mode: build your own relay worker
 
 ```ts
@@ -134,7 +165,8 @@ const stop = startRelayServiceWorker(self, {
     url.pathname === "/relay.html" ||
     url.pathname === "/relay-sw.js",
   takeover: "first-wins",
-  canRegister: (client, _key) => new URL(client.url).pathname === "/relay.html",
+  canRegister: (client, _key, path) =>
+    new URL(client.url).pathname === "/relay.html" && path !== "/index.html",
   decorateResponse: (response) => response,
 });
 ```
@@ -143,9 +175,15 @@ const stop = startRelayServiceWorker(self, {
 | --- | --- | --- |
 | `mounts` | none | Fixed table `Array<{ key, path?, match? }>`, for a host that knows its services at build time. A key declared here belongs to the host: a page's `REGISTER` or `UNREGISTER` for it never replaces or removes the mount, so the page can register with no `path`. |
 | `exclude` | none | `(url) => boolean`. Paths the relay never claims, through the table or through `/~<key>/`. Checked first. |
-| `canRegister` | everyone | `(client, key) => boolean \| Promise<boolean>`. Refuses a registration with `this client may not register "<key>"`. |
+| `canRegister` | everyone | `(client, key, path?) => boolean \| Promise<boolean>`. `path` is where the registrant asks to be mounted (`undefined` for `/~<key>/`), so a host can vet where a key lands, not only who takes it. Refuses with `this client may not register "<key>"` (`... at "<path>"`). Also consulted for `UNREGISTER`, with the key's current path. |
 | `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key; a second page gets `"<key>" is already served by another client`. A holder that reloaded is no longer live, so it can always re-register. |
 | `decorateResponse` | none | `(response, request) => Response`. Stamps headers on responses the relay makes, including its error responses. Not applied to requests the worker leaves to the network. |
+| `streamTimeout` | none | Per-stream inactivity timeout, in ms, of the links to services. |
+
+`UNREGISTER` is accepted only from the client that holds the key, or, once
+that client is gone, from any client `canRegister` allows: any page of the
+relay origin can post to the worker, including foreign content the host serves
+there.
 
 `startRelayServiceWorker` returns a function that removes its listeners.
 
@@ -235,9 +273,171 @@ importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
 | `scope` | directory of `serviceWorkerUrl` | Registration scope. |
 | `timeout` | `30_000` | Upper bound, in ms, for activation, control and the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError`. |
 | `reloadIfUncontrolled` | `false` | Reload the page once instead of rejecting when it stays uncontrolled. |
+| `streamTimeout` | none | Per-stream inactivity timeout of the links, in ms. Unset, a slow reader is throttled, never failed. |
+| `id`, `meta` | a fresh id, none | The handler slot of this page's handlers, and what a `route` function sees of them. |
+| `webSocket` | defaults | Options of `adapter.WebSocket` (`heartbeatMs`, `timers`, `closeTimeoutMs`). |
 
 `register(prefix, handler)` resolves `{ baseUrl, prefix, remove() }`. The
 prefix must start with the adapter's `key`.
+
+### Same-origin mode: handlers in Dedicated Workers
+
+A handler that does heavy work (SQLite on OPFS, WASM, a build) belongs in a
+worker. Attached with `attachWorker`, the worker talks to the ServiceWorker
+directly: the page makes the channels, hands one end of each to the worker and
+the other to the ServiceWorker, and carries nothing afterwards, so a busy or
+background-throttled page does not slow the requests down.
+
+```ts
+// page
+const adapter = new SwHttpAdapter({ key: "app", serviceWorkerUrl: "/sw-worker.js" });
+await adapter.start();
+const worker = new Worker(new URL("./site-worker.js", import.meta.url), { type: "module" });
+const link = await adapter.attachWorker(worker, { key: "site", id: "shard-0" });
+
+// site-worker.js
+import { serveHttpInWorker } from "@statewalker/webrun-http-browser/worker";
+
+const service = serveHttpInWorker(async (request) => new Response("from a worker"));
+// Requests through the ServiceWorker's router, to other handlers:
+const other = await service.fetch("/app/api/x");
+```
+
+`attachWorker(worker, { key?, id?, meta? })` resolves a `WorkerLink`
+`{ key, id, owner, drain({ ms }), detach() }`. Several workers may serve one key;
+the ServiceWorker picks one per request (see below). Attaching an `id` the key
+already has replaces that handler: the old one finishes its requests in flight
+and gets no new ones.
+
+`serveHttpInWorker(handler, options?)` returns `{ fetch, connectWebSocket,
+WebSocket, linked, close() }`. Its `fetch` goes through the router without a
+`fetch` event, so it works whether or not the worker is controlled.
+
+### Same-origin mode: routing and hand-over
+
+The ServiceWorker keeps a table of handlers per key and asks a `route`
+function which one answers a request:
+
+```js
+// sw-worker.js, served next to your pages
+self.HTTP_DISPATCHER_OPTIONS = {
+  route: (request, key, handlers) =>
+    handlers.find((h) => h.id === request.headers.get("x-shard")) ?? handlers[0],
+};
+importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
+```
+
+`handlers` are the live (not draining) handlers of the key, each a
+`HandlerInfo` `{ id, key, owner, inflight, meta, attachedAt, draining }`. The
+default, `leastInflightRoute`, takes the one with the fewest requests in flight,
+the oldest on a tie: with one tab per key, the same page as before. A worker of
+your own passes the options to `startHttpDispatcher({ self, ...options })`.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait for another to attach. |
+| `attachTimeoutMs` | `15_000` | How long a request waits for a handler during a hand-over. Past it, `503`. |
+| `relinkTimeoutMs` | `3_000` | How long a request waits for the pages to attach again after a restart. |
+| `handoverMs` | `5_000` | How long a replaced handler may finish its requests. |
+| `wsConnectTimeoutMs` | `15_000` | How long a socket waits for its handler's answer. |
+| `streamTimeout` | none | Per-stream inactivity timeout of the links. |
+| `livenessCheckMs` | `5_000` | Period of the backup liveness check (`navigator.locks.query()`); `0` turns it off. |
+
+`link.drain({ ms })` hands a slot over: no new requests reach the handler (they
+wait for the next owner of the key, up to `attachTimeoutMs`), and those in
+flight may finish for up to `ms`. Then the link is closed. A drain or detach
+names the attachment's `owner` token, so a late one from a previous owner never
+touches the current one.
+
+### Same-origin mode: restarts and liveness
+
+The browser stops an idle ServiceWorker (Chromium after about 30 s), and every
+port it held dies with it. Nothing reports that on the other end, so:
+
+- **Re-linking.** The ServiceWorker keeps its table in memory only. The first
+  request after a restart, for a key it served before, asks every window to
+  attach its links again (`NEED_LINKS`) and waits for them. Pages answer by
+  attaching their own handlers and their workers.
+- **Handler liveness.** Each handler holds a Web Lock while it lives; the
+  ServiceWorker watches it. When a tab closes or a worker is terminated, its
+  requests in flight fail at once with `502` and
+  `The handler was lost while this request was in flight; it may or may not
+  have been applied.`
+- **ServiceWorker liveness.** The ServiceWorker holds a Web Lock too, and the
+  handlers watch it. When it dies, a worker's calls in flight over
+  `service.fetch` fail with `LinkLostError` (`The ServiceWorker was lost while
+  this call was in flight; ...`) instead of hanging, and new calls wait: the
+  worker asks its page to attach it again, and that message wakes the
+  ServiceWorker.
+- **Keep-alive.** Port messages are not events, so a long call over
+  `service.fetch` would not keep the ServiceWorker awake. While such calls are
+  in flight, the worker asks its page every 20 s to post a keep-alive message
+  to the ServiceWorker.
+
+Measured in Chromium with a ServiceWorker that may idle out
+(`tests/browser/lifetime.browser.ts`, which drives Chromium over raw CDP:
+Playwright keeps every ServiceWorker running):
+
+- without the keep-alive, a 45 s call over `service.fetch` fails at about 30 s
+  with the loss error; with it, the call completes;
+- a response streaming through the ServiceWorker keeps it alive by itself: a
+  60 s event stream arrives whole in the test, and a 6-minute one did in a
+  one-off run.
+
+Without Web Locks, a page handler's liveness falls back to `clients.get()`, and
+worker deaths are not noticed until a request times out.
+
+### WebSockets
+
+A ServiceWorker never sees WebSocket connections, so a socket is opened
+explicitly and carried by a `MessagePort`. The handler side is an HTTP upgrade:
+
+```ts
+import { isWebSocketUpgrade, upgradeWebSocket } from "@statewalker/webrun-http-browser/worker";
+
+async function handler(request: Request): Promise<Response> {
+  if (isWebSocketUpgrade(request)) {
+    const { socket, response } = upgradeWebSocket(request, { protocol: "v1" });
+    socket.accept();
+    socket.addEventListener("message", (event) => socket.send(event.data));
+    return response; // status 101
+  }
+  return new Response("not a socket", { status: 426 });
+}
+```
+
+The caller gets a class with the browser's `WebSocket` API, which leaves the
+global `WebSocket` alone:
+
+```ts
+const ws = new adapter.WebSocket(`${baseUrl}chat`, ["v1"]);   // page with an adapter
+const WS = serviceWorkerWebSocketClass();                     // any controlled page
+const WS2 = service.WebSocket;                                // in a worker, via the router
+```
+
+The ServiceWorker only brokers the port: it routes the url like a fetch, asks
+the handler, and hands the accepted port to the caller. The socket then runs
+between the two directly, so it survives a ServiceWorker restart. A socket to
+a handler in the same page needs no ServiceWorker at all.
+
+- **Upgrade request.** A browser drops `Upgrade` and `Sec-*` headers from every
+  `new Request()`, so the upgrade request carries them as its own `headers`
+  property. `requestedProtocols(request)` reads the subprotocols.
+- **Server end.** `ServerWebSocket` delivers events only after `accept()`
+  (frames that arrive earlier are queued), answers pings before it, and has
+  `send`, `close`, `bufferedAmount` and `whenDrained(limit)` for
+  backpressure.
+- **Client.** `createWebSocketClass(connect, options)` validates as the
+  standard does (url, scheme, fragment, subprotocol tokens, close codes and
+  reasons), has `binaryType`, the `on*` handlers and the close handshake.
+  `bufferedAmount` is real: the other end acknowledges what it consumed.
+- **Heartbeat.** A port never reports that its other side died. The client
+  pings every `heartbeatMs` (default 10 s) and closes with 1006 when pongs stop
+  for twice that; the server closes with 1006 when pings stop for three times
+  that. On a page's main thread, pass unthrottled `timers`.
+- **Wire protocol.** Frames `m` (message), `c` (close), `p`/`q` (ping/pong) and
+  `a` (bytes consumed), version `WS_PORT_PROTOCOL_VERSION`; see
+  `src/ws/frames.ts`.
 
 ### Same-origin mode: a page that is not controlled
 
@@ -285,22 +485,30 @@ callHttpService(req, {key, port}) ──port──► relay iframe ──► rel
 Same-origin mode:
 
 ```
-page fetch(<scope>/KEY/...) ──► same-origin worker ── first path segment = KEY ──► page's port
-                                                                                 └► SwHttpAdapter
-                                                                                    (first registered prefix that matches)
+page fetch(<scope>/KEY/...) ──► same-origin worker ── KEY = first path segment
+                                 route(request, KEY, handlers) ──down──► page handler (SwHttpAdapter.register)
+                                                               ──down──► worker handler (serveHttpInWorker)
+worker service.fetch(url)  ──up──► same-origin worker ── same routing
+new WebSocket(...)         ──WS_CONNECT──► same-origin worker ──ctl──► handler ── port ──► caller
 ```
 
-Each call opens its own `MessageChannel`. The request is turned into a
-`SerializedHttpEnvelope` by `newHttpClientStub` and rebuilt on the other side
-by `newHttpServerStub` (both from `@statewalker/webrun-http-streams`), with the
-body streamed as chunks over the port.
+Every link is one `MessagePort` (`down`: requests a handler serves; `up`:
+requests a worker sends; `ctl`: socket hand-over). Calls on a link are
+multiplexed by `@statewalker/webrun-rpc` (`connect` / `serve` over `overPipe`),
+each a stream with a one-chunk window in both directions, and HTTP runs over
+them with `fetchOverDuplex` / `serveFetchOverDuplex` from
+`@statewalker/webrun-http-streams`. The relay uses the same links, one per
+`CONNECT`. Every hand-shake carries `HTTP_LINK_PROTOCOL`: a peer of version 1
+(this package's own stream transport) is still served over that transport, and
+a page whose worker runs an older version gets a `ServiceWorkerControlError`
+with `reason: "incompatible"`.
 
 ### Every bundle is self-contained
 
 This package does not externalise its dependencies. Its own HTML loads
 `../dist/index.js` from a static host with no import map, and the two IIFE
 workers are loaded with `importScripts`, which cannot resolve a bare
-specifier. So each of the five outputs is one file with `idb-keyval`,
+specifier. So each of the six outputs is one file with `idb-keyval`,
 `@statewalker/webrun-streams` and `@statewalker/webrun-http-streams` inlined,
 built from its own rolldown config so no chunks are shared. The cost is
 duplicated code across bundles, and that `instanceof` does not hold across this
@@ -380,19 +588,24 @@ When the relay worker cannot hand a request to a service, it answers with JSON
 
 ### Same-origin routing
 
-The worker takes the first path segment under its scope as the key and forwards
-the request to the page that registered it. A key that was registered at some
-point but has no live page answers `404 Not Found (no active handler)` rather
+The worker takes the first path segment under its scope as the key and routes
+the request to one of the key's handlers. A key that was served at some point
+but has no live handler answers `404 Not Found (no active handler)` rather
 than falling through to the network: a dev server's SPA fallback would
-otherwise serve the app shell for every site URL. Any other URL is passed
-through with `fetch(event.request)` unchanged; rebuilding the request would
-drop `mode`, and the constructor throws for `only-if-cached` navigations. On the
-page, a request matching no registered prefix gets `404 Error 404: Not found`.
+otherwise serve the app shell for every site URL. (After a restart, the first
+such request first asks the pages to link again; see above.) A URL outside the
+scope, or of a key never served, is not answered at all: the worker does not
+call `respondWith`, so the browser performs the request as without a worker.
+Navigations under the scope are the exception: they are passed through with
+`fetch(request)`, because Firefox can leave a page uncontrolled when its worker
+did not answer the navigation. On
+the page, a request matching no registered prefix gets
+`404 Error 404: Not found`.
 
-The worker keeps the claimed keys and client ids in IndexedDB (`claimedKeys`,
-`clientIds`) and asks each known client for a fresh port when it restarts. The
-relay keeps its registry under `clientsIds` as `{ clientId, path }` entries and
-still reads the older bare-client-id shape.
+The worker keeps only the served keys in IndexedDB (`claimedKeys`); the
+handlers are attached again after a restart. The relay keeps its registry
+under `clientsIds` as `{ clientId, path }` entries and still reads the older
+bare-client-id shape.
 
 `SwPortHandler.stop()` unregisters only the registration its own `start()`
 made; other workers on the origin stay registered. After a `start()` that
@@ -427,20 +640,31 @@ answered by the worker and can load uncontrolled in Firefox; call
   (`ServiceWorker "<url>" (scope <scope>) did not activate within <n> ms …`);
 - `uncontrolled`: active, but the page is not controlled;
 - `unresponsive`: controls the page but did not answer the adapter's
-  `UPDATE_COMMUNICATION_PORT` handshake in time.
+  `UPDATE_COMMUNICATION_PORT` handshake in time;
+- `incompatible`: answered the handshake but runs an older version of this
+  package (reload the page once the updated worker is active).
 
-### The port transport has no backpressure
+### Backpressure, and where the browser buffers
+
+Both modes move requests over webrun-rpc links: a handler producing a body is
+never more than a few chunks ahead of whoever reads it through this package's
+links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
+the producer. Between a ServiceWorker's `respondWith` and the page, though,
+Chromium buffers by itself, tens of megabytes of a fast stream: a page reading
+slowly sees the handler run that far ahead before backpressure reaches it
+(about 55 MiB, the same for a plain ServiceWorker with no library). Firefox
+sets no such bound: it keeps reading a ServiceWorker's response while the page
+does not, so there a handler streaming to a page that stopped reading keeps
+producing (this package still holds only a few chunks of it). A worker
+reading through `service.fetch` has no such buffer. `links.browser.ts` pins
+the split: once a page stops reading, the handler is never more than a few
+chunks ahead of what the ServiceWorker handed to Chromium, and stops.
 
 `sendStream` / `handleStreams`, and the `sendHttpRequest` /
-`handleHttpRequests` pair built on them, discard the promise their chunk
-sender returns, so a fast producer over a slow consumer accumulates without
-bound. There is also no per-stream timeout and no chunking to a transport's
-message size limit. `sendHttpRequest` and `handleHttpRequests` are marked
-`@deprecated` in favour of `duplexOverPort` / `serveDuplexOverPort` from
-`@statewalker/webrun-rpc` with `httpFetch` / `httpServe` from
-`@statewalker/webrun-http-streams`, which do have backpressure. Both modes of
-this package still use the deprecated pair internally. A caller that stops
-reading early does tell the peer to stop producing.
+`handleHttpRequests` pair built on them, are version 1's transport, kept for
+peers that still speak it. They have no backpressure (a fast producer over a
+slow consumer accumulates without bound), no per-stream timeout and no
+chunking, and are `@deprecated`.
 
 ### The adapter's default worker url follows the scope
 
@@ -464,6 +688,11 @@ computed from the other.
   relay origin cannot use it.
 - **Plain `fetch()` works only from pages under the worker's scope.** A caller
   on another origin uses `callHttpService`.
+- **`Set-Cookie` does not reach a page through a ServiceWorker.** A
+  browser-built `Response` drops it; carry state another way.
+- **Liveness needs Web Locks** (`navigator.locks`, in every current browser).
+  Without it, handler deaths are noticed late and ServiceWorker deaths not at
+  all.
 
 ### Exports of the root entry
 
@@ -472,12 +701,14 @@ Relay, page side:
 | Export | Purpose |
 | --- | --- |
 | `newRemoteRelayChannel(opts?)` / `RemoteRelayChannel`, `RemoteRelayChannelOptions` | Embed the relay iframe; resolves `{ baseUrl, port, close() }`. |
-| `initHttpService(handler, { key, path?, port })` | Register a service; resolves a cleanup that unregisters it. |
+| `initHttpService(handler, { key, path?, port, streamTimeout? })` | Register a service (HTTP and sockets); resolves a function that unregisters it, whose promise settles once the relay acknowledged. |
 | `callHttpService(request, { key, port })` | Call a service through the port. |
-| `ServiceOptions` | `{ key, path?, port }`. |
+| `callWebSocketService(url, protocols, { key, port })` / `relayWebSocketClass({ key, port }, options?)` | Open a socket to a service through the port. |
+| `answerConnect(handler, data, port)`, `sendOverConnection(port, reply, request)` | The two ends of one `CONNECT`, for a host with its own registration. |
+| `ServiceOptions`, `ConnectReply`, `WebSocketConnectParams` | `{ key, path?, port, streamTimeout? }`, and the `CONNECT` shapes. |
 | `getRelayWindowMessageHandler(opts?)` / `RelayWindowHandlerOptions` | The relay iframe's `window.onmessage`; options `swUrl`, `scopeUrl`, `timeout`. |
 | `initializeConnection(opts)` / `InitializeConnectionOptions` | Send `CONNECT` for a key; resolves a `MessagePort`, or `null` if refused. Extra fields ride in the payload. |
-| `registerConnectionsHandler(opts)` / `RegisterConnectionsHandlerOptions` | Register a key (and optional `path`) and answer its `CONNECT`s; resolves a cleanup. |
+| `registerConnectionsHandler(opts)` / `RegisterConnectionsHandlerOptions` | Register a key (and optional `path`) and answer its `CONNECT`s; resolves an awaitable cleanup. |
 | `splitServiceUrl(url, separator = "~")` / `SplitServiceUrl` | Parse `<origin>/~<key>/<path>` into `{ url, key, baseUrl, path }`. |
 
 ServiceWorker lifecycle:
@@ -504,6 +735,21 @@ Messaging primitives:
 | `newRegistry(onError?)` / `Registry`, `NewRegistryResult`, `CleanupAction` | Cleanup registry. |
 | `MessageTarget`, `MessageSource`, `MessageSink`, `MessageListener` | Port view types, re-exported from `@statewalker/webrun-rpc`. |
 
+Same-origin, links and WebSockets (also on `./sw`):
+
+| Export | Purpose |
+| --- | --- |
+| `SwHttpAdapter`, `SwHttpAdapterOptions`, `SwHttpRegistration`, `AttachWorkerOptions`, `WorkerLink` | The page side. |
+| `SwHttpDispatcher`, `startHttpDispatcher`, `SwHttpDispatcherOptions` | The ServiceWorker side. |
+| `HandlerTable`, `HandlerInfo`, `RouteFunction`, `leastInflightRoute` | Routing. |
+| `serveHttpInWorker`, `WorkerHttpService`, `HandlerEndpoint` | The handler side (also on `./worker`). |
+| `connectHttpLink`, `serveHttpLink`, `trackedLink`, `HttpLink`, `LinkLostError`, `HTTP_LINK_PROTOCOL` | HTTP over one `MessagePort`. |
+| `holdLock`, `watchLock`, `newLockName`, `locksAvailable`, `PortRendezvous` | Liveness and reply-matching helpers. |
+| `createWebSocketClass`, `PortWebSocket`, `WebSocketConnector`, `WebSocketConnection` | The client. |
+| `upgradeWebSocket`, `ServerWebSocket`, `takePort`, `takeUpgrade`, `serveWebSocketUpgrade`, `newWebSocketUpgradeRequest`, `isWebSocketUpgrade`, `requestedProtocols`, `withHeaders` | The server end and the upgrade. |
+| `serviceWorkerWebSocketClass`, `connectWebSocketThroughServiceWorker` | Sockets from any page a ServiceWorker of this package controls. |
+| `SwPortHandler`, `SwPortDispatcher` | Version 1's bases, kept for subclasses. |
+
 The root entry also re-exports all of `@statewalker/webrun-streams` and
 `@statewalker/webrun-http-streams`.
 
@@ -511,10 +757,12 @@ The root entry also re-exports all of `@statewalker/webrun-streams` and
 
 All four runtime dependencies are bundled into `dist/`:
 
-- `@statewalker/webrun-http-streams`: the client/server stubs the port
-  transport is built on, and `HttpError`.
+- `@statewalker/webrun-rpc`: the link transport (`connect` / `serve` over
+  `overPipe`), and the `MessageTarget` types.
+- `@statewalker/webrun-http-streams`: HTTP over those streams
+  (`fetchOverDuplex` / `serveFetchOverDuplex`), version 1's stubs, and
+  `HttpError`.
 - `@statewalker/webrun-streams`: iterator helpers and error serialisation.
-- `@statewalker/webrun-rpc`: only the `MessageTarget` types.
 - `idb-keyval`: a small IndexedDB key-value store that keeps registrations
   across worker restarts.
 
@@ -524,7 +772,9 @@ All four runtime dependencies are bundled into `dist/`:
 - `pnpm run test:browser`: builds, then runs `tests/browser/` in Chromium and
   Firefox through Playwright against the built bundles, plus
   `tests/packaging/`, which checks the published exports map. Needs the
-  browsers: `pnpm exec playwright install chromium firefox`.
+  browsers: `pnpm exec playwright install chromium firefox`. `links.browser.ts`
+  (workers, routing, restarts, sockets) and `relay-links.browser.ts` run in
+  Chromium only: they stop the ServiceWorker through CDP and use two origins.
 
 ## License
 

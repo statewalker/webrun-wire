@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>relay links fixture</title></head>
+  <body>
+    <script type="module">
+      // Browser-test fixture for the relay over its new transport (see
+      // tests/browser/relay-links.browser.ts). The relay is on ANOTHER origin,
+      // given by ?relay=<origin>.
+      import * as lib from "/dist/index.js";
+      import { newHandler } from "../links/handler.js";
+
+      const relayOrigin = new URLSearchParams(location.search).get("relay");
+      window.lib = lib;
+      window.ready = (async () => {
+        const connection = await lib.newRemoteRelayChannel({
+          url: new URL("/tests/fixtures/browser/relay-links/relay.html", relayOrigin),
+        });
+        window.connection = connection;
+        const service = newHandler("relay");
+        window.stats = service.stats;
+        // Mounted under the relay worker's scope, so content on the relay
+        // origin reaches it by plain urls.
+        const path = "/tests/fixtures/browser/relay-links/svc/";
+        window.stop = await lib.initHttpService(service.handler, {
+          key: "K",
+          path,
+          port: connection.port,
+        });
+        window.base = `${relayOrigin}${path}`;
+        return true;
+      })();
+    </script>
+  </body>
+</html>

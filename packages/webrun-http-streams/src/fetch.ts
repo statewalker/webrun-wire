@@ -126,46 +126,21 @@ export async function fetchOverDuplex(
     const buffered = new Uint8Array(await request.arrayBuffer());
     if (buffered.byteLength > 0) body = [buffered];
   }
-  const { envelope, body: respBody } = await httpFetch(call, env, body, options);
+  const { envelope, body: respBody, release } = await httpFetch(call, env, body, options);
   const responseInit: ResponseInit = {
     status: envelope.status,
     statusText: envelope.statusText,
     headers: forwardableHeaders(envelope.headers),
   };
   // `new Response(body, { status })` throws for the null-body-status set, and
-  // HEAD/OPTIONS carry no body either, so return a bodyless Response and try to
-  // let go of the body we were handed.
-  //
-  // KNOWN GAP — this `.return()` does not actually release the producer, and
-  // `discard` would not fix it either. Do not read it as a working drain.
-  //
-  // `respBody` is *not* the generator the codec pulled from. `decodeResponse`
-  // pulls from its `input` (the `output` generator returned by `call(...)`) to
-  // read the head, and hands back a freshly constructed one —
-  // `convertBodyErrors(readBody(...))` in `http1/decode.ts`. Nobody has pulled
-  // from that, so it is in suspended start and `.return()` on it is a no-op,
-  // exactly as in the two sites `http-stubs.ts` fixed. Measured: the producer's
-  // `finally` does not run for 204, 205, 304, HEAD+200 or OPTIONS+200.
-  //
-  // `discard` does not help because the release has to reach further down.
-  // `ByteReader` never propagates `.return()` to its own `#iter`, so only
-  // `await output.return()` frees the underlying call — and `fetchOverDuplex`
-  // has no handle on `output`, since `httpFetch` returns only `{envelope,
-  // body}`. Closing this needs `httpFetch` to expose the call for cancellation;
-  // that is a design change, not a patch here.
-  //
-  // Worth knowing which shapes leak a *populated* body rather than an empty
-  // one: `decodeResponse`'s own bodyless test covers status < 200, 204, 304 and
-  // HEAD, so for 205 and for OPTIONS the decoder frames a real body that is
-  // then abandoned. `http-data.ts` (see `throwIfPeerError`) spells out the cost
-  // on a mux transport — one stream-table slot per call, until `maxStreams`.
+  // HEAD/OPTIONS carry no body either, so return a bodyless Response and
+  // release the call: nobody will read the body, so leaving it cannot.
   if (
     request.method === "HEAD" ||
     request.method === "OPTIONS" ||
     NULL_BODY_STATUSES.has(envelope.status)
   ) {
-    const returnable = respBody as AsyncIterable<Uint8Array> & { return?: () => unknown };
-    await returnable.return?.();
+    await release?.();
     return new Response(null, responseInit);
   }
   return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);
@@ -225,6 +200,10 @@ export function serveFetchOverDuplex(
     return {
       envelope: respEnv,
       body: response.body ? readableToAsyncIterable(response.body) : undefined,
+      // A body the codec never started reading has no reader to cancel
+      // through; cancel the stream itself. Once read, it is locked and this
+      // rejects, harmlessly: the reader's own cancellation has run.
+      release: () => response.body?.cancel(),
     };
   }, options);
 }

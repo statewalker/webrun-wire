@@ -28,8 +28,21 @@ Thin platform adapter that owns *where* a site runs in the browser; takes a
 **SiteHandler** via `setHandler` and registers a ServiceWorker.
 
 **SwHttpAdapter**:
-The ServiceWorker-side fetch interceptor that turns SW `fetch` events into
-calls to a **SiteHandler**.
+The page side of the same-origin ServiceWorker: registers the worker and
+attaches **handler links** to it, so that SW `fetch` events become calls to a
+**SiteHandler** in the page or in a Dedicated Worker. Its counterpart in the
+ServiceWorker is `SwHttpDispatcher`.
+
+**Handler link**:
+The ports between the ServiceWorker and one handler (a page or a Dedicated
+Worker): `down` (requests it serves), `ctl` (WebSocket port hand-over) and,
+for workers, `up` (requests it sends through the router). Each carries
+webrun-rpc streams; a page makes the channels and then carries nothing.
+_Avoid_: channel, connection
+
+**Router**:
+The ServiceWorker's table of handler links per key, and the `route` function
+that picks one per request.
 
 **FilesApi**:
 Read/write interface for a byte store (memory, OPFS, Node FS, virtual mount).

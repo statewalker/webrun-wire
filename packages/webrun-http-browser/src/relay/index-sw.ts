@@ -1,9 +1,12 @@
 import { HttpError } from "@statewalker/webrun-http-streams";
 import { get, set } from "idb-keyval";
-import { callChannel, handleChannelCalls } from "../core/data-calls.js";
+import { callChannel, handleChannelCalls, withTransfer } from "../core/data-calls.js";
 import { newRegistry } from "../core/registry.js";
 import { handleClaimRequests } from "../core/service-worker-control.js";
-import { sendHttpRequest } from "../http/http-send-recieve.js";
+import { HTTP_LINK_PROTOCOL } from "../link/http-link.js";
+import { WS_CONNECT_CALL } from "../sw/protocol.js";
+import type { WebSocketConnection } from "../ws/client.js";
+import { type ConnectReply, sendOverConnection, type WebSocketConnectParams } from "./index.js";
 import { type MountSpec, type MountTable, newMountTable } from "./mount-table.js";
 import { splitServiceUrl } from "./split-service-url.js";
 
@@ -125,8 +128,18 @@ export interface RelayServiceWorkerOptions {
   mounts?: Array<{ key: string } & MountSpec>;
   /** Paths the relay never claims. Checked before the table. */
   exclude?: (url: URL) => boolean;
-  /** Refuse a registration from the wrong client. Default: everyone may. */
-  canRegister?: (client: Client, key: string) => boolean | Promise<boolean>;
+  /**
+   * Refuse a registration from the wrong client. Default: everyone may.
+   *
+   * `path` is where the registrant asks to be mounted (`undefined` for the
+   * `/~<key>/` addressing), so a host can vet where a key lands, not only who
+   * takes it: on an origin whose name is not a secret, a page could otherwise
+   * mount an allowed key at `/index.html` and outrank `/` on longest-prefix.
+   * Also consulted for `UNREGISTER`, with the path the key is mounted at.
+   */
+  canRegister?: (client: Client, key: string, path?: string) => boolean | Promise<boolean>;
+  /** Per-stream inactivity timeout of the links to services, in ms. Default none. */
+  streamTimeout?: number;
   /** Default `"last-wins"`, the behaviour before this option existed. */
   takeover?: "first-wins" | "last-wins";
   /** Stamp headers on responses the relay makes. Not applied to network fetches. */
@@ -220,8 +233,12 @@ export function startRelayServiceWorker(
       if (!source) return false;
       const { key, path } = data as { key: string; path?: string };
 
-      if (options.canRegister != null && !(await options.canRegister(source, key))) {
-        throw new Error(`this client may not register "${key}"`);
+      if (options.canRegister != null && !(await options.canRegister(source, key, path))) {
+        throw new Error(
+          path == null
+            ? `this client may not register "${key}"`
+            : `this client may not register "${key}" at "${path}"`,
+        );
       }
 
       // `last-wins` -- the untouched default -- must cost exactly what it did
@@ -242,8 +259,22 @@ export function startRelayServiceWorker(
     }),
   );
   register(
-    handleChannelCalls(self, "UNREGISTER", async (_event, data) => {
+    handleChannelCalls(self, "UNREGISTER", async (event, data) => {
+      // Only the client that holds a key may drop it -- or anyone the host
+      // allows, once the holder is gone. Any page of the relay origin can post
+      // here, including foreign content the host serves there.
+      const source = event.source as Client | null;
+      if (!source) return false;
       const { key } = data as { key: string };
+      const current = await clientsRegistry.getMount(key);
+      if (current == null) return false;
+      const isCurrentLive = (await clientsRegistry.getClient(key)) != null;
+      if (isCurrentLive && current.clientId !== source.id) {
+        throw new Error(`"${key}" is served by another client`);
+      }
+      if (options.canRegister != null && !(await options.canRegister(source, key, current.path))) {
+        throw new Error(`this client may not unregister "${key}"`);
+      }
       removeRegisteredMount(mounts, key, hostKeys);
       return await clientsRegistry.removeClient(key);
     }),
@@ -253,7 +284,41 @@ export function startRelayServiceWorker(
       const { key } = data as { key: string };
       const client = await clientsRegistry.getClient(key);
       if (!client) throw new Error(`Target client was not found. Target key: "${key}".`);
-      return await callChannel<boolean>(client, "CONNECT", data, port);
+      const reply = await callChannel<unknown>(client, "CONNECT", data, port);
+      // A socket's port comes back in the reply: pass it on.
+      const socketPort = (reply as Partial<WebSocketConnection> | null)?.port;
+      return socketPort ? withTransfer(reply, [socketPort]) : reply;
+    }),
+  );
+  register(
+    handleChannelCalls(self, WS_CONNECT_CALL, async (event, data) => {
+      // A page of the relay origin -- content a service serves there -- opens
+      // a socket to the service its url routes to, as it would fetch it.
+      const source = event.source as Client | null;
+      if (!source?.url || new URL(source.url).origin !== self.location.origin) {
+        throw new Error("Only this origin's pages may open sockets");
+      }
+      const { url, protocols = [] } = data as { url: string; protocols?: string[] };
+      const httpUrl = new URL(url);
+      if (httpUrl.protocol === "ws:") httpUrl.protocol = "http:";
+      else if (httpUrl.protocol === "wss:") httpUrl.protocol = "https:";
+      await restored.catch(() => {});
+      const key = resolveServiceKey(httpUrl, mounts, self.location.origin);
+      if (key == null) throw new Error(`No service serves ${url}`);
+      const client = await clientsRegistry.getClient(key);
+      if (!client) throw new Error(`No service serves ${url}`);
+      const channel = new MessageChannel();
+      try {
+        const connection = await callChannel<WebSocketConnection>(
+          client,
+          "CONNECT",
+          { type: "ws", key, url: `${httpUrl}`, protocols } satisfies WebSocketConnectParams,
+          channel.port2,
+        );
+        return withTransfer(connection, [connection.port]);
+      } finally {
+        channel.port1.close();
+      }
     }),
   );
 
@@ -264,10 +329,17 @@ export function startRelayServiceWorker(
       const channel = new MessageChannel();
       const client = await clientsRegistry.getClient(key);
       if (!client) throw HttpError.errorResourceGone(params);
-      const data = { type: "http", key };
-      const accepted = await callChannel<boolean>(client, "CONNECT", data, channel.port2);
-      if (!accepted) throw HttpError.errorForbidden(params);
-      const response = await sendHttpRequest(channel.port1, request);
+      const data = { type: "http", key, wire: HTTP_LINK_PROTOCOL };
+      const reply = await callChannel<boolean | ConnectReply>(
+        client,
+        "CONNECT",
+        data,
+        channel.port2,
+      );
+      if (!reply) throw HttpError.errorForbidden(params);
+      const response = await sendOverConnection(channel.port1, reply, request, {
+        streamTimeout: options.streamTimeout,
+      });
       return options.decorateResponse?.(response, request) ?? response;
     } catch (error) {
       const httpError = HttpError.fromError(error);

@@ -19,7 +19,7 @@ export const PACKAGES: ConsumerTarget[] = [
   {
     name: "@statewalker/webrun-http-browser",
     dir: "webrun-http-browser",
-    subpaths: [".", "./sw", "./relay-sw", "./relay-worker", "./sw-worker"],
+    subpaths: [".", "./sw", "./relay-sw", "./relay-worker", "./worker", "./sw-worker"],
     // ServiceWorker, relay and worker bundles; none of them can import under Node.
     browserOnly: ["./sw", "./relay-sw", "./relay-worker", "./sw-worker"],
   },

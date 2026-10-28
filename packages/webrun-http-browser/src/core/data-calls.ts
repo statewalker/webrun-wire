@@ -1,4 +1,5 @@
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
+import { withDeadline } from "./deadline.js";
 import type { MessageSink, MessageSource } from "./message-target.js";
 
 export type ChannelCallHandler = (
@@ -6,6 +7,34 @@ export type ChannelCallHandler = (
   params: unknown,
   ...transfers: MessagePort[]
 ) => unknown;
+
+const TRANSFER = Symbol.for("webrun-http-browser:transfer");
+
+interface TransferResult {
+  [TRANSFER]: true;
+  value: unknown;
+  transfer: Transferable[];
+}
+
+/**
+ * A channel call's result that carries transferables, a `MessagePort` say:
+ * return `withTransfer({ port }, [port])` from a `handleChannelCalls` handler
+ * and `callChannel` resolves with `{ port }`.
+ */
+export function withTransfer<T>(value: T, transfer: Transferable[]): T {
+  return { [TRANSFER]: true, value, transfer } as unknown as T;
+}
+
+function isTransferResult(value: unknown): value is TransferResult {
+  return typeof value === "object" && value !== null && TRANSFER in value;
+}
+
+/** Splits a handler's result into the value to post and its transfer list. */
+export function unwrapTransfer(result: unknown): { value: unknown; transfer: Transferable[] } {
+  return isTransferResult(result)
+    ? { value: result.value, transfer: result.transfer }
+    : { value: result, transfer: [] };
+}
 
 export function callChannel<T = unknown>(
   target: MessageSink,
@@ -33,14 +62,35 @@ export function handleChannelCalls(
     if (!event.data || event.data.type !== callType) return;
     const [port, ...transfers] = event.ports ?? [];
     const response: { result?: unknown; error?: unknown } = {};
+    let transfer: Transferable[] = [];
     try {
-      response.result = await handler(event, event.data.params, ...transfers);
+      const result = await handler(event, event.data.params, ...transfers);
+      ({ value: response.result, transfer } = unwrapTransfer(result));
     } catch (error) {
       response.error = serializeError(error);
     }
-    port?.postMessage(response);
+    port?.postMessage(response, transfer);
   };
   target.addEventListener("message", listener);
   target.start?.();
   return () => target.removeEventListener("message", listener);
+}
+
+/**
+ * `callChannel`, failing after `ms` instead of waiting for ever: a peer that
+ * died (a ServiceWorker stopped mid-call) or that does not know `callType` (an
+ * older version) never answers.
+ */
+export function callChannelWithin<T = unknown>(
+  ms: number,
+  target: MessageSink,
+  callType: string,
+  params: unknown,
+  ...transfers: Transferable[]
+): Promise<T> {
+  return withDeadline(
+    Date.now() + ms,
+    callChannel<T>(target, callType, params, ...transfers),
+    () => new Error(`No answer to ${callType} within ${ms} ms`),
+  );
 }
