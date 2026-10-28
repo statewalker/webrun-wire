@@ -112,6 +112,10 @@ export function newHandler(name, extra = {}) {
       case "echo-body": {
         let bytes = 0;
         let chunks = 0;
+        // Firefox has no `Request.body`: the body comes whole.
+        if (!request.body) {
+          return Response.json({ bytes: (await request.arrayBuffer()).byteLength, chunks: 1 });
+        }
         const reader = request.body.getReader();
         for (;;) {
           const { done, value } = await reader.read();
