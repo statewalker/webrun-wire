@@ -20,6 +20,14 @@ export interface StreamMessageTarget {
     removeEventListener(type: "message", listener: Listener): void;
     postMessage(message: unknown): void;
     close(): Promise<void>;
+    /** The stream's write buffer, in bytes. */
+    readonly bufferedAmount: number;
+    /**
+     * Resolves once the stream can take more (libp2p's `drain`), or has
+     * closed; at once when it can now. A multiplexer with `frameSize` waits
+     * on it between frames.
+     */
+    whenDrained(): Promise<void>;
   };
   /**
    * Aborts when the stream is over. The reason is a {@link PeerGoneError}
@@ -41,9 +49,9 @@ export interface StreamMessageTarget {
  * Frames are `[varint length][bytes]`. Reading starts at once, so attach the
  * `message` listener in the same tick: a message with no listener is dropped,
  * as on a `MessagePort`. `postMessage` hands the frame to `stream.send()` and
- * does not wait for room: the multiplexer above has no backpressure either,
- * and libp2p buffers up to the stream's `maxWriteBufferLength`, past which
- * it resets the stream.
+ * does not wait for room; libp2p buffers up to the stream's
+ * `maxWriteBufferLength`, past which it resets the stream. A sender that must
+ * wait — `multiplexPort` with `frameSize` — awaits `whenDrained()`.
  */
 export function messageTargetOverStream(stream: Stream): StreamMessageTarget {
   const listeners = new Set<Listener>();
@@ -126,6 +134,21 @@ export function messageTargetOverStream(stream: Stream): StreamMessageTarget {
       async close() {
         listeners.clear();
         await closeStream(stream);
+      },
+      get bufferedAmount() {
+        return stream.writeBufferLength;
+      },
+      whenDrained() {
+        if (!stream.writableNeedsDrain || life.signal.aborted) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          const done = (): void => {
+            stream.removeEventListener("drain", done);
+            stream.removeEventListener("close", done);
+            resolve();
+          };
+          stream.addEventListener("drain", done);
+          stream.addEventListener("close", done);
+        });
       },
     },
   };

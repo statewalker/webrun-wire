@@ -298,8 +298,12 @@ so this also covers a peer that dies while no data is flowing.
 
 Frames are `[varint length][bytes]`. Reading starts at once, so attach the
 `message` listener in the same tick (`multiplexPort` does). `postMessage`
-does not wait for room: the multiplexer has no backpressure either, and
-libp2p resets a stream whose write buffer passes `maxWriteBufferLength`.
+does not wait for room, and libp2p resets a stream whose write buffer passes
+`maxWriteBufferLength`. The target reports its state instead:
+`bufferedAmount` is the stream's write buffer, and `whenDrained()` resolves
+on libp2p's `drain` (or the stream's `close`, so no sender is left waiting),
+at once when the stream has room. `multiplexPort` with `frameSize` waits on it
+between frames, which is what lets ports take turns on the stream.
 
 ### Constraints
 

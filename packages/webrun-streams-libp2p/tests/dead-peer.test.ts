@@ -219,3 +219,44 @@ describe("a multiplexer over one libp2p stream closes with its connection", () =
     expect(received).toEqual(sent);
   });
 });
+
+describe("messageTargetOverStream reports when the stream is full", () => {
+  /** Stands in for libp2p's `Stream`: the readiness fields and events only. */
+  function fullStream() {
+    const events = new EventTarget();
+    const stream = Object.assign(events, {
+      writableNeedsDrain: true,
+      writeBufferLength: 70_000,
+      send: () => false,
+      close: async () => {},
+      abort: () => {},
+      async *[Symbol.asyncIterator]() {},
+    });
+    return stream;
+  }
+
+  it("whenDrained waits for the stream's drain, and bufferedAmount is its write buffer", async () => {
+    const stream = fullStream();
+    const { target } = messageTargetOverStream(stream as never);
+    expect(target.bufferedAmount).toBe(70_000);
+    let drained = false;
+    const waiting = target.whenDrained().then(() => {
+      drained = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(drained).toBe(false);
+    stream.writableNeedsDrain = false;
+    stream.dispatchEvent(new Event("drain"));
+    await waiting;
+    expect(drained).toBe(true);
+    await expect(target.whenDrained()).resolves.toBeUndefined();
+  });
+
+  it("whenDrained settles when the stream closes instead, so no sender hangs", async () => {
+    const stream = fullStream();
+    const { target } = messageTargetOverStream(stream as never);
+    const waiting = target.whenDrained();
+    stream.dispatchEvent(new Event("close"));
+    await expect(waiting).resolves.toBeUndefined();
+  });
+});
