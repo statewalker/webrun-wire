@@ -42,6 +42,13 @@ export function listenPort<TParams = unknown, TResult = unknown>(
     }
     port.postMessage({ callId, channelName, type, result, error });
   };
-  port.addEventListener("message", onMessage);
-  return () => port.removeEventListener("message", onMessage);
+  // A request counts as consumed (for a port's window) once it is handed to its
+  // handler, not when the handler finishes: a handler that waits for a later
+  // call on the same port (long polls, subscriptions) must not hold the window
+  // that later call needs.
+  const listener = (event: MessageEvent): void => {
+    void onMessage(event);
+  };
+  port.addEventListener("message", listener);
+  return () => port.removeEventListener("message", listener);
 }

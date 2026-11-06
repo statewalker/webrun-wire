@@ -89,17 +89,12 @@ export function multiplexPort(
     waiters: { below: number; resolve: () => void }[];
     toGrant: number;
     grantScheduled: boolean;
-    closeAfterFlush?: () => void;
   }
   interface Entry extends PortInfo {
     handle: VirtualPortHandle;
     credit?: Credit;
   }
   const open = new Map<number, Entry>();
-  // Ports closed locally whose queue still drains: they left `open`, but the
-  // peer's credit must still reach them, or the queue and the close behind it
-  // would wait forever.
-  const draining = new Map<number, Credit>();
   const touch = (id: number): void => {
     const entry = open.get(id);
     if (entry) entry.lastActivity = Date.now();
@@ -142,11 +137,6 @@ export function multiplexPort(
         w.resolve();
       }
     }
-    if (!c.queue.length && c.closeAfterFlush) {
-      const close = c.closeAfterFlush;
-      c.closeAfterFlush = undefined;
-      close();
-    }
   };
 
   // Credit goes back in batches: at once from a quarter of the window, else on
@@ -157,7 +147,7 @@ export function multiplexPort(
     c.toGrant += bytes;
     const send = () => {
       c.grantScheduled = false;
-      if (!c.toGrant || !(open.has(id) || draining.has(id))) return;
+      if (!c.toGrant || !open.has(id)) return;
       post({ type: "credit", id, bytes: c.toGrant });
       c.toGrant = 0;
     };
@@ -210,6 +200,15 @@ export function multiplexPort(
         // what the window counts, on both ends.
         const prepared = c.exact ? codec.prepare?.(envelope, transfer) : undefined;
         const size = prepared?.size ?? estimateMessageSize(payload);
+        // A message that will wait is copied now, as `postMessage` would copy
+        // it at once: the caller may reuse its buffer as soon as it returns.
+        const waits =
+          c.queue.length > 0 ||
+          (c.enforced && c.outstanding > 0 && c.outstanding + size > c.window);
+        const held =
+          !prepared && waits
+            ? { ...envelope, payload: structuredClone(payload, { transfer }) }
+            : undefined;
         const send = prepared
           ? () => {
               if (muxClosed) return;
@@ -219,24 +218,23 @@ export function multiplexPort(
                 // The underlying port is gone, as in `post`.
               }
             }
-          : () => post(envelope, transfer);
+          : held
+            ? () => post(held)
+            : () => post(envelope, transfer);
         c.queue.push({ send, size });
         c.queued += size;
         flush(c);
       },
       (reason) => {
         open.delete(id);
-        // What is queued still goes out before the close, as it would without
-        // a window. The id is already free: no new port may take it meanwhile.
+        // What is queued goes out now, before the close and regardless of the
+        // window: a peer that stopped returning credit (a listener that never
+        // settles) must still learn that the port is closed, and nothing is
+        // kept for a port nobody holds. Without a window it would all have
+        // gone out at once anyway.
         if (c?.queue.length) {
-          draining.set(id, c);
-          c.closeAfterFlush = () => {
-            draining.delete(id);
-            post({ type: "close", id, reason });
-            releaseWaiters(c);
-          };
-          self.markClosed(reason);
-          return;
+          for (const item of c.queue.splice(0)) item.send();
+          c.queued = 0;
         }
         post({ type: "close", id, reason });
         releaseWaiters(c);
@@ -285,6 +283,17 @@ export function multiplexPort(
         false,
         envelope.exact === true && codec.prepare != null,
       );
+      // Acknowledge the window before `onPort` runs: what `onPort` posts then
+      // reaches the opener after the ack, so both ends count it the same way
+      // (exact bytes or the estimate). A rejection's close follows the ack.
+      const credit = open.get(envelope.id)?.credit;
+      if (credit) {
+        post(
+          credit.exact
+            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
+            : { type: "credit", id: envelope.id, bytes: 0 },
+        );
+      }
       let accepted = false;
       if (onPort) {
         try {
@@ -299,22 +308,14 @@ export function multiplexPort(
         post({ type: "close", id: envelope.id, reason: "rejected" });
         return;
       }
-      // Acknowledge the window, so the opener starts to apply it.
-      const credit = open.get(envelope.id)?.credit;
-      if (credit) {
-        post(
-          credit.exact
-            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
-            : { type: "credit", id: envelope.id, bytes: 0 },
-        );
-      }
+
       return;
     }
 
     const entry = open.get(envelope.id);
 
     if (envelope.type === "credit") {
-      const c = entry?.credit ?? draining.get(envelope.id);
+      const c = entry?.credit;
       if (!c || !(envelope.bytes >= 0)) return;
       if (!c.enforced && c.opener) {
         // The ack. It also settles the sizing: if the responder cannot count
@@ -339,29 +340,13 @@ export function multiplexPort(
       // buffering layer 1 refuses to do.
       const sizeOf = (c: Credit) =>
         c.exact && codec.size ? codec.size(event) : estimateMessageSize(envelope.payload);
-      if (!entry) {
-        // Closed here while its own queue drains: credit what arrives at
-        // once, or a peer that closed with a full queue too would wait for
-        // credit that never comes, and neither close would ever go out.
-        const c = draining.get(envelope.id);
-        if (c) {
-          const size = sizeOf(c);
-          c.unconsumed += size;
-          grant(envelope.id, c, size);
-        }
-        return;
-      }
+      if (!entry) return;
       touch(envelope.id);
       entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
       return;
     }
 
-    if (!entry) {
-      // The peer is gone from a port still draining: nothing will be read.
-      releaseWaiters(draining.get(envelope.id));
-      draining.delete(envelope.id);
-      return;
-    }
+    if (!entry) return;
     open.delete(envelope.id);
     releaseWaiters(entry.credit);
     entry.handle.markClosed(new Error("webrun-rpc: the peer closed the port"));
@@ -389,13 +374,6 @@ export function multiplexPort(
       releaseWaiters(credit);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
     }
-    // Ports closed locally while their queue drained: the peer still waits
-    // for their close.
-    for (const [id, c] of draining) {
-      codecPost({ type: "close", id });
-      releaseWaiters(c);
-    }
-    draining.clear();
     await port.close?.();
   };
   // Nobody awaits the transport's close on this path, and a dead transport's

@@ -144,7 +144,7 @@ describe("per-port window", () => {
     expect(back.codec.sent.credit ?? 0).toBeLessThan(200);
   });
 
-  it("delivers what is queued before a close", async () => {
+  it("a close sends what is queued, in order, then the close, without waiting for credit", async () => {
     const got: number[] = [];
     let closed = false;
     let release!: () => void;
@@ -164,11 +164,11 @@ describe("per-port window", () => {
     await acknowledged(a);
     for (let i = 0; i < 5; i++) port.postMessage(new Uint8Array(40 * KiB).fill(i));
     port.close();
-    await waitFor(() => got.length === 1, "the first message");
-    expect(closed).toBe(false);
-    release();
-    await waitFor(() => got.length === 5 && closed, "the rest, then the close");
+    // A close sends what is queued at once, then the close, without waiting for
+    // credit: the peer's listener holding its first message holds nothing up.
+    await waitFor(() => got.length === 5 && closed, "the queue, then the close");
     expect(got).toEqual([0, 1, 2, 3, 4]);
+    release();
   });
 
   it("without a window, nothing changes: no credit envelopes, no queue", async () => {
