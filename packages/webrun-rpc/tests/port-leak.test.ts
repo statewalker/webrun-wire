@@ -1,6 +1,7 @@
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
+import type { MessageTarget } from "../src/message-target.js";
 import { multiplexPort } from "../src/multiplex-port.js";
 import type { PortInfo, PortMux } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
@@ -41,13 +42,12 @@ async function collectUntil(predicate: () => boolean, timeoutMs = 3000) {
 }
 
 describe("a port dropped without close", () => {
-  it("is reported with its meta, and its slot is freed on both ends", async () => {
+  it("with no listener, is reported with its meta and freed on both ends", async () => {
     const leaks: PortInfo[] = [];
     const { a, b } = pair((info) => leaks.push(info));
     await (async () => {
       const port = await a.openPort({ kind: "leaky" });
-      port.addEventListener("message", () => {});
-      port.postMessage("hello");
+      port.postMessage("hello"); // and never listens: nothing can reach it again
     })();
     const reported = await collectUntil(() => leaks.length > 0 && b.ports().length === 0);
     expect(reported).toBe(true);
@@ -73,5 +73,52 @@ describe("a port dropped without close", () => {
       await a.openPort({ kind: "signalled" }, { signal });
     })();
     expect(await collectUntil(() => leaks.length > 0)).toBe(true);
+  });
+
+  it("without onLeak, a dropped port opened with a signal is still freed when the signal aborts", async () => {
+    const { a, b } = pair();
+    const controller = new AbortController();
+    await (async () => {
+      await a.openPort({ kind: "signalled" }, { signal: controller.signal });
+    })();
+    await collectUntil(() => false, 200);
+    controller.abort(new Error("done"));
+    expect(await collectUntil(() => a.ports().length === 0 && b.ports().length === 0)).toBe(true);
+  });
+
+  it("a dropped port that still has a listener is reported but keeps receiving", async () => {
+    const leaks: PortInfo[] = [];
+    const received: unknown[] = [];
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    const a = multiplexPort(ch.port1, { codec: structuredCodec, side: "initiator" });
+    const b = multiplexPort(ch.port2, {
+      codec: structuredCodec,
+      side: "responder",
+      onLeak: (info) => leaks.push(info),
+      onPort: (p) => {
+        p.addEventListener("message", (e) => {
+          received.push(e.data);
+        });
+        return true;
+      },
+    });
+    muxes.push(a, b);
+    const sender = await a.openPort({ kind: "events" });
+    sender.postMessage(0);
+    expect(await collectUntil(() => leaks.length > 0)).toBe(true);
+    for (let i = 1; i < 5; i++) sender.postMessage(i);
+    expect(await collectUntil(() => received.length === 5)).toBe(true);
+    expect(b.ports()).toHaveLength(1);
+  });
+});
+
+describe("Symbol.dispose", () => {
+  it("closes the port when called detached from it", async () => {
+    const { a } = pair();
+    const port = (await a.openPort()) as MessageTarget & { [Symbol.dispose](): void };
+    const dispose = port[Symbol.dispose];
+    dispose();
+    expect(a.ports()).toEqual([]);
   });
 });

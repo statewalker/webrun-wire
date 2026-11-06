@@ -435,12 +435,17 @@ A browser realm (a tab, an iframe, a worker) reports nothing, but the browser re
 holds a lock for its whole life, and this side asks for the same lock, which it gets only then:
 
 ```ts
-// In the other realm, before it says it is ready:
-navigator.locks.request("realm:editor", () => new Promise(() => {}));
+// In the other realm: a name of its own (realms of one origin share locks), and
+// "ready" only from inside the callback, once the lock is really held.
+const lock = `realm:${crypto.randomUUID()}`;
+navigator.locks.request(lock, () => {
+  port.postMessage({ ready: lock });
+  return new Promise(() => {}); // held until this realm ends
+});
 
-// Here, once the other realm has said it holds the lock — asked earlier, it is granted at once:
+// Here, on that "ready" — asked before the lock is held, it would be granted at once:
 const gone = new AbortController();
-navigator.locks.request("realm:editor", () => gone.abort(new Error("the editor realm is gone")));
+navigator.locks.request(ready.lock, () => gone.abort(new Error("the other realm is gone")));
 const mux = multiplexPort(port, { codec: structuredCodec, signal: gone.signal });
 ```
 
@@ -456,11 +461,17 @@ the mux must deliver to every open port, and an abandoned port's listeners usual
 port, so it stays reachable from the table. What they can do is catch the ports nothing else
 holds. The mux keeps only its own record of a port, never the consumer's object, so with
 `onLeak` a port its consumer dropped without `close()` is reported once the collector reclaims it
-(`onLeak(info)`, with its `meta`), and freed on both ends as a close would free it: the peer sees
-reason `"leaked"`, and the port's close signal aborts with `webrun-rpc: the port was dropped
-without close()`. A port whose own listener refers to it is never collected, so never reported;
-when the collector runs is up to the runtime. It is a development aid: each port costs a
-`FinalizationRegistry` entry.
+(`onLeak(info)`, with its `meta`). What happens next depends on its listeners:
+
+- **No listener left:** nothing can reach the port again, so it is freed on both ends as a close
+  would free it. Its close signal aborts with `webrun-rpc: the port was dropped without close()`;
+  the peer's port closes as on any close (`webrun-rpc: the peer closed the port`).
+- **A listener left** (a subscription that keeps only its handler): the port is still receiving,
+  so it is reported and left open. Hold the port, or close it, to silence the report.
+
+A port whose own listener refers to it is never collected, so never reported; when the collector
+runs is up to the runtime. It is a development aid: each port costs a `FinalizationRegistry`
+entry.
 
 ### No close is observable at layer 1
 

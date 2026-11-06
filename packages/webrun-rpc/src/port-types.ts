@@ -123,12 +123,12 @@ export interface PortMuxOptions {
   /**
    * Leak detection, for development (off when unset). A port its consumer
    * dropped without `close()` is reported here once the garbage collector
-   * reclaims it, and its slot is freed on both ends as a close would free it
-   * (the peer sees reason `"leaked"`). It catches only ports nothing else
-   * holds: a listener that closes over its own port keeps it reachable from
-   * the mux, so such a port is never collected, and never reported. Each port
-   * costs a `FinalizationRegistry` entry, and when the collector runs is up
-   * to the runtime.
+   * reclaims it. If it has no listener left it is freed on both ends, as a
+   * close would free it; one that still has a listener is still receiving, so
+   * it is reported and left open. A listener that closes over its own port
+   * keeps it reachable from the mux, so such a port is never collected, and
+   * never reported. Each port costs a `FinalizationRegistry` entry, and when
+   * the collector runs is up to the runtime.
    */
   onLeak?: (info: PortInfo) => void;
 }

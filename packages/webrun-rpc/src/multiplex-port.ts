@@ -102,7 +102,13 @@ export function multiplexPort(
    * What the mux keeps of a port: never the consumer's `port` object itself,
    * so a port its consumer dropped can be collected and reported (`onLeak`).
    */
-  type PortRecord = Pick<VirtualPortHandle, "deliver" | "markClosed" | "isClosed">;
+  type PortRecord = Pick<
+    VirtualPortHandle,
+    "deliver" | "markClosed" | "isClosed" | "hasListeners"
+  > & {
+    /** Close the port as its consumer's `close()` would, without its object. */
+    close(reason: unknown): void;
+  };
   interface Entry extends PortInfo {
     handle: PortRecord;
     credit?: Credit;
@@ -121,8 +127,13 @@ export function multiplexPort(
         const entry = open.get(id);
         if (entry?.handle !== record) return;
         const { handle: _, credit: __, partial: ___, ...info } = entry;
-        release("leaked");
-        record.markClosed(new Error("webrun-rpc: the port was dropped without close()"));
+        // A port whose consumer still listens is still receiving (a
+        // subscription that keeps only its listener): report it, but leave it
+        // open. One with no listener can neither send nor receive any more.
+        if (!record.hasListeners()) {
+          release("leaked");
+          record.markClosed(new Error("webrun-rpc: the port was dropped without close()"));
+        }
         try {
           onLeak?.(info);
         } catch {
@@ -356,7 +367,7 @@ export function multiplexPort(
     }
     // No closure below may refer to `self`: closures in one scope share it, and
     // the ones the mux keeps would then hold the consumer's port (`onLeak`).
-    const { markClosed, isClosed } = self;
+    const { markClosed, isClosed, hasListeners } = self;
     if (c) {
       const deliver = self.deliver;
       self.deliver = (payload, size = estimateMessageSize(payload)) => {
@@ -375,7 +386,17 @@ export function multiplexPort(
           }),
       });
     }
-    const record: PortRecord = { deliver: self.deliver, markClosed, isClosed };
+    const record: PortRecord = {
+      deliver: self.deliver,
+      markClosed,
+      isClosed,
+      hasListeners,
+      close: (reason) => {
+        if (isClosed()) return;
+        release(reason);
+        markClosed(reason);
+      },
+    };
     leaks?.register(self.port, { id, record, release }, record);
     const now = Date.now();
     open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: record, credit: c });
@@ -566,9 +587,12 @@ export function multiplexPort(
           : { type: "open", id, meta },
       );
       if (portSignal) {
-        // Weakly: a long-lived signal must not keep a dropped port reachable.
-        const ref = new WeakRef(handle.port);
-        const onAbort = () => void ref.deref()?.close?.(portSignal.reason);
+        // Through the mux's record, not the port: a long-lived signal must not
+        // keep a dropped port reachable, and must still free it once dropped.
+        const record = open.get(id)?.handle;
+        const onAbort = () => {
+          if (record && open.get(id)?.handle === record) record.close(portSignal.reason);
+        };
         portSignal.addEventListener("abort", onAbort, { once: true });
         getPortCloseSignal(handle.port)?.addEventListener(
           "abort",

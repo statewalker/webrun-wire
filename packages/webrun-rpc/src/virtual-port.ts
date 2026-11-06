@@ -17,6 +17,8 @@ export interface VirtualPortHandle {
    */
   markClosed(reason?: unknown): void;
   isClosed(): boolean;
+  /** Multiplexer-only: the consumer still listens, so the port is in use. */
+  hasListeners(): boolean;
 }
 
 /**
@@ -43,6 +45,21 @@ export function newVirtualPort(
     closing.abort(reason ?? new Error("webrun-rpc: the port was closed"));
   };
 
+  // A standalone function, not a method using `port`: closures here share one
+  // scope, and one that captured `port` would make `deliver` and `markClosed`
+  // — which the mux keeps — hold the consumer's port too (see `onLeak`). It
+  // also works detached, as `Symbol.dispose` may be called.
+  const close = (reason?: unknown): void => {
+    if (closed) return;
+    closed = true;
+    const notify = requestClose;
+    listeners.clear();
+    // The mux frees the port first (its slot and its entry in `ports()`), then the close
+    // signal fires with the caller's reason: a listener that reopens (reconnect logic) finds
+    // the slot free. `notify` passes the reason on to `markClosed`, which aborts with it.
+    notify(reason);
+    abort(reason);
+  };
   const port: MessageTarget = {
     addEventListener(_type, listener) {
       listeners.add(listener);
@@ -54,17 +71,7 @@ export function newVirtualPort(
       if (closed) return;
       send(message, transfer);
     },
-    close(reason?: unknown) {
-      if (closed) return;
-      closed = true;
-      const notify = requestClose;
-      listeners.clear();
-      // The mux frees the port first (its slot and its entry in `ports()`), then the close
-      // signal fires with the caller's reason: a listener that reopens (reconnect logic) finds
-      // the slot free. `notify` passes the reason on to `markClosed`, which aborts with it.
-      notify(reason);
-      abort(reason);
-    },
+    close,
   };
   setPortCloseSignal(port, closing.signal);
   // `using port = await mux.openPort()` closes it on scope exit. Installed
@@ -72,16 +79,7 @@ export function newVirtualPort(
   // which would require consumers to compile with `esnext.disposable`.
   const dispose = (Symbol as { dispose?: symbol }).dispose;
   if (dispose) {
-    // A method, not a closure over `port`: closures here share one scope, and
-    // one that captured `port` would make `deliver` and `markClosed` — which
-    // the mux keeps — hold the consumer's port too, so it could never be
-    // collected (see `onLeak`).
-    Object.defineProperty(port, dispose, {
-      value(this: MessageTarget) {
-        return this.close?.();
-      },
-      configurable: true,
-    });
+    Object.defineProperty(port, dispose, { value: () => close(), configurable: true });
   }
 
   return {
@@ -113,6 +111,9 @@ export function newVirtualPort(
     },
     isClosed() {
       return closed;
+    },
+    hasListeners() {
+      return listeners.size > 0;
     },
   };
 }
