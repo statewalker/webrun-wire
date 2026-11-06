@@ -1,6 +1,6 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import { setPortSendState } from "./port-credit.js";
+import { nextTask, setPortSendState } from "./port-credit.js";
 import type {
   OpenPortOptions,
   PortEnvelope,
@@ -42,36 +42,15 @@ export function estimateMessageSize(payload: unknown): number {
 }
 
 /**
- * Runs `fn` on a later task, never a microtask: a producer looping on
- * `whenPortReady` must let the transport's own events run. `setImmediate`
- * where it exists; elsewhere a `MessageChannel`, because nested `setTimeout`s
- * are clamped to 4 ms in browsers.
- */
-const setImmediateFn = (globalThis as { setImmediate?: (fn: () => void) => unknown }).setImmediate;
-const nextTask: (fn: () => void) => void = setImmediateFn
-  ? (fn) => {
-      setImmediateFn(fn);
-    }
-  : (() => {
-      let channel: MessageChannel | undefined;
-      const queue: Array<() => void> = [];
-      return (fn) => {
-        if (!channel) {
-          channel = new MessageChannel();
-          channel.port1.onmessage = () => queue.shift()?.();
-        }
-        queue.push(fn);
-        channel.port2.postMessage(0);
-      };
-    })();
-
-/**
  * The default `PortMux`: emulates multiplexing over a single port.
  *
  * A transport that already multiplexes natively supplies its own `PortMux`
  * instead — this implementation is for transports that offer one pipe.
  */
-export function multiplexPort(port: MessageTarget, options: PortMuxOptions): PortMux {
+export function multiplexPort(
+  port: MessageTarget,
+  options: PortMuxOptions,
+): PortMux & { ports(): PortInfo[] } {
   const {
     codec,
     onPort,
@@ -96,8 +75,16 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
      * never sends credit, and its ports must run as they did before.
      */
     enforced: boolean;
-    /** The peer reassembles frames (`frameSize`): it said so in its `open` or its ack. */
-    peerReadsFrames: boolean;
+    /** This side opened the port; the other answers its window with an ack. */
+    opener: boolean;
+    /**
+     * Both ends count encoded bytes (`PortCodec.encode` / `decode`), and so
+     * may split a large message into frames (`frameSize`). If either cannot,
+     * both count the shared estimate and send messages whole: two ends
+     * counting different sizes would leak window on every message until the
+     * port wedged.
+     */
+    exact: boolean;
     outstanding: number;
     queue: { send: () => void; size: number }[];
     queued: number;
@@ -124,9 +111,15 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
   };
   let nextId = side === "initiator" ? 0 : 1;
   let muxClosed = false;
+  /** This end counts encoded bytes and reassembles frames. */
+  const exactCodec = codec.encode != null && codec.decode != null;
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
+    codecPost(envelope, transfer);
+  };
+  /** Like `post`, also while closing: the mux's own close notices. */
+  const codecPost = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     try {
       codec.post(port, envelope, transfer);
     } catch {
@@ -159,6 +152,10 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         else outgoing.delete(id);
         item?.();
       }
+    } catch (err) {
+      // The pipe failed while this mux waited for room: nothing queued can
+      // go out now, and the ports must hear so rather than wait forever.
+      close(err).catch(() => {});
     } finally {
       pumping = false;
     }
@@ -176,6 +173,11 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     }
     queue.push(item);
     if (!pumping) void pump();
+  };
+  const dropOutgoing = (id: number): void => {
+    if (!outgoing.delete(id)) return;
+    const at = ring.indexOf(id);
+    if (at >= 0) ring.splice(at, 1);
   };
   const postBytes = (bytes: Uint8Array): void => {
     if (muxClosed) return;
@@ -222,7 +224,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     c.toGrant += bytes;
     const send = () => {
       c.grantScheduled = false;
-      if (!c.toGrant || !open.has(id)) return;
+      if (!c.toGrant || !(open.has(id) || draining.has(id))) return;
       post({ type: "credit", id, bytes: c.toGrant });
       c.toGrant = 0;
     };
@@ -238,17 +240,22 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
   const attach = (
     id: number,
     meta: unknown,
-    portWindow: number | undefined,
-    enforced: boolean,
-    peerReadsFrames: boolean,
+    portWindow: unknown,
+    opener: boolean,
+    exact: boolean,
   ): VirtualPortHandle => {
     let self!: VirtualPortHandle;
+    // A peer's window must be a positive integer; anything else means none.
     const c: Credit | undefined =
-      portWindow != null && portWindow > 0
+      typeof portWindow === "number" && Number.isSafeInteger(portWindow) && portWindow > 0
         ? {
             window: portWindow,
-            enforced,
-            peerReadsFrames,
+            // Nobody holds back until the other end has shown it reads credit:
+            // the responder's ack proves that to the opener, and the opener's
+            // answer to the ack proves it to the responder.
+            enforced: false,
+            opener,
+            exact,
             outstanding: 0,
             queue: [],
             queued: 0,
@@ -262,20 +269,24 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       (payload, transfer) => {
         touch(id);
         const envelope: PortEnvelope = { type: "message", id, payload };
+        // Without a window nothing frames or waits: post at once, so the
+        // payload is read now, while the caller still expects it to be.
         if (!c) {
-          sendOnPort(id, () => post(envelope, transfer));
+          post(envelope, transfer);
           return;
         }
         // Encoded once, here, when the codec can: the exact wire size is then
         // what the window counts, on both ends, and the bytes are what frames split.
-        const bytes = codec.encode?.(envelope);
+        const bytes = c.exact ? codec.encode?.(envelope) : undefined;
         const size = bytes?.byteLength ?? estimateMessageSize(payload);
         const send = (): void => {
           if (!bytes) {
             sendOnPort(id, () => post(envelope, transfer));
             return;
           }
-          if (frameSize != null && c.peerReadsFrames && bytes.byteLength > frameSize) {
+          // Frames only once the peer has acknowledged exact sizing: before
+          // that, it may be a peer that cannot reassemble them.
+          if (frameSize != null && c.enforced && c.exact && bytes.byteLength > frameSize) {
             for (let at = 0; at < bytes.byteLength; at += frameSize) {
               const data = bytes.subarray(at, at + frameSize);
               const frame: PortEnvelope =
@@ -351,8 +362,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         envelope.id,
         envelope.meta,
         envelope.window,
-        true,
-        envelope.frames === true,
+        false,
+        envelope.exact === true && exactCodec,
       );
       let accepted = false;
       if (onPort) {
@@ -369,10 +380,11 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         return;
       }
       // Acknowledge the window, so the opener starts to apply it.
-      if (open.get(envelope.id)?.credit) {
+      const credit = open.get(envelope.id)?.credit;
+      if (credit) {
         post(
-          codec.decode
-            ? { type: "credit", id: envelope.id, bytes: 0, frames: true }
+          credit.exact
+            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
             : { type: "credit", id: envelope.id, bytes: 0 },
         );
       }
@@ -384,8 +396,18 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     if (envelope.type === "credit") {
       const c = entry?.credit ?? draining.get(envelope.id);
       if (!c || !(envelope.bytes >= 0)) return;
+      if (!c.enforced && c.opener) {
+        // The ack. It also settles the sizing: if the responder cannot count
+        // exact bytes, both ends fall back to the estimate, and what was
+        // counted exactly before the ack no longer matches what comes back.
+        if (c.exact && envelope.exact !== true) {
+          c.exact = false;
+          c.outstanding = 0;
+        }
+        // Show the responder its codec reads credit, so it may hold back too.
+        post({ type: "credit", id: envelope.id, bytes: 0 });
+      }
       c.enforced = true;
-      if (envelope.frames === true) c.peerReadsFrames = true;
       c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
       flush(c);
       return;
@@ -395,14 +417,30 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       // Drop, never queue. An id that was rejected, never opened, or already
       // closed has no consumer, and holding its traffic would be exactly the
       // buffering layer 1 refuses to do.
-      if (!entry) return;
+      const sizeOf = (c: Credit) =>
+        (c.exact ? byteLengthOf(event.data) : undefined) ?? estimateMessageSize(envelope.payload);
+      if (!entry) {
+        // Closed here while its own queue drains: credit what arrives at
+        // once, or a peer that closed with a full queue too would wait for
+        // credit that never comes, and neither close would ever go out.
+        const c = draining.get(envelope.id);
+        if (c) {
+          const size = sizeOf(c);
+          c.unconsumed += size;
+          grant(envelope.id, c, size);
+        }
+        return;
+      }
       touch(envelope.id);
-      entry.handle.deliver(envelope.payload, codec.encode ? byteLengthOf(event.data) : undefined);
+      entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
       return;
     }
 
     if (envelope.type === "frame") {
-      if (!entry || !codec.decode || !(envelope.data instanceof Uint8Array)) return;
+      // Only where this end advertised exact sizing — the one place a peer may
+      // frame. A frame sequence buffers no more than the same message sent
+      // whole, which a byte transport would also have to hold entire.
+      if (!entry?.credit?.exact || !codec.decode || !(envelope.data instanceof Uint8Array)) return;
       touch(envelope.id);
       const partial = entry.partial ?? { chunks: [], bytes: 0 };
       entry.partial = partial;
@@ -423,7 +461,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     }
 
     // The peer closed the port: whatever it still had to receive is moot.
-    outgoing.delete(envelope.id);
+    dropOutgoing(envelope.id);
     if (!entry) {
       // The peer is gone from a port still draining: nothing will be read.
       releaseWaiters(draining.get(envelope.id));
@@ -442,28 +480,46 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
   const close = async (reason?: unknown): Promise<void> => {
     if (muxClosed) return;
+    // Closed BEFORE the ports: `markClosed` runs their close-signal listeners
+    // synchronously, and one that reopens (reconnect logic) must be refused
+    // rather than add a port after the snapshot below, which nothing would
+    // ever close.
+    muxClosed = true;
     signal?.removeEventListener("abort", onTransportAbort);
+    port.removeEventListener("message", listener);
+    const closedNow = new Set<number>();
     for (const [id, { handle, credit }] of [...open]) {
-      post({ type: "close", id });
+      closedNow.add(id);
+      codecPost({ type: "close", id });
       open.delete(id);
       releaseWaiters(credit);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
     }
-    for (const c of draining.values()) releaseWaiters(c);
+    // Ports closed locally while their queue drained: the peer still waits
+    // for their close.
+    for (const [id, c] of draining) {
+      closedNow.add(id);
+      codecPost({ type: "close", id });
+      releaseWaiters(c);
+    }
     draining.clear();
+    // Ports closed here whose close still waits behind their frames: it goes
+    // now, or the peer would hold them open forever.
+    for (const id of outgoing.keys()) if (!closedNow.has(id)) codecPost({ type: "close", id });
     outgoing.clear();
     ring.length = 0;
-    muxClosed = true;
-    port.removeEventListener("message", listener);
     await port.close?.();
   };
+  // Nobody awaits the transport's close on this path, and a dead transport's
+  // `close()` often rejects (a stream already reset): never let that become
+  // an unhandled rejection.
   const onTransportAbort = (): void => {
-    void close(signal?.reason);
+    close(signal?.reason).catch(() => {});
   };
 
   port.addEventListener("message", listener);
   void port.start?.();
-  if (signal?.aborted) void close(signal.reason);
+  if (signal?.aborted) close(signal.reason).catch(() => {});
   else signal?.addEventListener("abort", onTransportAbort, { once: true });
 
   return {
@@ -471,6 +527,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
     async openPort(meta?: unknown, { signal: portSignal }: OpenPortOptions = {}) {
       if (muxClosed) throw new Error("webrun-rpc: the multiplexer is closed");
+      // As `fetch` does: a signal already aborted opens nothing.
+      if (portSignal?.aborted) throw portSignal.reason;
       if (open.size >= maxPorts) {
         throw new RangeError(
           `webrun-rpc: maxPorts (${maxPorts}) reached; open ports by kind: ${describeKinds(open.values())}`,
@@ -482,25 +540,22 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id, meta, window, false, false);
+      const handle = attach(id, meta, window, true, exactCodec);
       post(
         window
-          ? codec.decode
-            ? { type: "open", id, meta, window, frames: true }
+          ? exactCodec
+            ? { type: "open", id, meta, window, exact: true }
             : { type: "open", id, meta, window }
           : { type: "open", id, meta },
       );
       if (portSignal) {
-        const onAbort = () => void handle.port.close?.();
-        if (portSignal.aborted) onAbort();
-        else {
-          portSignal.addEventListener("abort", onAbort, { once: true });
-          getPortCloseSignal(handle.port)?.addEventListener(
-            "abort",
-            () => portSignal.removeEventListener("abort", onAbort),
-            { once: true },
-          );
-        }
+        const onAbort = () => void handle.port.close?.(portSignal.reason);
+        portSignal.addEventListener("abort", onAbort, { once: true });
+        getPortCloseSignal(handle.port)?.addEventListener(
+          "abort",
+          () => portSignal.removeEventListener("abort", onAbort),
+          { once: true },
+        );
       }
       return handle.port;
     },

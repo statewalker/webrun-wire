@@ -166,7 +166,7 @@ describe("fair framing", () => {
     // The peer of an earlier version: it never advertises frames.
     const olderPeer: PortCodec = {
       post(port, envelope, transfer) {
-        const { frames: _, ...rest } = envelope as typeof envelope & { frames?: unknown };
+        const { exact: _, ...rest } = envelope as typeof envelope & { exact?: unknown };
         msgpackCodec.post(port, rest as typeof envelope, transfer);
       },
       read(event) {
@@ -182,5 +182,75 @@ describe("fair framing", () => {
     await waitFor(() => arrivals.length === 1, "it arrives");
     expect(frames).toBe(0);
     expect(arrivals[0]?.data).toEqual(pattern(100 * KiB, 3));
+  });
+});
+
+describe("review fixes (#48)", () => {
+  it("closing the mux still closes a port whose close waits behind its frames", async () => {
+    const { a, b } = pair({ frameSize: 16 * KiB });
+    const port = await a.openPort("one");
+    await acknowledged(a, 1);
+    port.postMessage(pattern(1024 * KiB, 1));
+    await port.close?.();
+    await a.close();
+    await waitFor(() => (b.ports?.() ?? []).length === 0, "the peer frees the port");
+  });
+
+  it("a port without a window posts at once: a buffer reused after postMessage is not read late", async () => {
+    const { a, arrivals } = pair({ frameSize: 16 * KiB, window: 0 });
+    const port = await a.openPort("plain");
+    const buffer = new Uint8Array([1, 2, 3]);
+    port.postMessage(buffer);
+    buffer.fill(9);
+    await waitFor(() => arrivals.length === 1, "it arrives");
+    expect(arrivals[0]?.data).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("a pipe whose whenDrained rejects closes the mux", async () => {
+    const channel = new MessageChannel();
+    cleanups.push(() => channel.port1.close());
+    const failure = new Error("pipe broke");
+    const pipe: MessageTarget = {
+      addEventListener: (_t, l: MessageListener) => channel.port1.addEventListener("message", l),
+      removeEventListener: (_t, l: MessageListener) =>
+        channel.port1.removeEventListener("message", l),
+      postMessage: (m) => channel.port1.postMessage(m),
+      whenDrained: () => Promise.reject(failure),
+    };
+    const a = multiplexPort(pipe, { codec: msgpackCodec, window: 64 * KiB, frameSize: 16 * KiB });
+    cleanups.push(() => a.close());
+    const port = await a.openPort("one");
+    await port.close?.(); // the close goes through the pump
+    await waitFor(() => a.ports().length === 0, "closed");
+    await expect(a.openPort("two")).rejects.toThrow("the multiplexer is closed");
+  });
+
+  it("a frame on a port that never agreed exact sizes is dropped", async () => {
+    const channel = new MessageChannel();
+    cleanups.push(() => {
+      channel.port1.close();
+      channel.port2.close();
+    });
+    const got: unknown[] = [];
+    const b = multiplexPort(channel.port2, {
+      codec: msgpackCodec,
+      side: "responder",
+      onPort: (p) => {
+        p.addEventListener("message", (e) => {
+          got.push(e.data);
+        });
+        return true;
+      },
+    });
+    cleanups.push(() => b.close());
+    channel.port1.start();
+    msgpackCodec.post(channel.port1, { type: "open", id: 0 }); // no window
+    const inner = msgpackCodec.encode?.({ type: "message", id: 0, payload: "smuggled" });
+    if (!inner) throw new Error("msgpackCodec.encode is required");
+    msgpackCodec.post(channel.port1, { type: "frame", id: 0, data: inner, last: true });
+    msgpackCodec.post(channel.port1, { type: "message", id: 0, payload: "plain" });
+    await waitFor(() => got.length >= 1, "the plain message arrives");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).toEqual(["plain"]);
   });
 });

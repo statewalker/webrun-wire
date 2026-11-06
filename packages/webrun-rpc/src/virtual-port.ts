@@ -54,13 +54,13 @@ export function newVirtualPort(
       if (closed) return;
       send(message, transfer);
     },
-    close() {
+    close(reason?: unknown) {
       if (closed) return;
       closed = true;
       const notify = requestClose;
       listeners.clear();
+      abort(reason);
       notify();
-      abort();
     },
   };
   setPortCloseSignal(port, closing.signal);

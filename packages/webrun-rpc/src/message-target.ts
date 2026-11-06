@@ -26,5 +26,6 @@ export interface MessageSink {
 
 /** Full-duplex message target: both sends and receives. */
 export interface MessageTarget extends MessageSource, MessageSink {
-  close?(): void | Promise<void>;
+  /** `reason`, where the target keeps one, becomes its close signal's reason. */
+  close?(reason?: unknown): void | Promise<void>;
 }

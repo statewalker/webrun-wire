@@ -11,6 +11,31 @@ export interface PortSendState {
   ready(below?: number): Promise<void>;
 }
 
+/**
+ * Runs `fn` on a later task, never a microtask: a producer looping on
+ * `whenPortReady` must let the transport's own events run. `setImmediate`
+ * where it exists; elsewhere a `MessageChannel`, because nested `setTimeout`s
+ * are clamped to 4 ms in browsers.
+ */
+const setImmediateFn = (globalThis as { setImmediate?: (fn: () => void) => unknown }).setImmediate;
+/** @internal */
+export const nextTask: (fn: () => void) => void = setImmediateFn
+  ? (fn) => {
+      setImmediateFn(fn);
+    }
+  : (() => {
+      let channel: MessageChannel | undefined;
+      const queue: Array<() => void> = [];
+      return (fn) => {
+        if (!channel) {
+          channel = new MessageChannel();
+          channel.port1.onmessage = () => queue.shift()?.();
+        }
+        queue.push(fn);
+        channel.port2.postMessage(0);
+      };
+    })();
+
 const states = new WeakMap<MessageTarget, PortSendState>();
 
 /** @internal Registered by the multiplexer for each port with a window. */
@@ -28,9 +53,9 @@ export function portBufferedAmount(port: MessageTarget): number {
 }
 
 /**
- * Resolves once at most `below` bytes are queued on `port` (at once for a
- * port without flow control).
+ * Resolves once at most `below` bytes are queued on `port`, always on a later
+ * task (for a port without flow control, on the next one).
  */
 export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
-  return states.get(port)?.ready(below) ?? Promise.resolve();
+  return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
 }

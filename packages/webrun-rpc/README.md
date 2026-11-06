@@ -324,19 +324,23 @@ stays at the window (with `queued` and `outstanding` on the sending side).
 Credit goes back in batches: at once from a quarter of the window, else on the next task. 10,000
 small messages and their echoes take fewer than 200 credit envelopes.
 
-**What a message costs.** With a codec that implements `encode` / `decode`, as `msgpackCodec`
-does, the window counts the encoded bytes, envelope included, and the message is encoded once.
-Otherwise (`structuredCodec`) it is an estimate both ends compute from the same value: byte
-length for `ArrayBuffer`s and typed arrays, a string's length, an object's values 4 levels deep
-and at most 256 of them, and at least 64 bytes. A message larger than the window is sent once
-nothing else is outstanding.
+**What a message costs.** When both ends' codecs implement `encode` / `decode`, as `msgpackCodec`
+does, the window counts the encoded bytes, envelope included, and the message is encoded once,
+when it is posted. Each end says so in its `open` or its ack (`exact: true`); if either cannot,
+both count an estimate computed from the same value: byte length for `ArrayBuffer`s and typed
+arrays, a string's length, an object's values 4 levels deep and at most 256 of them, and at least
+64 bytes. Two ends counting different sizes would leak window on every message until the port
+wedged. A message larger than the window is sent once nothing else is outstanding.
 
 **Older peers.** A peer from before the window reads `window` in an `open` but never sends
-credit. So the responder acknowledges the window with a zero-byte `credit` as soon as it accepts
-the port, and the opener applies the window only from that acknowledgement on, one round trip
-after the open. Until then it counts bytes but holds nothing back. A port to an older peer keeps
-running without flow control, as it always did; `ports()` reports `window` only once it is in
-force. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
+credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
+other has shown it reads credit: the responder acknowledges the window with a zero-byte `credit`
+as soon as it accepts the port, and the opener answers that ack with one of its own. Until then
+each end counts bytes but holds nothing back, so a port to an older peer, or over an older codec,
+keeps running without flow control, as it always did; `ports()` reports `window` only once it is
+in force. A port closed while its queue still drains keeps crediting what the peer sends, so two
+ends that both close with full queues still drain and close. A peer's `window` that is not a
+positive integer is ignored. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
 throughput.
 
 ### Large messages take turns with small ones
@@ -345,8 +349,9 @@ All ports share one pipe, and a message leaves whole. So without more, a port se
 the pipe for the whole megabyte, and a 64-byte message on another port waits behind it: the
 window bounds how much is in flight, not the order on the wire. With `frameSize: n`:
 
-- every port's messages, and its `close`, wait in a per-port queue, and the queues take turns, one
-  item each, whenever the pipe has room;
+- every windowed port's messages, and every port's `close`, wait in a per-port queue, and the
+  queues take turns, one item each, whenever the pipe has room (a port without a window posts its
+  messages at once, as without `frameSize`);
 - a message whose encoding is larger than `n` is split into `frame` envelopes of `n` bytes, which
   the peer reassembles before delivery.
 
@@ -356,9 +361,12 @@ report when it is full**: `MessageTarget`'s optional `whenDrained()` (and `buffe
 such as a `MessagePort`, accepts everything at once, so the queues empty in one go and only the
 frames of messages posted together interleave.
 
-It also needs `window` and a byte codec (`encode` / `decode`). A side frames only for a peer that
-said it reassembles: `frames: true` in its `open`, or in its acknowledgement of the window. An
-older peer gets whole messages. 16-64 KiB frames cost one small envelope each (about 15 bytes with
+It also needs `window` and byte codecs (`encode` / `decode`) on both ends. A side frames only on a
+port whose window is in force with exact sizes agreed (`exact: true` in the `open` and in its
+acknowledgement), and accepts frames only there; a frame anywhere else is dropped. An older peer,
+or one whose codec cannot decode, gets whole messages. A frame sequence buffers no more than the
+same message sent whole would. If the pipe's `whenDrained()` rejects, the mux closes with that
+error, so the ports waiting behind it fail instead of hanging. 16-64 KiB frames cost one small envelope each (about 15 bytes with
 `msgpackCodec`).
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
@@ -368,12 +376,12 @@ transport cannot produce a port synchronously and both must share one shape. Its
 are rejections, not synchronous throws: `RangeError: webrun-rpc: maxPorts (<n>) reached` and
 `Error: webrun-rpc: the multiplexer is closed`. The `RangeError` goes on with the three commonest
 `meta.kind`s among the open ports, `open ports by kind: http: 1000, ws: 24`, so a full table names
-the consumer that filled it (`"?"` counts ports without a kind). A duplicate `open` id from the peer is ignored
-rather than replacing a live port, and a local `openPort` skips ids the peer already claimed with
-the wrong parity.
+the consumer that filled it (`"?"` counts ports without a kind). A duplicate `open` id from the
+peer is ignored rather than replacing a live port, and a local `openPort` skips ids the peer
+already claimed with the wrong parity.
 
-`PortEnvelope` is `{ type: "open", id, meta?, window?, frames? }`, `{ type: "message", id, payload }`,
-`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, frames? }`, and with
+`PortEnvelope` is `{ type: "open", id, meta?, window?, exact? }`, `{ type: "message", id, payload }`,
+`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, exact? }`, and with
 `frameSize` `{ type: "frame", id, data, last? }`. The codecs' `read` accept only objects with a
 non-negative integer `id` and one of those five types, so other traffic on a shared port is
 ignored.
@@ -389,10 +397,16 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
   event, so the mux cannot notice by itself. Pass `signal` and abort it from whatever does notice
   (a worker's `exit`, a stream's `close`, a liveness lock): the mux closes with `signal.reason`,
   every port's close signal aborts with it, and calls in flight reject at once instead of hanging.
-  `close(reason)` does the same by hand.
-- **The user.** `openPort(meta, { signal })` closes the port when `signal` aborts. Ports are also
-  disposable where the runtime defines `Symbol.dispose`, so `using port = await mux.openPort()`
-  closes it on scope exit.
+  `close(reason)` does the same by hand. A port opened from a close-signal listener while the mux
+  closes is refused, and a transport `close()` that rejects on this path is swallowed rather than
+  left as an unhandled rejection.
+- **The user.** `openPort(meta, { signal })` closes the port when `signal` aborts, with
+  `signal.reason` as the reason of the port's close signal; a signal already aborted rejects
+  `openPort` with its reason and opens nothing. `transferPortMux` honours the signal too. Virtual
+  ports are also disposable where the runtime defines `Symbol.dispose`, so
+  `using port = (await mux.openPort()) as MessageTarget & Disposable` closes it on scope exit. The
+  cast is needed because the declared type leaves `Symbol.dispose` out: naming it would require
+  every consumer to compile with the `esnext.disposable` lib.
 
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.

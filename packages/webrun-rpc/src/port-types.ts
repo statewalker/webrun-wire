@@ -8,11 +8,11 @@ import type { MessageTarget } from "./message-target.js";
  * because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown; window?: number; frames?: boolean }
+  | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }
   | { type: "message"; id: number; payload: unknown }
   | { type: "close"; id: number; reason?: unknown }
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
-  | { type: "credit"; id: number; bytes: number; frames?: boolean }
+  | { type: "credit"; id: number; bytes: number; exact?: boolean }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean };
 
@@ -100,11 +100,13 @@ export interface PortMuxOptions {
    *
    * A message's size is its byte length (`ArrayBuffer`, typed arrays), a
    * string's length, or for an object the sizes of its values (4 levels deep,
-   * at most 256 values), and at least 64. A message
-   * larger than the window is sent when nothing else is outstanding.
+   * at most 256 values), and at least 64 — or, when both ends' codecs
+   * implement `encode` / `decode`, the encoded bytes. A message larger than
+   * the window is sent when nothing else is outstanding.
    *
-   * Both ends must support it: an old peer never sends credit, and a port
-   * that asked for a window then stalls once the window is spent.
+   * Safe against an older peer: neither end holds back until the other has
+   * shown it reads credit (the responder's zero-byte ack, then the opener's
+   * answer to it), so a peer that never sends credit runs unwindowed.
    */
   window?: number;
   /**
@@ -155,8 +157,9 @@ export interface PortMux {
   /** Allocate a port, announce it, and return the local end. */
   openPort(meta?: unknown, options?: OpenPortOptions): Promise<MessageTarget>;
   /**
-   * Close every virtual port, then release the underlying port. `reason`
-   * becomes the reason of every port's close signal.
+   * Close every port, then release the underlying port. With
+   * `multiplexPort`, `reason` becomes the reason of every port's close signal
+   * (`getPortCloseSignal`); `transferPortMux`'s real ports have none.
    */
   close(reason?: unknown): Promise<void>;
   /** The ports open now, to find who holds a full table. */
