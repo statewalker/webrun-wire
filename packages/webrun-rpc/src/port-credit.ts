@@ -59,3 +59,28 @@ export function portBufferedAmount(port: MessageTarget): number {
 export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
   return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
 }
+
+/** @internal PROTOTYPE: a windowed port's half-close (capability `"end"`). */
+export interface PortEndState {
+  /** End this direction: resolves `true` once the `end` is posted, `false` if not agreed. */
+  end(): Promise<boolean>;
+  /** Resolves when the peer has ended its direction. */
+  ended: Promise<void>;
+}
+const ends = new WeakMap<MessageTarget, PortEndState>();
+/** @internal */
+export function setPortEndState(port: MessageTarget, state: PortEndState): void {
+  ends.set(port, state);
+}
+/**
+ * PROTOTYPE: end this side's direction of `port`. Behind everything already
+ * posted on it. `false` when the peer did not agree on `end` (the caller then
+ * closes the port as today). Nothing posted afterwards is sent.
+ */
+export function endPort(port: MessageTarget): Promise<boolean> {
+  return ends.get(port)?.end() ?? Promise.resolve(false);
+}
+/** PROTOTYPE: resolves once the peer has ended its direction of `port` (never, if it cannot). */
+export function whenPortEnded(port: MessageTarget): Promise<void> {
+  return ends.get(port)?.ended ?? new Promise<void>(() => {});
+}

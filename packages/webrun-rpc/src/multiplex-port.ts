@@ -1,6 +1,6 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import { nextTask, setPortSendState } from "./port-credit.js";
+import { nextTask, setPortEndState, setPortSendState } from "./port-credit.js";
 import type {
   OpenPortOptions,
   PortEnvelope,
@@ -75,6 +75,7 @@ export function multiplexPort(
     frameSize,
     keepalive,
     onLeak,
+    capabilities = ["end"],
   } = options;
   const maxReassembledBytes = options.maxReassembledBytes ?? DEFAULT_MAX_REASSEMBLED_BYTES;
   const misses = keepalive?.misses ?? 3;
@@ -132,6 +133,16 @@ export function multiplexPort(
     waiters: { below: number; resolve: () => void }[];
     toGrant: number;
     grantScheduled: boolean;
+    /**
+     * PROTOTYPE: capabilities agreed on this port; `undefined` until known (the
+     * opener learns them from the ack).
+     */
+    caps?: string[];
+    capsSettled: () => void;
+    localEnded: boolean;
+    endSent: boolean;
+    remoteEnded: boolean;
+    resolveEnded: () => void;
   }
   /**
    * What the mux keeps of a port: never the consumer's `port` object itself,
@@ -277,6 +288,19 @@ export function multiplexPort(
     }
   };
 
+  /** PROTOTYPE: what the opener listed that this mux also offers. */
+  const shared = (peer: unknown): string[] =>
+    Array.isArray(peer) ? capabilities.filter((cap) => peer.includes(cap)) : [];
+  /** PROTOTYPE: both directions have ended: free the id, as a close would, with no close sent. */
+  const freeIfBothEnded = (id: number, c: Credit): void => {
+    const entry = open.get(id);
+    if (!c.endSent || !c.remoteEnded || entry?.credit !== c) return;
+    freePartial(entry);
+    open.delete(id);
+    dropOutgoing(id);
+    releaseWaiters(c);
+    entry.handle.markClosed(new Error("webrun-rpc: the port ended in both directions"));
+  };
   const releaseWaiters = (c: Credit | undefined): void => {
     for (const w of c?.waiters.splice(0) ?? []) w.resolve();
   };
@@ -286,7 +310,9 @@ export function multiplexPort(
       // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the queue is not empty.
       const next = c.queue[0]!;
       // A message larger than the window goes out once nothing else is outstanding.
-      if (c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window) break;
+      // An `end` (size 0) costs no window: it leaves as soon as it is at the head.
+      if (next.size > 0 && c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window)
+        break;
       c.queue.shift();
       c.queued -= next.size;
       c.outstanding += next.size;
@@ -327,6 +353,7 @@ export function multiplexPort(
     portWindow: unknown,
     opener: boolean,
     exact: boolean,
+    peerCaps?: unknown,
   ): VirtualPortHandle => {
     // A peer's window must be a positive integer; anything else means none.
     const c: Credit | undefined =
@@ -346,10 +373,26 @@ export function multiplexPort(
             waiters: [],
             toGrant: 0,
             grantScheduled: false,
+            // The responder knows at once: what the opener listed and it shares.
+            caps: opener ? undefined : shared(peerCaps),
+            capsSettled: () => {},
+            localEnded: false,
+            endSent: false,
+            remoteEnded: false,
+            resolveEnded: () => {},
           }
         : undefined;
+    const capsKnown = new Promise<void>((resolve) => {
+      if (c) c.capsSettled = resolve;
+    });
+    if (c && c.caps) c.capsSettled();
+    const ended = new Promise<void>((resolve) => {
+      if (c) c.resolveEnded = resolve;
+    });
     const self = newVirtualPort(
       (payload, transfer) => {
+        // PROTOTYPE: this direction has ended; nothing more goes out on it.
+        if (c?.localEnded) return;
         touch(id);
         const envelope: PortEnvelope = { type: "message", id, payload };
         // Without a window nothing frames or waits: post at once, so the
@@ -431,6 +474,42 @@ export function multiplexPort(
     // the ones the mux keeps would then hold the consumer's port (`onLeak`).
     const { markClosed, isClosed, hasListeners } = self;
     if (c) {
+      // PROTOTYPE: half-close. The `end` joins the window queue behind what
+      // this side already posted, then the fair-framing ring behind this
+      // port's frames, so the peer has every byte before it sees the end.
+      const closeSignal = getPortCloseSignal(self.port);
+      const untilClosed = new Promise<false>((resolve) => {
+        if (closeSignal?.aborted) resolve(false);
+        closeSignal?.addEventListener("abort", () => resolve(false), { once: true });
+      });
+      let localEnd: Promise<boolean> | undefined;
+      setPortEndState(self.port, {
+        ended,
+        end: () => {
+          if (localEnd) return localEnd;
+          c.localEnded = true;
+          localEnd = (async () => {
+            await Promise.race([capsKnown, untilClosed]);
+            if (isClosed() || !c.caps?.includes("end")) return false;
+            const posted = new Promise<boolean>((resolve) => {
+              c.queue.push({
+                size: 0,
+                send: () =>
+                  sendOnPort(id, () => {
+                    post({ type: "end", id });
+                    c.endSent = true;
+                    // Before the free below aborts the close signal.
+                    resolve(true);
+                    freeIfBothEnded(id, c);
+                  }),
+              });
+              flush(c);
+            });
+            return Promise.race([posted, untilClosed]);
+          })();
+          return localEnd;
+        },
+      });
       const deliver = self.deliver;
       self.deliver = (payload, size = estimateMessageSize(payload)) => {
         c.unconsumed += size;
@@ -490,16 +569,19 @@ export function multiplexPort(
         envelope.window,
         false,
         envelope.exact === true && exactCodec,
+        envelope.caps,
       );
       // Acknowledge the window before `onPort` runs: what `onPort` posts then
       // reaches the opener after the ack, so both ends count it the same way
       // (exact bytes or the estimate). A rejection's close follows the ack.
       const credit = open.get(envelope.id)?.credit;
       if (credit) {
+        // PROTOTYPE: only an opener that listed capabilities hears them back.
+        const caps = credit.caps?.length ? { caps: credit.caps } : {};
         post(
           credit.exact
-            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
-            : { type: "credit", id: envelope.id, bytes: 0 },
+            ? { type: "credit", id: envelope.id, bytes: 0, exact: true, ...caps }
+            : { type: "credit", id: envelope.id, bytes: 0, ...caps },
         );
       }
       let accepted = false;
@@ -533,6 +615,9 @@ export function multiplexPort(
           c.exact = false;
           c.outstanding = 0;
         }
+        // PROTOTYPE: the ack settles the capabilities; none listed means none.
+        c.caps = shared(envelope.caps);
+        c.capsSettled();
         // Show the responder its codec reads credit, so it may hold back too.
         post({ type: "credit", id: envelope.id, bytes: 0 });
       }
@@ -549,6 +634,13 @@ export function multiplexPort(
       const sizeOf = (c: Credit) =>
         (c.exact ? byteLengthOf(event.data) : undefined) ?? estimateMessageSize(envelope.payload);
       if (!entry) return;
+      // PROTOTYPE: a message before the ack comes from a peer that never acks
+      // (no window): nothing was agreed.
+      const mc = entry.credit;
+      if (mc?.opener && mc.caps === undefined) {
+        mc.caps = [];
+        mc.capsSettled();
+      }
       touch(envelope.id);
       entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
       return;
@@ -610,6 +702,17 @@ export function multiplexPort(
       const inner = codec.decode(whole);
       if (inner?.type !== "message" || inner.id !== envelope.id) return;
       entry.handle.deliver(inner.payload, whole.byteLength);
+      return;
+    }
+
+    if (envelope.type === "end") {
+      // PROTOTYPE: only where `end` was agreed; anything else is a peer bug.
+      const c = entry?.credit;
+      if (!c?.caps?.includes("end") || c.remoteEnded) return;
+      touch(envelope.id);
+      c.remoteEnded = true;
+      c.resolveEnded();
+      freeIfBothEnded(envelope.id, c);
       return;
     }
 
@@ -721,11 +824,12 @@ export function multiplexPort(
       const id = nextId;
       nextId += 2;
       const handle = attach(id, meta, window, true, exactCodec);
+      const openCaps = capabilities.length ? { caps: capabilities } : {};
       post(
         window
           ? exactCodec
-            ? { type: "open", id, meta, window, exact: true }
-            : { type: "open", id, meta, window }
+            ? { type: "open", id, meta, window, exact: true, ...openCaps }
+            : { type: "open", id, meta, window, ...openCaps }
           : { type: "open", id, meta },
       );
       if (portSignal) {

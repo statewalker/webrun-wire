@@ -9,11 +9,21 @@ import type { MessageTarget } from "./message-target.js";
  * inspects, because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }
+  | {
+      type: "open";
+      id: number;
+      meta?: unknown;
+      window?: number;
+      exact?: boolean;
+      /** PROTOTYPE: capabilities the opener speaks on this windowed port (e.g. `"end"`). */
+      caps?: string[];
+    }
   | { type: "message"; id: number; payload: unknown }
   | { type: "close"; id: number; reason?: unknown }
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
-  | { type: "credit"; id: number; bytes: number; exact?: boolean }
+  | { type: "credit"; id: number; bytes: number; exact?: boolean; caps?: string[] }
+  /** PROTOTYPE: this direction of the port has ended (agreed capability `"end"`). */
+  | { type: "end"; id: number }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
   /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */
@@ -160,6 +170,8 @@ export interface PortMuxOptions {
    * the collector runs is up to the runtime.
    */
   onLeak?: (info: PortInfo) => void;
+  /** PROTOTYPE: capabilities this mux offers on windowed ports (default `["end"]`). */
+  capabilities?: string[];
 }
 
 /** What `PortMux.ports()` reports for one open port. */
