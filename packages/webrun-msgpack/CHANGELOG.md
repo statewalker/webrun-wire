@@ -1,5 +1,32 @@
 # @statewalker/webrun-msgpack
 
+## 0.5.0
+
+### Minor Changes
+
+- de98774: `msgpackCodec` implements `PortCodec`'s `encode` / `decode`, so a windowed port counts exact wire bytes, and it carries the new `credit` and `frame` envelopes. Requires `@statewalker/webrun-rpc` ^0.6.0.
+- f98d2c4: Fair framing for `multiplexPort` / `overPipe`, off unless `frameSize` (bytes) is set; it needs `window`.
+  
+  - Every port's messages leave in turn, one per port, whenever the pipe has room, and a message larger than `frameSize` goes as `frame` envelopes the peer reassembles. A small message on one port no longer waits behind a large one on another.
+  - `MessageTarget` may implement `whenDrained()` / `bufferedAmount` to say when it is full; framing waits on it between frames.
+  - Frames go only on a windowed port whose two ends agreed exact sizes (`exact: true`); older peers get whole messages. Frames anywhere else are dropped.
+  - `frameSize` must be a positive integer; anything else is a `RangeError`.
+  - With `frameSize`, a port without a window posts at once; a `whenDrained()` that rejects closes the mux with its error; `mux.close()` still posts the close of a port whose close was queued behind its frames.
+- 76c3b6d: Per-port flow control for `multiplexPort` / `overPipe`, off unless `window` (bytes) is set.
+  
+  - Each port has at most `window` bytes delivered to the other side and not yet consumed, in both directions, so a slow consumer holds its own port's budget and no other port's. What exceeds it waits in the port's send queue; `portBufferedAmount(port)` and `whenPortReady(port, below)` let senders wait. `whenPortReady` always resolves on a later task.
+  - A message counts as consumed when its listeners return, or their promises settle. Credit goes back in batched `credit` envelopes.
+  - Safe against older peers: neither end holds back until the other has shown it reads credit — the responder's zero-byte `credit` ack proves it to the opener, and the opener's answer to that ack proves it to the responder. A peer that never answers credit keeps running without flow control.
+  - `PortCodec` may implement `encode(envelope)` / `decode(data)` so the window counts exact wire bytes; `msgpackCodec` does, and accepts the `credit` envelope.
+  - `mux.ports()` reports a windowed port's `window` (once in force), `queued`, `outstanding` and `unconsumed` bytes.
+
+### Patch Changes
+
+- Updated dependencies [30d2cff]
+- Updated dependencies [f98d2c4]
+- Updated dependencies [76c3b6d]
+  - @statewalker/webrun-rpc@0.6.0
+
 ## 0.4.1
 
 ### Patch Changes
