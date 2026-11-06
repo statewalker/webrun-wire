@@ -225,14 +225,12 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
 });
 
 describe("msgpackCodec — exact sizes for a port's window", () => {
-  it("prepare encodes once and reports the frame's byte length; size reads it back", () => {
+  it("encode gives the frame's bytes, and decode reads them back", () => {
     const envelope: PortEnvelope = { type: "message", id: 2, payload: new Uint8Array(100) };
-    const prepared = msgpackCodec.prepare?.(envelope);
-    expect(prepared?.size).toBe(serialize(envelope).byteLength);
-    const port = recordingPort();
-    prepared?.post(port);
-    expect(port.sent[0]).toEqual(serialize(envelope));
-    expect(msgpackCodec.size?.(event(port.sent[0]))).toBe(prepared?.size);
+    const bytes = msgpackCodec.encode?.(envelope);
+    expect(bytes).toEqual(serialize(envelope));
+    expect(msgpackCodec.decode?.(bytes)).toEqual(envelope);
+    expect(msgpackCodec.decode?.(new Uint8Array([0xc1]))).toBeUndefined();
   });
 
   it("a window counts the encoded bytes, envelope included", async () => {

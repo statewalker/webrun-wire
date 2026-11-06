@@ -8,11 +8,13 @@ import type { MessageTarget } from "./message-target.js";
  * because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown; window?: number }
+  | { type: "open"; id: number; meta?: unknown; window?: number; frames?: boolean }
   | { type: "message"; id: number; payload: unknown }
   | { type: "close"; id: number; reason?: unknown }
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
-  | { type: "credit"; id: number; bytes: number };
+  | { type: "credit"; id: number; bytes: number; frames?: boolean }
+  /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
+  | { type: "frame"; id: number; data: Uint8Array; last?: boolean };
 
 /**
  * How an envelope reaches the wire.
@@ -28,16 +30,14 @@ export interface PortCodec {
   /** Recover an envelope from a message event, or `undefined` to ignore it. */
   read(event: MessageEvent): PortEnvelope | undefined;
   /**
-   * Optional, with `size`: encode `envelope` once and report its exact size
-   * on the wire. A port with a window then counts real bytes instead of an
-   * estimate. `post` places the prepared envelope on the port.
+   * Optional, for codecs whose wire form is bytes, with `decode`: the bytes
+   * `post` would place on the port. A port with a window then counts real
+   * bytes instead of an estimate, posts them as they are (encoding once), and
+   * can split them into frames (`frameSize`).
    */
-  prepare?(
-    envelope: PortEnvelope,
-    transfer?: Transferable[],
-  ): { size: number; post(port: MessageTarget): void };
-  /** Optional, with `prepare`: the wire size of a received message event. */
-  size?(event: MessageEvent): number;
+  encode?(envelope: PortEnvelope): Uint8Array;
+  /** Optional, with `encode`: an envelope back from its bytes, or `undefined`. */
+  decode?(data: unknown): PortEnvelope | undefined;
 }
 
 export interface PortMuxOptions {
@@ -107,6 +107,17 @@ export interface PortMuxOptions {
    * that asked for a window then stalls once the window is spent.
    */
   window?: number;
+  /**
+   * Fair framing, in bytes (off when unset). Every port's messages leave in
+   * turn, one item per port, whenever the pipe has room (its `whenDrained`),
+   * and a message whose encoding is larger than `frameSize` goes as frames of
+   * that size, reassembled by the peer. A small message then waits for one
+   * frame of another port's large message, not for all of it. It needs
+   * `window`, a codec with `encode` / `decode`, and a peer that says it reads
+   * frames (in its `open` or its acknowledgement); otherwise messages go
+   * whole. 16-64 KiB is a reasonable range.
+   */
+  frameSize?: number;
 }
 
 /** What `PortMux.ports()` reports for one open port. */

@@ -62,7 +62,7 @@ Stream tier and adapter:
 | `serve(params: PortParams, handler)` | Registers a `Duplex` handler. Resolves an idempotent teardown that abandons live streams, then closes the mux. |
 | `PortParams` | `{ mux: PortMuxFactory; timeout?: number }`. |
 | `PortMuxFactory`, `OnPort` | `(onPort?: OnPort) => PortMux \| Promise<PortMux>`; `(port, meta?) => boolean \| undefined`, `false` rejects. |
-| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`, `window`. |
+| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`, `window`, `frameSize`. |
 | `overPorts(factory)` | Pass-through, for a mux this package knows nothing about. |
 | `duplexOverPort(port, options?)` | A `Duplex` running one stream on `port`. |
 | `serveDuplexOverPort(port, handler, options?)` | The serving half. Returns an idempotent teardown that abandons the stream and notifies the peer. |
@@ -78,7 +78,7 @@ Port multiplexing:
 | `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
 | `portBufferedAmount(port)`, `whenPortReady(port, below?)` | A windowed port's queued bytes, and a promise for room. See below. |
 | `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
-| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `prepare(envelope)` / `size(event)` for exact window sizes. |
+| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames). |
 | `structuredCodec` | Envelopes passed through unencoded. |
 | `DEFAULT_MAX_PORTS` | `1024`. |
 | `PORT_TRANSFER` | `"webrun-rpc:port-transfer"`, the `type` of the message that carries a port. |
@@ -297,6 +297,7 @@ port cannot grow memory here.
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
+| `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -323,8 +324,8 @@ stays at the window (with `queued` and `outstanding` on the sending side).
 Credit goes back in batches: at once from a quarter of the window, else on the next task. 10,000
 small messages and their echoes take fewer than 200 credit envelopes.
 
-**What a message costs.** With a codec that implements `prepare` / `size`, as `msgpackCodec`
-does, the window counts the encoded frame, envelope included, and the message is encoded once.
+**What a message costs.** With a codec that implements `encode` / `decode`, as `msgpackCodec`
+does, the window counts the encoded bytes, envelope included, and the message is encoded once.
 Otherwise (`structuredCodec`) it is an estimate both ends compute from the same value: byte
 length for `ArrayBuffer`s and typed arrays, a string's length, an object's values 4 levels deep
 and at most 256 of them, and at least 64 bytes. A message larger than the window is sent once
@@ -338,6 +339,28 @@ running without flow control, as it always did; `ports()` reports `window` only 
 force. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
 throughput.
 
+### Large messages take turns with small ones
+
+All ports share one pipe, and a message leaves whole. So without more, a port sending 1 MiB holds
+the pipe for the whole megabyte, and a 64-byte message on another port waits behind it: the
+window bounds how much is in flight, not the order on the wire. With `frameSize: n`:
+
+- every port's messages, and its `close`, wait in a per-port queue, and the queues take turns, one
+  item each, whenever the pipe has room;
+- a message whose encoding is larger than `n` is split into `frame` envelopes of `n` bytes, which
+  the peer reassembles before delivery.
+
+A small message then waits for one frame, not for a whole large message. **It needs the pipe to
+report when it is full**: `MessageTarget`'s optional `whenDrained()` (and `bufferedAmount`), which
+`messageTargetOverStream` in `@statewalker/webrun-streams-libp2p` provides. A pipe without it,
+such as a `MessagePort`, accepts everything at once, so the queues empty in one go and only the
+frames of messages posted together interleave.
+
+It also needs `window` and a byte codec (`encode` / `decode`). A side frames only for a peer that
+said it reassembles: `frames: true` in its `open`, or in its acknowledgement of the window. An
+older peer gets whole messages. 16-64 KiB frames cost one small envelope each (about 15 bytes with
+`msgpackCodec`).
+
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
 peer to accept. That keeps layer 1 free of round trips: messages posted before a rejection are
 dropped at the far end and the port goes inert. It is asynchronous because a natively multiplexed
@@ -349,10 +372,11 @@ the consumer that filled it (`"?"` counts ports without a kind). A duplicate `op
 rather than replacing a live port, and a local `openPort` skips ids the peer already claimed with
 the wrong parity.
 
-`PortEnvelope` is `{ type: "open", id, meta?, window? }`, `{ type: "message", id, payload }`,
-`{ type: "close", id, reason? }` or, with a window, `{ type: "credit", id, bytes }`. The codecs'
-`read` accept only objects with a non-negative integer `id` and one of those four types, so other
-traffic on a shared port is ignored.
+`PortEnvelope` is `{ type: "open", id, meta?, window?, frames? }`, `{ type: "message", id, payload }`,
+`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, frames? }`, and with
+`frameSize` `{ type: "frame", id, data, last? }`. The codecs' `read` accept only objects with a
+non-negative integer `id` and one of those five types, so other traffic on a shared port is
+ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
 

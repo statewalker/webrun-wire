@@ -199,6 +199,8 @@ export interface OverPipeOptions {
   signal?: AbortSignal;
   /** Experimental per-port flow control in bytes — see `PortMuxOptions.window`. */
   window?: number;
+  /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
+  frameSize?: number;
 }
 
 /**
