@@ -1,5 +1,11 @@
 # @statewalker/webrun-rpc
 
+## 0.9.0
+
+### Minor Changes
+
+- 4e88f7b: Pipelined streams on windowed ports. A windowed `open` now lists `caps: ["pipeline"]` and the responder's ack answers with the shared subset (only to an opener that listed some). Once `pipeline` is agreed and the window holds this end's sends, `duplexOverPort` (and so `connect` / `serve`) sends chunks as plain messages bounded by the window instead of one confirmed call per chunk. A peer that pipelines where it was not agreed, past the window plus one chunk, or mixing confirmed and pipelined chunks, fails the stream and closes the port. Every stream chunk is sent as a plain `Uint8Array` that owns its buffer (views, Node `Buffer`s, other typed arrays and `DataView`s are copied, an `ArrayBuffer` is wrapped) and copied again on receipt, so neither end ships or holds a whole buffer per chunk; a chunk that is not bytes ends the stream with the producer's own `TypeError`. Ports without a window, `transferPortMux` ports and peers that answer no capabilities behave as before.
+
 ## 0.8.0
 
 ### Minor Changes
