@@ -323,19 +323,23 @@ stays at the window (with `queued` and `outstanding` on the sending side).
 Credit goes back in batches: at once from a quarter of the window, else on the next task. 10,000
 small messages and their echoes take fewer than 200 credit envelopes.
 
-**What a message costs.** With a codec that implements `prepare` / `size`, as `msgpackCodec`
+**What a message costs.** When both ends' codecs implement `prepare` / `size`, as `msgpackCodec`
 does, the window counts the encoded frame, envelope included, and the message is encoded once.
-Otherwise (`structuredCodec`) it is an estimate both ends compute from the same value: byte
-length for `ArrayBuffer`s and typed arrays, a string's length, an object's values 4 levels deep
-and at most 256 of them, and at least 64 bytes. A message larger than the window is sent once
-nothing else is outstanding.
+Each end says so in its `open` or its ack (`exact: true`); if either cannot, both count an
+estimate computed from the same value: byte length for `ArrayBuffer`s and typed arrays, a
+string's length, an object's values 4 levels deep and at most 256 of them, and at least 64 bytes.
+Two ends counting different sizes would leak window on every message until the port wedged. A
+message larger than the window is sent once nothing else is outstanding.
 
 **Older peers.** A peer from before the window reads `window` in an `open` but never sends
-credit. So the responder acknowledges the window with a zero-byte `credit` as soon as it accepts
-the port, and the opener applies the window only from that acknowledgement on, one round trip
-after the open. Until then it counts bytes but holds nothing back. A port to an older peer keeps
-running without flow control, as it always did; `ports()` reports `window` only once it is in
-force. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
+credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
+other has shown it reads credit: the responder acknowledges the window with a zero-byte `credit`
+as soon as it accepts the port, and the opener answers that ack with one of its own. Until then
+each end counts bytes but holds nothing back, so a port to an older peer, or over an older codec,
+keeps running without flow control, as it always did; `ports()` reports `window` only once it is
+in force. A port closed while its queue still drains keeps crediting what the peer sends, so two
+ends that both close with full queues still drain and close. A peer's `window` that is not a
+positive integer is ignored. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
 throughput.
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the

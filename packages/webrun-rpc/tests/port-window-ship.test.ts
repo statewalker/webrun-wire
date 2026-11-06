@@ -146,3 +146,114 @@ describe("closing a port whose window is spent", () => {
     expect(peer).toBeDefined();
   });
 });
+
+describe("review fixes (#47)", () => {
+  it("both ends closing with full queues still drain and close", async () => {
+    let peer!: MessageTarget;
+    const got = { a: 0, b: 0 };
+    const { a, b } = pair(4 * KiB, (p) => {
+      peer = p;
+      p.addEventListener("message", () => {
+        got.b++;
+      });
+    });
+    const port = await a.openPort();
+    port.addEventListener("message", () => {
+      got.a++;
+    });
+    await waitFor(() => a.ports()[0]?.window != null && peer != null, "acknowledged");
+    for (let i = 0; i < 10; i++) {
+      port.postMessage(new Uint8Array(KiB));
+      peer.postMessage(new Uint8Array(KiB));
+    }
+    const waiter = whenPortReady(port);
+    await port.close?.();
+    await peer.close?.();
+    await waiter;
+    await waitFor(() => a.ports().length === 0 && b.ports().length === 0, "both ends free the id");
+  });
+
+  it("a responder whose codec drops credit never stalls its own sends", async () => {
+    let echoes = 0;
+    const { a } = pair(
+      4 * KiB,
+      (p) => {
+        p.addEventListener("message", (e) => p.postMessage(e.data));
+      },
+      olderPeerCodecReading,
+    );
+    const port = await a.openPort();
+    port.addEventListener("message", () => {
+      echoes++;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 50; i++) port.postMessage(new Uint8Array(KiB));
+    await waitFor(() => echoes === 50, "every echo comes back");
+  });
+
+  it("ends that size messages differently fall back to the shared estimate instead of wedging", async () => {
+    let got = 0;
+    const exact: PortCodec = {
+      ...structuredCodec,
+      prepare: (envelope, transfer) => ({
+        size: 3,
+        post: (port) => structuredCodec.post(port, envelope, transfer),
+      }),
+      size: () => 3,
+    };
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    const a = multiplexPort(ch.port1, { codec: exact, side: "initiator", window: 4 * KiB });
+    const b = multiplexPort(ch.port2, {
+      codec: structuredCodec,
+      side: "responder",
+      onPort: (p) => {
+        p.addEventListener("message", (e) => p.postMessage(e.data));
+        return true;
+      },
+    });
+    muxes.push(a, b);
+    const port = await a.openPort();
+    port.addEventListener("message", () => {
+      got++;
+    });
+    await waitFor(() => a.ports()[0]?.window != null, "acknowledged");
+    for (let i = 0; i < 500; i++) port.postMessage(i);
+    await waitFor(() => got === 500, "every echo comes back");
+  });
+
+  it("a window that is not a positive integer is ignored", async () => {
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    const b = multiplexPort(ch.port2, {
+      codec: structuredCodec,
+      side: "responder",
+      onPort: () => true,
+    });
+    muxes.push(b);
+    ch.port1.postMessage({ type: "open", id: 0, window: 1e-9 });
+    ch.port1.postMessage({ type: "open", id: 2, window: "4096" });
+    await waitFor(() => b.ports().length === 2, "both opens arrive");
+    for (const info of b.ports()) expect(info.queued).toBeUndefined();
+  });
+
+  it("whenPortReady yields a task on a port without a window too", async () => {
+    const { a } = pair(0, () => {});
+    const port = await a.openPort();
+    let otherTaskRan = false;
+    setImmediate(() => {
+      otherTaskRan = true;
+    });
+    await whenPortReady(port);
+    expect(otherTaskRan).toBe(true);
+  });
+});
+
+/** A responder whose codec reads only open/message/close (an older codec), so credit never reaches its mux. */
+const olderPeerCodecReading: PortCodec = {
+  post: (port, envelope, transfer) => structuredCodec.post(port, envelope, transfer),
+  read: (e) => {
+    const envelope = structuredCodec.read(e);
+    return envelope?.type === "credit" ? undefined : envelope;
+  },
+};

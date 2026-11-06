@@ -8,11 +8,11 @@ import type { MessageTarget } from "./message-target.js";
  * because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown; window?: number }
+  | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }
   | { type: "message"; id: number; payload: unknown }
   | { type: "close"; id: number; reason?: unknown }
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
-  | { type: "credit"; id: number; bytes: number };
+  | { type: "credit"; id: number; bytes: number; exact?: boolean };
 
 /**
  * How an envelope reaches the wire.
@@ -100,11 +100,13 @@ export interface PortMuxOptions {
    *
    * A message's size is its byte length (`ArrayBuffer`, typed arrays), a
    * string's length, or for an object the sizes of its values (4 levels deep,
-   * at most 256 values), and at least 64. A message
-   * larger than the window is sent when nothing else is outstanding.
+   * at most 256 values), and at least 64 — or, when both ends' codecs
+   * implement `prepare` / `size`, the encoded bytes. A message larger than
+   * the window is sent when nothing else is outstanding.
    *
-   * Both ends must support it: an old peer never sends credit, and a port
-   * that asked for a window then stalls once the window is spent.
+   * Safe against an older peer: neither end holds back until the other has
+   * shown it reads credit (the responder's zero-byte ack, then the opener's
+   * answer to it), so a peer that never sends credit runs unwindowed.
    */
   window?: number;
 }
