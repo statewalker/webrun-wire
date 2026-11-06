@@ -298,7 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
-| `maxReassembledBytes` | Ceiling on one message reassembled from the peer's frames, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what the port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
+| `maxReassembledBytes` | Ceiling on what the peer's framed messages hold past their ports' windows, summed over all ports, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what a port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
 | `onLeak` | Development aid, off when unset: called with a port's `PortInfo` when its consumer dropped it without `close()`, and the port is freed. See "A port lives until its transport or its user lets go" below. |
 
@@ -384,8 +384,10 @@ error, so the ports waiting behind it fail instead of hanging. 16-64 KiB frames 
 - a message begun while this side still owed the port credit (delivered or consumed bytes not yet
   granted back) must fit what the window left, since an honest sender counts at least that much as
   outstanding; one begun with nothing owed may be larger than the window, as a whole message may;
-- all partial messages together, across every port, hold at most `maxReassembledBytes` (64 MiB by
-  default), so opening many ports does not multiply it.
+- what messages larger than the window hold past it, summed across every port, is at most
+  `maxReassembledBytes` (64 MiB by default), so opening many ports does not multiply it. A partial
+  message within its window is not charged: the window bounds it already, as it bounds unframed
+  traffic, so many ports framing honest messages at once never trip the cap.
 
 A frame past either limit closes its port: the partial message is dropped, the port's close signal
 aborts with a `RangeError` ("webrun-rpc: a framed message passed what the window left …" or
@@ -393,8 +395,8 @@ aborts with a `RangeError` ("webrun-rpc: a framed message passed what the window
 the close carries reason `"max-reassembled-bytes"`. A port that closes with messages still queued
 sends them whole, not framed, so they never trip the window check on the way out.
 
-The cap is the receiver's: a sender with `frameSize` that frames a message larger than the
-peer's `maxReassembledBytes` has its port closed, where the same message sent whole would arrive.
+The cap is the receiver's: a sender with `frameSize` that frames a message more than the
+peer's `maxReassembledBytes` past the window has its port closed, where the same message sent whole would arrive.
 Set it above the largest message the peer legitimately frames; a message just past it looks like
 a closed port, not a lost message.
 

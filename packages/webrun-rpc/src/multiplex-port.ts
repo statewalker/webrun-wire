@@ -149,16 +149,24 @@ export function multiplexPort(
     credit?: Credit;
     /**
      * The frames of a message still arriving. `room`: what the window left
-     * when the first came, if anything was still owed back then.
+     * when the first came, if anything was still owed back then. `charged`:
+     * its bytes past the window, counted in `reassembling`.
      */
-    partial?: { chunks: Uint8Array[]; bytes: number; room?: number; owed: number };
+    partial?: {
+      chunks: Uint8Array[];
+      bytes: number;
+      room?: number;
+      owed: number;
+      charged: number;
+    };
   }
   const open = new Map<number, Entry>();
-  // Bytes held in partial messages across every port (`maxReassembledBytes`).
+  // Bytes of partial messages held past their port's window, across every
+  // port (`maxReassembledBytes`). What fits a window is bounded by it already.
   let reassembling = 0;
   const freePartial = (entry: Entry | undefined): void => {
     if (!entry?.partial) return;
-    reassembling -= entry.partial.bytes;
+    reassembling -= entry.partial.charged;
     entry.partial = undefined;
   };
   // A port collected while still open: report it, then free its slot on both
@@ -563,15 +571,19 @@ export function multiplexPort(
         chunks: [],
         bytes: 0,
         owed,
+        charged: 0,
         ...(owed > 0 ? { room: c.window - owed } : {}),
       };
       entry.partial = partial;
       const size = envelope.data.byteLength;
+      // Only a message begun with nothing owed may pass the window; what it
+      // holds past it is what the cap, shared by all ports, bounds.
+      const charged = partial.room == null ? Math.max(0, partial.bytes + size - c.window) : 0;
       const overrun =
         partial.room != null && partial.bytes + size > partial.room
           ? `what the window left (${partial.room} of ${c.window} bytes, ${partial.owed} still owed)`
-          : reassembling + size > maxReassembledBytes
-            ? `maxReassembledBytes (${maxReassembledBytes} bytes across all ports)`
+          : reassembling - partial.charged + charged > maxReassembledBytes
+            ? `maxReassembledBytes (${maxReassembledBytes} bytes past the window, across all ports)`
             : undefined;
       if (overrun) {
         // A peer that frames past what it may send: hold none of it.
@@ -584,7 +596,8 @@ export function multiplexPort(
         return;
       }
       partial.bytes += size;
-      reassembling += size;
+      reassembling += charged - partial.charged;
+      partial.charged = charged;
       partial.chunks.push(envelope.data);
       if (!envelope.last) return;
       freePartial(entry);

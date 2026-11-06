@@ -276,11 +276,13 @@ describe("a message reassembled from frames is bounded (#50)", () => {
       channel.port2.close();
     });
     const got: unknown[] = [];
+    const ports: Array<{ close(): void }> = [];
     const b = multiplexPort(channel.port2, {
       codec: msgpackCodec,
       side: "responder",
       maxReassembledBytes: options.maxReassembledBytes,
       onPort: (p) => {
+        ports.push(p);
         p.addEventListener("message", (e) => {
           got.push(e.data);
           return options.hold ? new Promise<void>(() => {}) : undefined;
@@ -302,7 +304,7 @@ describe("a message reassembled from frames is bounded (#50)", () => {
       await waitFor(() => b.ports().some((p) => p.id === id), `port ${id} opens`);
     };
     await open(0);
-    return { b, got, closes, peer, open };
+    return { b, got, closes, peer, open, ports };
   }
 
   /** `payload` on port `id`, encoded as the mux would and split into frames of `size`. */
@@ -338,10 +340,11 @@ describe("a message reassembled from frames is bounded (#50)", () => {
     }
   });
 
-  it("bounds the partial messages of all ports together, and frees what one delivers", async () => {
+  it("bounds what all ports hold past their windows, and frees what one delivers", async () => {
+    // 160 KiB on a 64 KiB window is charged 96 KiB: two of them pass 128 KiB.
     const { b, got, closes, peer, open } = await hostile({
       window: 64 * KiB,
-      maxReassembledBytes: 256 * KiB,
+      maxReassembledBytes: 128 * KiB,
     });
     await open(2);
     const first = framesOf(0, pattern(160 * KiB, 0), 16 * KiB);
@@ -354,9 +357,44 @@ describe("a message reassembled from frames is bounded (#50)", () => {
     await waitFor(() => got.length === 1, "the first message arrives whole");
     // What it held is free again: another port may now reassemble as much.
     await open(4);
-    for (const frame of framesOf(4, pattern(200 * KiB, 2), 16 * KiB)) peer(frame);
+    for (const frame of framesOf(4, pattern(180 * KiB, 2), 16 * KiB)) peer(frame);
     await waitFor(() => got.length === 2, "the third message arrives whole");
     expect(closes).toEqual(["max-reassembled-bytes"]);
+  });
+
+  for (const closer of ["the peer", "this side"] as const) {
+    it(`frees a partial message when ${closer} closes its port`, async () => {
+      const { got, closes, peer, open, ports } = await hostile({
+        window: 64 * KiB,
+        maxReassembledBytes: 128 * KiB,
+      });
+      const frames = framesOf(0, pattern(160 * KiB, 0), 16 * KiB);
+      frames.pop();
+      for (const frame of frames) peer(frame); // 96 KiB charged, never finished
+      await new Promise((r) => setTimeout(r, 20));
+      if (closer === "the peer") peer({ type: "close", id: 0 });
+      else ports[0]?.close();
+      await open(2);
+      // Another 116 KiB past the window fits only once the first is freed.
+      for (const frame of framesOf(2, pattern(180 * KiB, 1), 16 * KiB)) peer(frame);
+      await waitFor(() => got.length === 1, "the second message arrives whole");
+      expect(closes.filter((r) => r === "max-reassembled-bytes")).toEqual([]);
+    });
+  }
+
+  it("honest messages framed on several ports at once never trip the cap", async () => {
+    const { a, arrivals } = pair({
+      frameSize: 16 * KiB,
+      window: 64 * KiB,
+      maxReassembledBytes: 128 * KiB,
+    });
+    const ports = await Promise.all(["p1", "p2", "p3"].map((name) => a.openPort(name)));
+    await acknowledged(a, 3);
+    ports.forEach((port, i) => {
+      port.postMessage(pattern(60 * KiB, i));
+    });
+    await waitFor(() => arrivals.length === 3, "all three messages arrive");
+    expect(arrivals.map((x) => x.data.byteLength)).toEqual([60 * KiB, 60 * KiB, 60 * KiB]);
   });
 
   it("a port that closes with messages still queued delivers them", async () => {
@@ -372,7 +410,8 @@ describe("a message reassembled from frames is bounded (#50)", () => {
 
   it("frames past maxReassembledBytes close the port", async () => {
     const { b, closes, peer } = await hostile({ window: 64 * KiB, maxReassembledBytes: 256 * KiB });
-    for (let i = 0; i < 5; i++) peer({ type: "frame", id: 0, data: pattern(64 * KiB, i) });
+    // Charged past the window: 6 × 64 KiB holds 320 KiB past a 64 KiB window.
+    for (let i = 0; i < 6; i++) peer({ type: "frame", id: 0, data: pattern(64 * KiB, i) });
     await waitFor(() => closes.length > 0, "the responder closes the port");
     expect(closes).toEqual(["max-reassembled-bytes"]);
     expect(b.ports()).toEqual([]);
