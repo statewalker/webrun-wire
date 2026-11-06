@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  duplexOverPort,
   type MessageTarget,
   multiplexPort,
   type PortEnvelope,
@@ -12,6 +13,18 @@ import {
 // and the receiver holds no more than the window plus one chunk.
 
 const KiB = 1024;
+const MiB = 1024 * KiB;
+
+/** Bytes of `ArrayBuffer`s alive after a full collection (the run passes `--expose-gc`). */
+async function liveBuffers(): Promise<number> {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (!gc) throw new Error("run with --expose-gc");
+  for (let i = 0; i < 3; i++) {
+    gc();
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return process.memoryUsage().arrayBuffers;
+}
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -190,5 +203,93 @@ describe("duplexOverPort — a peer that pipelines where it may not", () => {
     release();
     await waitFor("the handler's input fails", () => ended.length > 0);
     expect((ended[0] as Error).message).toMatch(/past the window/);
+  });
+
+  it("chunks that are small views on large buffers hold only their own bytes", async () => {
+    // Structured clone carries a view's whole buffer. Counted by the view, 200
+    // one-byte chunks on 1 MiB buffers fit a 64 KiB window, so they are not
+    // refused: what must hold is that the receiver keeps their bytes, not
+    // their buffers.
+    const WINDOW = 64 * KiB;
+    const { wire, mux } = responder();
+    const peer = hostile(wire);
+    peer.post({
+      type: "open",
+      id: 0,
+      meta: { kind: "stream" },
+      window: WINDOW,
+      caps: ["pipeline"],
+    });
+    await waitFor("the window is acknowledged", () => peer.received.length > 0);
+    peer.post({ type: "credit", id: 0, bytes: 0 });
+    const before = await liveBuffers();
+    for (let i = 0; i < 200; i++) {
+      const value = new Uint8Array(new ArrayBuffer(MiB), 0, 1);
+      peer.post({
+        type: "message",
+        id: 0,
+        payload: { ...chunk(0), chunk: { done: false, value } },
+      });
+      if (i % 20 === 0) await new Promise((r) => setTimeout(r, 5));
+    }
+    await waitFor("all of them are held", () => (mux.ports()[0]?.unconsumed ?? 0) >= 200 * 64);
+    const held = (await liveBuffers()) - before;
+    expect(mux.ports()).toHaveLength(1);
+    expect(held).toBeLessThanOrEqual(WINDOW + MiB);
+  });
+
+  it("a confirmed chunk beside pipelined ones fails the stream and closes the port", async () => {
+    const { wire, mux, release, ended } = responder();
+    const peer = hostile(wire);
+    peer.post({
+      type: "open",
+      id: 0,
+      meta: { kind: "stream" },
+      window: 64 * KiB,
+      caps: ["pipeline"],
+    });
+    await waitFor("the window is acknowledged", () => peer.received.length > 0);
+    peer.post({ type: "credit", id: 0, bytes: 0 });
+    // One confirmed chunk the stalled handler holds, then a pipelined one.
+    const request = { type: "request", channelName: "in", callId: "c1", params: chunk(16).chunk };
+    peer.post({ type: "message", id: 0, payload: request });
+    peer.post({ type: "message", id: 0, payload: chunk(16) });
+
+    await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
+    expect(mux.ports()).toEqual([]);
+    release();
+    await waitFor("the handler's input fails", () => ended.length > 0);
+    expect((ended[0] as Error).message).toMatch(/mixed confirmed and pipelined/);
+  });
+
+  it("an opener refuses a pipelined chunk from a responder that never agreed", async () => {
+    const ch = new MessageChannel();
+    const client = multiplexPort(ch.port1, {
+      codec: structuredCodec,
+      side: "initiator",
+      window: 64 * KiB,
+    });
+    cleanups.push(async () => {
+      await client.close();
+      ch.port1.close();
+      ch.port2.close();
+    });
+    // The responder at the wire: no ack, then output pipelined straight away.
+    const peer = hostile(ch.port2);
+    peer.received.length = 0;
+    const port = await client.openPort({ kind: "stream" });
+    await waitFor("the open arrives", () => peer.received.some((e) => e.type === "open"));
+    peer.post({ type: "message", id: 0, payload: { ...chunk(16), channelName: "out" } });
+
+    let error: unknown;
+    try {
+      for await (const _ of duplexOverPort(port)([new Uint8Array([1])])) {
+      }
+    } catch (err) {
+      error = err;
+    }
+    expect((error as Error)?.message).toMatch(/pipelining was not agreed/);
+    await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
+    expect(client.ports()).toEqual([]);
   });
 });

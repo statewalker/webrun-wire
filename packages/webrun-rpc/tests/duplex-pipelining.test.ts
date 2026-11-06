@@ -15,16 +15,21 @@ afterEach(async () => {
 
 /**
  * `connect` / `serve` over one `MessageChannel`, with `window` on both ends
- * (or none). `responses` counts the chunk confirmations the caller sends back
- * to the handler, read off the raw pipe.
+ * (or none). `responses` counts the chunk confirmations each side sends
+ * back, read off the raw pipe: the caller's for the handler's output (`out`),
+ * the handler's for the caller's input (`in`).
  */
 async function link(window: number | undefined, handler: Duplex) {
   const ch = new MessageChannel();
-  let responses = 0;
-  ch.port2.addEventListener("message", (event) => {
+  const responses = { in: 0, out: 0 };
+  const count = (channelName: "in" | "out") => (event: MessageEvent) => {
     const payload = (event.data as { payload?: { type?: string; channelName?: string } }).payload;
-    if (payload?.type === "response:result" && payload.channelName === "out") responses++;
-  });
+    if (payload?.type === "response:result" && payload.channelName === channelName) {
+      responses[channelName]++;
+    }
+  };
+  ch.port2.addEventListener("message", count("out"));
+  ch.port1.addEventListener("message", count("in"));
   const teardown = await serve(
     { mux: overPipe(ch.port2, { codec: structuredCodec, side: "responder", window }) },
     handler,
@@ -38,7 +43,7 @@ async function link(window: number | undefined, handler: Duplex) {
     ch.port1.close();
     ch.port2.close();
   });
-  return { call, responses: () => responses };
+  return { call, responses };
 }
 
 /** Reads a stream to its end: the chunks' bytes, and the error it ended with. */
@@ -74,21 +79,24 @@ describe("duplexOverPort — pipelined chunks under a window", () => {
     expect((piped.error as Error).name).toBe((plain.error as Error).name);
   });
 
-  it("agreed pipelining sends no acknowledgement per chunk", async () => {
+  it("agreed pipelining sends no acknowledgement per chunk, in either direction", async () => {
     const CHUNKS = 200;
-    const producer: Duplex = async function* (input) {
-      for await (const _ of input) {
-      }
-      for (let i = 0; i < CHUNKS; i++) yield new Uint8Array(256).fill(i & 0xff);
+    const echo: Duplex = async function* (input) {
+      for await (const chunk of input) yield chunk;
     };
-    const plain = await link(undefined, producer);
-    const piped = await link(64 * KiB, producer);
+    const input = Array.from({ length: CHUNKS }, (_, i) => new Uint8Array(256).fill(i & 0xff));
+    const plain = await link(undefined, echo);
+    const piped = await link(64 * KiB, echo);
 
-    expect((await drain(plain.call([new Uint8Array([1])]))).seen).toHaveLength(CHUNKS * 256);
-    expect((await drain(piped.call([new Uint8Array([1])]))).seen).toHaveLength(CHUNKS * 256);
+    expect((await drain(plain.call(input))).seen).toHaveLength(CHUNKS * 256);
+    expect((await drain(piped.call(input))).seen).toHaveLength(CHUNKS * 256);
     // Without a window every chunk, and the end, is confirmed.
-    expect(plain.responses()).toBe(CHUNKS + 1);
-    expect(piped.responses()).toBe(0);
+    expect(plain.responses).toEqual({ in: CHUNKS + 1, out: CHUNKS + 1 });
+    // Until the handshake settles, the first chunk each way may still go
+    // confirmed: the caller's leaves with the `open`, before the ack, and the
+    // handler's answer to it before the opener's answer to the ack arrives.
+    expect(piped.responses.in).toBeLessThanOrEqual(1);
+    expect(piped.responses.out).toBeLessThanOrEqual(1);
   });
 
   it("carries a large body both ways, in order, through a small window", async () => {

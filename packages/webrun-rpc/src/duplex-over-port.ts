@@ -42,6 +42,22 @@ const CHUNK = "webrun-rpc:chunk";
  */
 const CHUNK_OVERHEAD = 32;
 
+/**
+ * `bytes`, or a copy when it is a view on a larger buffer. Structured clone
+ * carries and keeps a view's whole `ArrayBuffer`, while the window and the
+ * receiver's count see only the view: a 4 KiB `subarray` of a 4 MiB buffer
+ * would cost 4 MiB per chunk. Copied on both ends — the sender so posts no
+ * more than it counts, and the receiver holds no more than it counts whatever
+ * the peer posts.
+ */
+const ownBytes = (bytes: Uint8Array | undefined): Uint8Array | undefined =>
+  bytes instanceof Uint8Array && bytes.byteLength !== bytes.buffer.byteLength
+    ? bytes.slice()
+    : bytes;
+
+const MIXED_MESSAGE =
+  "webrun-rpc: peer mixed confirmed and pipelined chunks; the stream port is closed";
+
 /** This end may pipeline its own chunks: agreed, and the window holds them. */
 const mayPipeline = (port: MessageTarget): boolean => {
   const agreement = portAgreement(port);
@@ -411,11 +427,17 @@ function receiveChunks(
     return poison;
   };
 
+  // Bytes of pipelined chunks delivered and not yet consumed (see `onChunk`).
+  let held = 0;
   const off = listenPort<WireChunk, void>(
     port,
     async ({ done, value, error }) => {
       touch();
       if (poison) throw poison;
+      // A confirmed chunk is held outside the pipelined count: one beside
+      // pipelined ones would let a peer hold more than the window plus one
+      // chunk. An honest sender switches to pipelining once and stays.
+      if (held > 0) throw violate(MIXED_MESSAGE);
       if (outstanding) {
         // Spec D15: a second chunk before the first was confirmed is a
         // protocol violation, not a resource question. A count of one needs
@@ -431,7 +453,7 @@ function receiveChunks(
         if (finished) throw poison ?? new Error("webrun-rpc: the stream is closed");
         await deliver?.({
           done,
-          value,
+          value: ownBytes(value),
           error: error ? deserializeError(error) : undefined,
         });
       } finally {
@@ -448,7 +470,6 @@ function receiveChunks(
   // that is what bounds a stalled reader to one window. A peer that ignores
   // the credit is caught by counting what is held: an honest one never makes
   // it pass the window, so past the window plus this chunk it is refused.
-  let held = 0;
   const onChunk = (event: MessageEvent): Promise<void> | undefined => {
     const data = event.data as
       | { type?: unknown; channelName?: unknown; chunk?: WireChunk }
@@ -462,6 +483,15 @@ function receiveChunks(
       violate("webrun-rpc: peer sent a pipelined chunk where pipelining was not agreed");
       return;
     }
+    if (outstanding) {
+      violate(MIXED_MESSAGE);
+      return;
+    }
+    // What is held is counted by its bytes, so it must be bytes.
+    if (data.chunk.value !== undefined && !(data.chunk.value instanceof Uint8Array)) {
+      violate("webrun-rpc: peer sent a pipelined chunk whose value is not bytes");
+      return;
+    }
     if (held > agreement.window) {
       violate(
         `webrun-rpc: peer sent past the window (${agreement.window} bytes) without waiting for credit; the stream port is closed`,
@@ -469,7 +499,8 @@ function receiveChunks(
       return;
     }
     touch();
-    const { done, value, error } = data.chunk;
+    const { done, error } = data.chunk;
+    const value = ownBytes(data.chunk.value);
     const size = (value?.byteLength ?? 0) + CHUNK_OVERHEAD;
     held += size;
     return (async () => {
@@ -574,7 +605,7 @@ async function sendChunks(
       if (signal.aborted) return;
       const chunk: WireChunk = {
         done,
-        value,
+        value: ownBytes(value),
         error: error === undefined ? undefined : serializeError(error),
       };
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });
