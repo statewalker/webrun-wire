@@ -302,9 +302,9 @@ transport cannot produce a port synchronously and both must share one shape. Its
 are rejections, not synchronous throws: `RangeError: webrun-rpc: maxPorts (<n>) reached` and
 `Error: webrun-rpc: the multiplexer is closed`. The `RangeError` goes on with the three commonest
 `meta.kind`s among the open ports, `open ports by kind: http: 1000, ws: 24`, so a full table names
-the consumer that filled it (`"?"` counts ports without a kind). A duplicate `open` id from the peer is ignored
-rather than replacing a live port, and a local `openPort` skips ids the peer already claimed with
-the wrong parity.
+the consumer that filled it (`"?"` counts ports without a kind). A duplicate `open` id from the
+peer is ignored rather than replacing a live port, and a local `openPort` skips ids the peer
+already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta? }`, `{ type: "message", id, payload }` or
 `{ type: "close", id, reason? }`. `structuredCodec.read` accepts only objects with a non-negative
@@ -321,10 +321,16 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
   event, so the mux cannot notice by itself. Pass `signal` and abort it from whatever does notice
   (a worker's `exit`, a stream's `close`, a liveness lock): the mux closes with `signal.reason`,
   every port's close signal aborts with it, and calls in flight reject at once instead of hanging.
-  `close(reason)` does the same by hand.
-- **The user.** `openPort(meta, { signal })` closes the port when `signal` aborts. Ports are also
-  disposable where the runtime defines `Symbol.dispose`, so `using port = await mux.openPort()`
-  closes it on scope exit.
+  `close(reason)` does the same by hand. A port opened from a close-signal listener while the mux
+  closes is refused, and a transport `close()` that rejects on this path is swallowed rather than
+  left as an unhandled rejection.
+- **The user.** `openPort(meta, { signal })` closes the port when `signal` aborts, with
+  `signal.reason` as the reason of the port's close signal; a signal already aborted rejects
+  `openPort` with its reason and opens nothing. `transferPortMux` honours the signal too. Virtual
+  ports are also disposable where the runtime defines `Symbol.dispose`, so
+  `using port = (await mux.openPort()) as MessageTarget & Disposable` closes it on scope exit. The
+  cast is needed because the declared type leaves `Symbol.dispose` out: naming it would require
+  every consumer to compile with the `esnext.disposable` lib.
 
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.

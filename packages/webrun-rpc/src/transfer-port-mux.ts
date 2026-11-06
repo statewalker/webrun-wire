@@ -1,5 +1,5 @@
 import type { MessageTarget } from "./message-target.js";
-import type { PortMux } from "./port-types.js";
+import type { OpenPortOptions, PortMux } from "./port-types.js";
 
 /** The `type` of the envelope that carries a transferred port to the peer. */
 export const PORT_TRANSFER = "webrun-rpc:port-transfer";
@@ -76,8 +76,9 @@ export function transferPortMux(
   return {
     maxMessageSize,
 
-    async openPort(meta?: unknown): Promise<MessageTarget> {
+    async openPort(meta?: unknown, { signal }: OpenPortOptions = {}): Promise<MessageTarget> {
       if (closed) throw new Error("webrun-rpc: the multiplexer is closed");
+      if (signal?.aborted) throw signal.reason;
       const channel = new MessageChannel();
       channel.port1.start();
       // The transferred end is not referenced from the message itself, so it
@@ -85,6 +86,14 @@ export function transferPortMux(
       // identical in Node and in browsers.
       target.postMessage({ type: PORT_TRANSFER, meta }, [channel.port2]);
       issued.add(channel.port1);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          issued.delete(channel.port1);
+          channel.port1.close();
+        },
+        { once: true },
+      );
       return channel.port1;
     },
 
