@@ -23,6 +23,15 @@ export type HttpDataOptions = {
    * body is the caller's to leave.)
    */
   signal?: AbortSignal;
+  /**
+   * `serveFetchOverDuplex` only: once the response is out, how long the request
+   * body may go unread before it is abandoned and the exchange ends (default
+   * 30 s). A handler that answers first and reads the upload afterwards keeps
+   * it as long as it keeps reading; one that took the body and dropped it would
+   * otherwise keep the exchange — on a multiplexed transport, its port — open
+   * for good. `Infinity` waits for as long as it takes.
+   */
+  requestIdleMs?: number;
 };
 
 export interface HttpFetchResult {
@@ -214,7 +223,15 @@ export async function httpFetch(
   const finish = () => {
     if (finished || released) return;
     finished = true;
-    void drain(output);
+    // The peer ends the call; an abort of the request's signal abandons it
+    // instead (a peer that never ends a call, say).
+    if (signal?.aborted) {
+      void release();
+      return;
+    }
+    const onAbort = () => void release();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    void drain(output).finally(() => signal?.removeEventListener("abort", onAbort));
   };
   let decoded: Awaited<ReturnType<MessageCodec["decodeResponse"]>>;
   try {

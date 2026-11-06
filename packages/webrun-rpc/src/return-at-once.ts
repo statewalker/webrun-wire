@@ -9,9 +9,9 @@
  * then never runs, and on a multiplexer the port is kept for good.
  *
  * So `abandon` runs first, synchronously: it must make the pending `next()`
- * settle (abort the stream), after which the generator's own `return()` /
- * `throw()` proceeds as usual. On a generator suspended at a `yield` it is
- * the same ending, a step earlier. `abandon` runs once, whichever comes first.
+ * settle (abort the stream), which then resolves done, after which the
+ * generator's own `return()` / `throw()` proceeds as usual. On a generator
+ * suspended at a `yield` it is the same ending, a step earlier. `abandon` runs once, whichever comes first.
  */
 export function returningAtOnce<T>(
   gen: AsyncGenerator<T>,
@@ -24,7 +24,14 @@ export function returningAtOnce<T>(
     abandon(reason);
   };
   const wrapped: AsyncGenerator<T> = {
-    next: (...args: [] | [unknown]) => gen.next(...args),
+    // A `next()` that was pending when the consumer gave up ends as the
+    // stream does — done — rather than rejecting with the abort it caused: a
+    // consumer that raced it against a timer may hold no handler for it.
+    next: (...args: [] | [unknown]) =>
+      gen.next(...args).catch((error: unknown) => {
+        if (abandoned) return { done: true, value: undefined } as IteratorResult<T>;
+        throw error;
+      }),
     return(value) {
       giveUp();
       return gen.return(value);

@@ -170,11 +170,10 @@ export function serveFetchOverDuplex(
       method: env.method,
       headers: forwardableHeaders(env.headers),
     };
-    let uploadEnded: Promise<void> | undefined;
+    let upload: ReturnType<typeof trackingEnd> | undefined;
     if (env.method !== "GET" && env.method !== "HEAD") {
       if (supportsRequestStreams()) {
-        const upload = trackingEnd(body);
-        uploadEnded = upload.ended;
+        upload = trackingEnd(body);
         reqInit.body = asyncIterableToReadable(upload.source);
         (reqInit as RequestInit & { duplex?: string }).duplex = "half";
       } else {
@@ -197,9 +196,11 @@ export function serveFetchOverDuplex(
     // Once the response is out, the exchange ends when the handler is done
     // with the request body too: a handler may answer first and read the
     // upload afterwards (`202`, then store it). One it never took — not used,
-    // not locked — it will not read: cancel it, and the exchange ends now.
+    // not locked — it will not read: cancel it, and the exchange ends now. One
+    // it took and stopped reading (a reader dropped, a clone nobody reads) is
+    // abandoned once nothing has asked it for a chunk for `requestIdleMs`.
     const settled = async () => {
-      if (!uploadEnded) return;
+      if (!upload) return;
       if (!request.bodyUsed && !request.body?.locked) {
         try {
           await request.body?.cancel();
@@ -207,7 +208,7 @@ export function serveFetchOverDuplex(
           /* already finished */
         }
       }
-      await uploadEnded;
+      await upload.settle(options.requestIdleMs ?? DEFAULT_REQUEST_IDLE_MS);
     };
     const respEnv: ResponseEnvelope = {
       status: response.status,
@@ -238,25 +239,46 @@ export function serveFetchOverDuplex(
   }, options);
 }
 
+/** How long a request body may sit unread after the response before it is abandoned. */
+export const DEFAULT_REQUEST_IDLE_MS = 30_000;
+
 /**
- * `source`, and a promise that resolves once it is done: read to its end,
- * failed, or abandoned — `return()` included before the first `next()`, which
- * a generator's `finally` would not see.
+ * `source`, and `settle(idleMs)`: resolves once it is done — read to its end,
+ * failed, or abandoned (`return()` included before the first `next()`, which a
+ * generator's `finally` would not see) — or once nobody has asked it for a
+ * chunk for `idleMs`, in which case it is abandoned: later reads fail.
+ *
+ * Idle counts only while no `next()` is pending: a reader waiting for a slow
+ * sender is still reading.
  */
 function trackingEnd(source: AsyncIterable<Uint8Array>): {
   source: AsyncIterable<Uint8Array>;
-  ended: Promise<void>;
+  settle(idleMs: number): Promise<void>;
 } {
   let end: () => void = () => {};
+  let isEnded = false;
   const ended = new Promise<void>((resolve) => {
-    end = resolve;
+    end = () => {
+      isEnded = true;
+      resolve();
+    };
   });
+  let abandoned: Error | undefined;
+  let pending = 0;
+  let idleSince = Date.now();
   const it = source[Symbol.asyncIterator]();
+  const abandon = (reason: Error) => {
+    abandoned ??= reason;
+    end();
+    void Promise.resolve(it.return?.(undefined)).catch(() => {});
+  };
   const tracked: AsyncIterableIterator<Uint8Array> = {
     [Symbol.asyncIterator]() {
       return tracked;
     },
     async next() {
+      if (abandoned) throw abandoned;
+      pending++;
       try {
         const r = await it.next();
         if (r.done) end();
@@ -264,6 +286,8 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
       } catch (error) {
         end();
         throw error;
+      } finally {
+        if (--pending === 0) idleSince = Date.now();
       }
     },
     async return(value?: unknown) {
@@ -276,7 +300,32 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
       return { done: true, value: undefined };
     },
   };
-  return { source: tracked, ended };
+  const settle = (idleMs: number): Promise<void> => {
+    if (isEnded || !Number.isFinite(idleMs)) return ended;
+    return new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const check = () => {
+        if (isEnded) return resolve();
+        const idle = pending === 0 ? Date.now() - idleSince : 0;
+        if (idle >= idleMs) {
+          abandon(
+            new Error(
+              `webrun-http-streams: the request body was left unread for ${idleMs} ms after the response; abandoned`,
+            ),
+          );
+          return resolve();
+        }
+        timer = setTimeout(check, Math.max(1, Math.min(idleMs - idle, 1_000)));
+        (timer as { unref?: () => void }).unref?.();
+      };
+      void ended.then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+      check();
+    });
+  };
+  return { source: tracked, settle };
 }
 
 async function* withAbort(

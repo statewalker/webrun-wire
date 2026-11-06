@@ -496,4 +496,43 @@ describe("every exchange ends its call", () => {
     }
     expect(releases).toBe(0);
   });
+  it("a handler that took the request body and dropped it: the call ends after requestIdleMs", async () => {
+    let failed: unknown;
+    const t = tracked(
+      serveFetchOverDuplex(
+        async (q) => {
+          const reader = (q.body as ReadableStream<Uint8Array>).getReader();
+          await reader.read();
+          // Dropped without cancelling; a later read fails once abandoned.
+          setTimeout(async () => {
+            try {
+              while (!(await reader.read()).done);
+            } catch (e) {
+              failed = e;
+            }
+          }, 200);
+          return new Response("ok");
+        },
+        { requestIdleMs: 50 },
+      ),
+    );
+    for (let i = 0; i < 5; i++) {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (n++ === 5) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      const r = await fetchOverDuplex(
+        t.call,
+        new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
+      );
+      expect(await r.text()).toBe("ok");
+    }
+    for (let k = 0; k < 100 && t.open() > 0; k++) await sleep(10);
+    expect(t.open()).toBe(0);
+    await sleep(250);
+    expect(String(failed)).toMatch(/left unread/);
+  });
 });

@@ -22,9 +22,13 @@ afterEach(async () => {
 
 async function linked(
   handler: (request: Request) => Response | Promise<Response>,
+  serveOptions: { requestIdleMs?: number } = {},
 ): Promise<{ link: HttpLink; stop: () => Promise<void> }> {
   const channel = new MessageChannel();
-  const stop = await serveHttpLink(channel.port2, handler, { maxPorts: MAX_PORTS });
+  const stop = await serveHttpLink(channel.port2, handler, {
+    maxPorts: MAX_PORTS,
+    ...serveOptions,
+  });
   const link = await connectHttpLink(channel.port1, { maxPorts: MAX_PORTS });
   closers.push(
     () => link.close(),
@@ -364,6 +368,108 @@ describe("a link gives every request's port back", () => {
       await expect(pending, `round ${i + 1}`).rejects.toThrow("gave up");
     }
     expect(started).toBe(ROUNDS);
+    expect(link.inflight).toBe(0);
+  });
+  describe("a handler that takes the request body and stops reading it", () => {
+    const upload = () => {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await tick(2);
+          if (n++ === 5) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      return new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit);
+    };
+    const takers: Record<string, (q: Request) => Promise<void>> = {
+      "a reader dropped after one read": async (q) => {
+        await (q.body as ReadableStream<Uint8Array>).getReader().read();
+      },
+      "a reader released after one read": async (q) => {
+        const reader = (q.body as ReadableStream<Uint8Array>).getReader();
+        await reader.read();
+        reader.releaseLock();
+      },
+      "a reader taken, nothing read": async (q) => {
+        (q.body as ReadableStream<Uint8Array>).getReader();
+      },
+      "a clone nobody reads": async (q) => {
+        void q.clone();
+        await q.text();
+      },
+    };
+    for (const [name, take] of Object.entries(takers)) {
+      it(`${name}: the exchange ends once the body sat unread for requestIdleMs`, async () => {
+        const { link } = await linked(
+          async (q) => {
+            await take(q);
+            return new Response("ok");
+          },
+          { requestIdleMs: 50 },
+        );
+        for (let i = 0; i < ROUNDS / 3; i++) {
+          const r = await link.send(upload());
+          expect(await r.text(), `round ${i + 1}`).toBe("ok");
+          // The exchange holds its port until the body has sat unread that long.
+          await tick(120);
+        }
+        // Every round got a port: none was kept by an exchange left hanging.
+        expect(link.inflight).toBe(0);
+      });
+    }
+
+    it("a slow reader that keeps reading keeps its upload past requestIdleMs", async () => {
+      const received: number[] = [];
+      const { link } = await linked(
+        async (q) => {
+          void (async () => {
+            const reader = (q.body as ReadableStream<Uint8Array>).getReader();
+            let n = 0;
+            for (let c = await reader.read(); !c.done; c = await reader.read()) {
+              n += c.value.byteLength;
+              await tick(30); // slower than the client, under requestIdleMs each time
+            }
+            received.push(n);
+          })().catch(() => received.push(-1));
+          return new Response("accepted", { status: 202 });
+        },
+        { requestIdleMs: 60 },
+      );
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (n++ === 8) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      const r = await link.send(
+        new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
+      );
+      expect(await r.text()).toBe("accepted");
+      for (let k = 0; k < 200 && received.length === 0; k++) await tick(10);
+      expect(received).toEqual([80]);
+    });
+  });
+  it("an abort after the response was read ends an exchange the peer would keep", async () => {
+    // The handler holds the request body forever (no idle bound): only the
+    // client's abort can end the exchange.
+    const { link } = await linked(
+      async (q) => {
+        (q.body as ReadableStream<Uint8Array>).getReader();
+        return new Response("ok");
+      },
+      { requestIdleMs: Number.POSITIVE_INFINITY },
+    );
+    for (let i = 0; i < ROUNDS / 3; i++) {
+      const controller = new AbortController();
+      const r = await link.send(
+        new Request("http://x/", { method: "POST", body: "x", signal: controller.signal }),
+      );
+      expect(await r.text(), `round ${i + 1}`).toBe("ok");
+      controller.abort();
+      await settle();
+    }
     expect(link.inflight).toBe(0);
   });
 });

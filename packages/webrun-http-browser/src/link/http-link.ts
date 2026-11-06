@@ -26,6 +26,13 @@ export interface HttpLinkOptions {
    * refused. Every exchange gives its port back when it ends, however it ends.
    */
   maxPorts?: number;
+  /**
+   * The answering end only: once a response is out, how long the request body
+   * may go unread before it is abandoned and the exchange ends (default 30 s;
+   * webrun-http-streams' `requestIdleMs`). A handler that answers first and
+   * reads the upload afterwards keeps it as long as it keeps reading.
+   */
+  requestIdleMs?: number;
 }
 
 /** The calling end of a link: sends requests, gets responses. */
@@ -94,14 +101,14 @@ export async function connectHttpLink(
 export async function serveHttpLink(
   port: MessagePort,
   handler: (request: Request) => Response | Promise<Response>,
-  { streamTimeout, maxPorts }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts, requestIdleMs }: HttpLinkOptions = {},
 ): Promise<() => Promise<void>> {
   const teardown = await serve(
     {
       mux: overPipe(port, { codec: structuredCodec, side: "responder", maxPorts }),
       timeout: streamTimeout,
     },
-    serveFetchOverDuplex(async (request) => await handler(request)),
+    serveFetchOverDuplex(async (request) => await handler(request), { requestIdleMs }),
   );
   const onClose = (event: MessageEvent) => {
     if ((event.data as { type?: unknown } | null)?.type === LINK_CLOSE) void close();

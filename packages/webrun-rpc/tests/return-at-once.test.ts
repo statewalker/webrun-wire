@@ -62,7 +62,8 @@ describe("return() while a next() is pending", () => {
     const t0 = Date.now();
     await stream.return(undefined);
     expect(Date.now() - t0).toBeLessThan(100);
-    await expect(pending).rejects.toThrow(/abandoned/);
+    // The pending next() ends as the stream does, rather than rejecting.
+    expect(await pending).toEqual({ done: true, value: undefined });
     await tick(20);
     expect(notices.length).toBe(1);
   });
