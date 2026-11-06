@@ -12,6 +12,7 @@ import { callPort, NO_TIMEOUT } from "./call-port.js";
 import { getPortCloseSignal } from "./close-signal.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
+import { portAgreement, portBufferedAmount, whenPortReady } from "./port-credit.js";
 import { returningAtOnce } from "./return-at-once.js";
 import { throughAbort } from "./through-abort.js";
 
@@ -24,6 +25,28 @@ import { throughAbort } from "./through-abort.js";
  * tests and adapters assert on it.
  */
 export const STREAM_ABORT = "webrun-rpc:stream-abort";
+
+/**
+ * The `type` of a pipelined chunk: a plain port message, not a `callPort`
+ * request, sent only on a port where both ends agreed `pipeline`. The window's
+ * credit is its confirmation.
+ */
+const CHUNK = "webrun-rpc:chunk";
+
+/**
+ * What a pipelined chunk counts beyond its bytes, against the window, on the
+ * receiving side. Both codecs' windows count more for the chunk's envelope
+ * (the estimate at least 64, msgpack's keys alone more than this), so an honest
+ * sender never makes the receiver count past the window; a sender of empty
+ * chunks still cannot have it hold an unbounded number of them.
+ */
+const CHUNK_OVERHEAD = 32;
+
+/** This end may pipeline its own chunks: agreed, and the window holds them. */
+const pipelined = (port: MessageTarget): boolean => {
+  const agreement = portAgreement(port);
+  return !!agreement?.enforced && agreement.caps.has("pipeline");
+};
 
 /** Caller's input travels on this channel; the handler listens on it. */
 const CHANNEL_IN = "in";
@@ -64,7 +87,9 @@ export interface DuplexOverPortOptions {
  * same way on the other channel. Within each direction the next chunk is never
  * sent until the previous one has been delivered *and* pulled past by the
  * consumer (spec D11) — the reply to a chunk call *is* the confirmation, and
- * `listenPort` withholds it until then.
+ * `listenPort` withholds it until then. On a port whose window both ends
+ * speak and that agreed `pipeline`, chunks go as plain messages instead, and
+ * the window's credit is the confirmation: up to a window is in flight.
  *
  * A stream port carries exactly one invocation. To make several calls, open
  * several ports: `mux.openPort({ kind: "stream" })` per call.
@@ -356,6 +381,36 @@ function receiveChunks(
     for (const r of waiting.splice(0)) r();
   };
 
+  // A protocol violation fails the stream and closes its port.
+  const violate = (message: string): Error => {
+    poison = new Error(message);
+    // Route through the existing abort machinery instead of duplicating
+    // it by hand. `onAbort` below (a) sets `aborted`/`abortReason`, so
+    // `recieveIterator`'s installer replays the error even if poison
+    // fires before the consumer's first `.next()` — otherwise `deliver`
+    // is still undefined here and the local stream hangs forever; and
+    // (b) since `controller.signal` is the very signal `sendChunks`
+    // passes into `callPort` for *both* directions of this stream,
+    // aborting it rejects any outbound call parked at `NO_TIMEOUT` —
+    // otherwise `port.close()` below makes that call unsettleable, the
+    // pump never returns, the handler's `finally` never runs, and
+    // `disarmClockWhenBothSidesSettle` never fires. `onAbort` also
+    // resolves `ended`, making a separate call here redundant.
+    controller.abort(poison);
+    // Close on the next macrotask, so listenPort still gets to post the
+    // refusal on this one — a virtual port goes inert the instant it
+    // closes, and a silent drop would leave the offender hanging rather
+    // than telling it what it did wrong.
+    setTimeout(() => {
+      try {
+        void port.close?.();
+      } catch {
+        /* already gone */
+      }
+    }, 0);
+    return poison;
+  };
+
   const off = listenPort<WireChunk, void>(
     port,
     async ({ done, value, error }) => {
@@ -366,34 +421,9 @@ function receiveChunks(
         // protocol violation, not a resource question. A count of one needs
         // no threshold and no byte accounting, and it bounds memory by
         // construction: maxPorts x one chunk.
-        poison = new Error(
+        throw violate(
           "webrun-rpc: peer sent a second unconfirmed chunk; the stream port is closed",
         );
-        // Route through the existing abort machinery instead of duplicating
-        // it by hand. `onAbort` below (a) sets `aborted`/`abortReason`, so
-        // `recieveIterator`'s installer replays the error even if poison
-        // fires before the consumer's first `.next()` — otherwise `deliver`
-        // is still undefined here and the local stream hangs forever; and
-        // (b) since `controller.signal` is the very signal `sendChunks`
-        // passes into `callPort` for *both* directions of this stream,
-        // aborting it rejects any outbound call parked at `NO_TIMEOUT` —
-        // otherwise `port.close()` below makes that call unsettleable, the
-        // pump never returns, the handler's `finally` never runs, and
-        // `disarmClockWhenBothSidesSettle` never fires. `onAbort` also
-        // resolves `ended`, making a separate call here redundant.
-        controller.abort(poison);
-        // Close on the next macrotask, so listenPort still gets to post the
-        // refusal on this one — a virtual port goes inert the instant it
-        // closes, and a silent drop would leave the offender hanging rather
-        // than telling it what it did wrong.
-        setTimeout(() => {
-          try {
-            void port.close?.();
-          } catch {
-            /* already gone */
-          }
-        }, 0);
-        throw poison;
       }
       outstanding = true;
       try {
@@ -412,6 +442,47 @@ function receiveChunks(
     { channelName },
   );
 
+  // Pipelined chunks: plain messages, held until the consumer pulls past
+  // them. The listener's promise settles only then, so the mux returns the
+  // window's credit for a chunk once it is consumed, not once it arrived —
+  // that is what bounds a stalled reader to one window. A peer that ignores
+  // the credit is caught by counting what is held: an honest one never makes
+  // it pass the window, so past the window plus this chunk it is refused.
+  let held = 0;
+  const onChunk = (event: MessageEvent): Promise<void> | undefined => {
+    const data = event.data as
+      | { type?: unknown; channelName?: unknown; chunk?: WireChunk }
+      | undefined;
+    if (data?.type !== CHUNK || data.channelName !== channelName || !data.chunk) return;
+    if (poison) return;
+    const agreement = portAgreement(port);
+    if (!agreement?.caps.has("pipeline")) {
+      violate("webrun-rpc: peer sent a pipelined chunk where pipelining was not agreed");
+      return;
+    }
+    if (held > agreement.window) {
+      violate(
+        `webrun-rpc: peer sent past the window (${agreement.window} bytes) without waiting for credit; the stream port is closed`,
+      );
+      return;
+    }
+    touch();
+    const { done, value, error } = data.chunk;
+    const size = (value?.byteLength ?? 0) + CHUNK_OVERHEAD;
+    held += size;
+    return (async () => {
+      try {
+        await ready();
+        if (finished) return;
+        await deliver?.({ done, value, error: error ? deserializeError(error) : undefined });
+        if (done) resolveEnded();
+      } finally {
+        held -= size;
+      }
+    })();
+  };
+  port.addEventListener("message", onChunk);
+
   // Every path that stops listening to this channel — the consumer walking
   // away early (`break`/`return`/`throw` on the `for await`), an external
   // `stop()`, or the abort branch below — means no more chunks are coming
@@ -429,6 +500,7 @@ function receiveChunks(
     finished = true;
     wake();
     off();
+    port.removeEventListener("message", onChunk);
     controller.signal.removeEventListener("abort", onAbort);
     resolveEnded();
   };
@@ -469,7 +541,8 @@ function receiveChunks(
 
 /**
  * The sending half of one direction: one `callPort` per chunk, one call
- * outstanding at a time (spec D11/D12), with no per-chunk deadline (spec D8).
+ * outstanding at a time (spec D11/D12), with no per-chunk deadline (spec D8) —
+ * or, once pipelining is agreed, plain chunk messages held back by the window.
  */
 async function sendChunks(
   port: MessageTarget,
@@ -487,6 +560,11 @@ async function sendChunks(
   const producer = output as Partial<AsyncIterator<Uint8Array>>;
   const returnProducer = () => void Promise.resolve(producer.return?.()).catch(() => {});
   if (framed !== output) signal.addEventListener("abort", returnProducer, { once: true });
+  // A pipelined sender waits only for room in the window, or for the abort.
+  const aborted = new Promise<void>((resolve) => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
+  });
   try {
     await sendIterator<Uint8Array>(async ({ done, value, error }) => {
       if (signal.aborted) return;
@@ -496,6 +574,14 @@ async function sendChunks(
         error: error === undefined ? undefined : serializeError(error),
       };
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });
+      // Decided per chunk: acknowledged calls until `pipeline` is agreed (the
+      // opener learns it from the ack), plain messages from then on.
+      if (pipelined(port)) {
+        port.postMessage({ type: CHUNK, channelName, chunk });
+        touch();
+        if (portBufferedAmount(port) > 0) await Promise.race([whenPortReady(port), aborted]);
+        return;
+      }
       await callPort<void, WireChunk>(port, chunk, {
         channelName,
         timeout: NO_TIMEOUT,

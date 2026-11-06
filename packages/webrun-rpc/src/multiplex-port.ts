@@ -1,6 +1,6 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import { nextTask, setPortSendState } from "./port-credit.js";
+import { nextTask, type PortCap, setPortAgreement, setPortSendState } from "./port-credit.js";
 import type {
   OpenPortOptions,
   PortEnvelope,
@@ -25,6 +25,18 @@ const KEEPALIVE_ID = Number.MAX_SAFE_INTEGER;
 
 /** The longest delay a timer holds; past it `setInterval` fires at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** What a windowed port offers in its `open`: every capability this end speaks. */
+const OWN_CAPS: readonly PortCap[] = ["pipeline"];
+
+/**
+ * The capabilities in a peer's `caps` that this end speaks too, or
+ * `undefined` when the peer listed none (it is then treated as an older peer).
+ */
+function sharedCaps(listed: unknown): Set<PortCap> | undefined {
+  if (!Array.isArray(listed)) return undefined;
+  return new Set(OWN_CAPS.filter((cap) => listed.includes(cap)));
+}
 
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
 export const DEFAULT_MAX_PORTS = 1024;
@@ -125,6 +137,8 @@ export function multiplexPort(
      * port wedged.
      */
     exact: boolean;
+    /** What both ends speak on this port; empty until the handshake says otherwise. */
+    caps: Set<PortCap>;
     outstanding: number;
     queue: { send: (whole?: boolean) => void; size: number }[];
     queued: number;
@@ -339,6 +353,7 @@ export function multiplexPort(
             enforced: false,
             opener,
             exact,
+            caps: new Set(),
             outstanding: 0,
             queue: [],
             queued: 0,
@@ -447,6 +462,11 @@ export function multiplexPort(
             else c.waiters.push({ below, resolve: () => nextTask(resolve) });
           }),
       });
+      setPortAgreement(self.port, () => ({
+        window: c.window,
+        caps: c.caps,
+        enforced: c.enforced,
+      }));
     }
     const record: PortRecord = {
       deliver: self.deliver,
@@ -494,13 +514,18 @@ export function multiplexPort(
       // Acknowledge the window before `onPort` runs: what `onPort` posts then
       // reaches the opener after the ack, so both ends count it the same way
       // (exact bytes or the estimate). A rejection's close follows the ack.
+      // Only an opener that listed capabilities hears them answered; they
+      // hold from here for what it sends. This end's own sends still wait for
+      // the opener's answer to the ack before the window holds them: that
+      // answer is what shows this end's codec reads credit at all.
       const credit = open.get(envelope.id)?.credit;
+      const listed = sharedCaps(envelope.caps);
       if (credit) {
-        post(
-          credit.exact
-            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
-            : { type: "credit", id: envelope.id, bytes: 0 },
-        );
+        const ack: PortEnvelope = credit.exact
+          ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
+          : { type: "credit", id: envelope.id, bytes: 0 };
+        if (listed) credit.caps = listed;
+        post(listed ? { ...ack, caps: [...listed] } : ack);
       }
       let accepted = false;
       if (onPort) {
@@ -533,6 +558,7 @@ export function multiplexPort(
           c.exact = false;
           c.outstanding = 0;
         }
+        c.caps = sharedCaps(envelope.caps) ?? new Set();
         // Show the responder its codec reads credit, so it may hold back too.
         post({ type: "credit", id: envelope.id, bytes: 0 });
       }
@@ -724,8 +750,8 @@ export function multiplexPort(
       post(
         window
           ? exactCodec
-            ? { type: "open", id, meta, window, exact: true }
-            : { type: "open", id, meta, window }
+            ? { type: "open", id, meta, window, exact: true, caps: [...OWN_CAPS] }
+            : { type: "open", id, meta, window, caps: [...OWN_CAPS] }
           : { type: "open", id, meta },
       );
       if (portSignal) {
