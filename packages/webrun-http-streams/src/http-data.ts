@@ -36,18 +36,36 @@ export interface HttpFetchResult {
    * custom transports) still type-check; `httpFetch` always sets it.
    */
   release?(): Promise<void>;
+  /**
+   * The caller is done with a response it took in full — read to its end, or
+   * one with no body to read (HEAD, 204, 304...): the call is read to its end
+   * in the background, so the peer ends it once its side is over (it may still
+   * be reading the request body). Reading `body` to its end does this by
+   * itself. Optional, like `release`; `httpFetch` always sets it.
+   */
+  finish?(): void;
 }
 
 export interface HttpDataHandlerResult {
   envelope: ResponseEnvelope;
   body?: ByteSource;
   /**
-   * Called when the caller abandons the response before its end. A body the
-   * codec never started pulling cannot be released through the iterator
-   * protocol (`.return()` on a generator in suspended start does nothing), so
-   * a producer that holds resources says here how to let them go.
+   * Called when the caller abandons the response before its end — never once
+   * the response went out in full. A body the codec never started pulling
+   * cannot be released through the iterator protocol (`.return()` on a
+   * generator in suspended start does nothing), so a producer that holds
+   * resources says here how to let them go.
    */
   release?: () => unknown;
+  /**
+   * Awaited once the response went out in full: the exchange — and with it
+   * the call, and on a multiplexed transport its port — ends when it
+   * resolves. A handler that answers before it has read the request body, and
+   * goes on reading it, resolves this once it is done with it; until then the
+   * caller keeps sending. Left out, the exchange ends with the response, and
+   * the rest of the request is dropped.
+   */
+  settled?: () => Promise<unknown>;
 }
 
 /**
@@ -177,9 +195,10 @@ export async function httpFetch(
   const output = call(codec.encodeRequest(env, body));
   // The call is one Duplex invocation, and only its own generator's ending
   // ends it: on a multiplexed transport that `finally` is what frees the
-  // call's port. So every way out of an exchange runs it once — the body read
-  // to its end, left early, never started (bodyless), a peer error, a
-  // response that could not be decoded, an abort while waiting for the head.
+  // call's port. So every way out of an exchange ends it — the body read to
+  // its end (the call is read to its end too), left early, never started
+  // (bodyless), a peer error, a response that could not be decoded, an abort
+  // while waiting for the head (the call is abandoned).
   let released: Promise<void> | undefined;
   const release = () => {
     released ??= (async () => {
@@ -190,6 +209,12 @@ export async function httpFetch(
       }
     })();
     return released;
+  };
+  let finished = false;
+  const finish = () => {
+    if (finished || released) return;
+    finished = true;
+    void drain(output);
   };
   let decoded: Awaited<ReturnType<MessageCodec["decodeResponse"]>>;
   try {
@@ -207,8 +232,9 @@ export async function httpFetch(
   }
   const result: HttpFetchResult = {
     envelope: decoded.envelope,
-    body: releasingOnExit(decoded.body, release),
+    body: releasingOnExit(decoded.body, finish, release),
     release,
+    finish,
   };
   await throwIfPeerError(result, output);
   return result;
@@ -244,8 +270,7 @@ export function abortReason(signal: AbortSignal): Error {
 }
 
 /**
- * `body`, releasing the call however it is left: read to its end, or left
- * early.
+ * `body`, ending the call however it is left: read to its end, or left early.
  *
  * The body the codec hands back is a generator of its own over a `ByteReader`,
  * and its ending never reaches the call's `output` (see `throwIfPeerError` for
@@ -253,18 +278,36 @@ export function abortReason(signal: AbortSignal): Error {
  * aborted `fetch`, a cancelled response stream — left the peer's producer
  * parked forever; and one that read the body to its end left the call itself
  * open, which on a multiplexed transport is one port per exchange until the
- * multiplexer refuses to open more (`maxPorts`). Safe here for the same reason
- * it is safe in `throwIfPeerError`: `output` is this call's own response-only
- * generator, and the request was fully sent.
+ * multiplexer refuses to open more (`maxPorts`).
+ *
+ * Left early, the call is abandoned (`.return()`): the peer's producer is
+ * released. Read to its end, the call is not cut short but read to ITS end, in
+ * the background: the peer ends it once its side of the exchange is over,
+ * which may be later than the response — a handler that answered before it
+ * read the request body is still receiving it (`HttpDataHandlerResult.settled`),
+ * and abandoning the call would abort that upload.
  */
 async function* releasingOnExit(
   body: AsyncIterable<Uint8Array>,
+  finish: () => void,
   release: () => Promise<void>,
 ): AsyncGenerator<Uint8Array> {
+  let completed = false;
   try {
     yield* body;
+    completed = true;
   } finally {
-    await release();
+    if (completed) finish();
+    else await release();
+  }
+}
+
+/** Reads `output` to its end, discarding what is left, ignoring a failure. */
+async function drain(output: AsyncGenerator<Uint8Array>): Promise<void> {
+  try {
+    for (let r = await output.next(); !r.done; r = await output.next());
+  } catch {
+    /* the exchange is over for this side; how the peer ended it is its own */
   }
 }
 
@@ -314,6 +357,7 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
         method: decoded.envelope.method,
       });
       completed = true;
+      await result.settled?.();
     } finally {
       if (!completed) {
         try {

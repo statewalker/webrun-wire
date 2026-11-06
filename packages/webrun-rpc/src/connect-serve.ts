@@ -7,6 +7,7 @@ import {
 import type { MessageTarget } from "./message-target.js";
 import { multiplexPort } from "./multiplex-port.js";
 import type { PortCodec, PortMux } from "./port-types.js";
+import { returningAtOnce } from "./return-at-once.js";
 
 /**
  * Announced with every port this pair opens. Layer 1 never reads `meta` — it is
@@ -74,19 +75,34 @@ export const connect: Connect<PortParams> = async ({ mux: factory, timeout }) =>
   const mux = await factory();
   const streamOptions: DuplexOverPortOptions = { maxMessageSize: mux.maxMessageSize, timeout };
 
-  const call: Duplex = (input) =>
+  const call: Duplex = (input) => {
+    let stream: AsyncGenerator<Uint8Array> | undefined;
+    let abandoned = false;
     // The port is opened on the consumer's first pull, not when `call` is
     // invoked. A caller that builds a stream and then drops it without
     // iterating therefore costs the peer nothing — under eager opening it
     // would burn a port (and over libp2p, a whole stream) for a call that
     // never arrives.
-    (async function* () {
+    const outer = (async function* () {
       const port = await mux.openPort(STREAM_META);
+      if (abandoned) {
+        // Given up while the port was being opened.
+        await port.close?.();
+        return;
+      }
+      stream = duplexOverPort(port, streamOptions)(input);
       // `yield*` and not a hand-rolled pump: delegation already forwards
       // `return()` and `throw()` into `duplexOverPort`'s generator, which is
       // exactly the cancellation path `Duplex` specifies.
-      yield* duplexOverPort(port, streamOptions)(input);
+      yield* stream;
     })();
+    // Delegation forwards them only once the pending `next()` settles, though:
+    // giving up while the peer has not answered must reach the stream now.
+    return returningAtOnce(outer, () => {
+      abandoned = true;
+      void stream?.return(undefined).catch(() => {});
+    });
+  };
 
   return {
     call,

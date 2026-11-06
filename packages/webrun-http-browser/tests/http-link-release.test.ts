@@ -302,4 +302,68 @@ describe("a link gives every request's port back", () => {
       await expect(link.send(new Request("http://x/"))).rejects.toThrow(/closed/);
     }
   });
+  it("a handler that answers first and reads the upload afterwards gets all of it", async () => {
+    const received: number[] = [];
+    const { link } = await linked(async (q) => {
+      void q.arrayBuffer().then(
+        (b) => received.push(b.byteLength),
+        () => received.push(-1),
+      );
+      return new Response("accepted", { status: 202 });
+    });
+    for (let i = 0; i < ROUNDS; i++) {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await tick(2);
+          if (n++ === 5) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      const r = await link.send(
+        new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
+      );
+      expect([r.status, await r.text()]).toEqual([202, "accepted"]);
+      // The exchange holds its port until the upload is in; the next one waits.
+      for (let k = 0; k < 200 && received.length <= i; k++) await tick(5);
+      await settle();
+    }
+    expect(received).toEqual(Array(ROUNDS).fill(50));
+    await settle();
+    expect(link.inflight).toBe(0);
+  });
+
+  it("204 to an upload the handler reads afterwards: all of it arrives", async () => {
+    const received: number[] = [];
+    const { link } = await linked(async (q) => {
+      void q.arrayBuffer().then(
+        (b) => received.push(b.byteLength),
+        () => received.push(-1),
+      );
+      return new Response(null, { status: 204 });
+    });
+    for (let i = 0; i < ROUNDS; i++) {
+      const r = await link.send(new Request("http://x/", { method: "PUT", body: bytes(70_000) }));
+      expect(r.status).toBe(204);
+      for (let k = 0; k < 200 && received.length <= i; k++) await tick(5);
+      await settle();
+    }
+    expect(received).toEqual(Array(ROUNDS).fill(70_000));
+  });
+  it("an abort against a handler that never answers gives the port back at once", async () => {
+    let started = 0;
+    const { link } = await linked(async () => {
+      started++;
+      return await new Promise<Response>(() => {});
+    });
+    for (let i = 0; i < ROUNDS; i++) {
+      const controller = new AbortController();
+      const pending = link.send(new Request("http://x/", { signal: controller.signal }));
+      for (let k = 0; k < 100 && started <= i; k++) await tick(2);
+      controller.abort(new Error("gave up"));
+      await expect(pending, `round ${i + 1}`).rejects.toThrow("gave up");
+    }
+    expect(started).toBe(ROUNDS);
+    expect(link.inflight).toBe(0);
+  });
 });

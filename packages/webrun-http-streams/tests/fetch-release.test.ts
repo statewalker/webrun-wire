@@ -1,6 +1,7 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { fetchOverDuplex, serveFetchOverDuplex } from "../src/fetch.js";
+import { httpFetch, httpServe } from "../src/http-data.js";
 
 /**
  * Every exchange ends its call, however it ends.
@@ -432,5 +433,67 @@ describe("every exchange ends its call", () => {
     await expect(fetchOverDuplex(t.call, get())).rejects.toThrow();
     await settle();
     expect(t.open()).toBe(0);
+  });
+  it("a handler that answers first and reads the upload afterwards gets all of it", async () => {
+    const received: number[] = [];
+    let stored!: () => void;
+    const done = new Promise<void>((r) => (stored = r));
+    const t = tracked(
+      serveFetchOverDuplex(async (q) => {
+        void q.arrayBuffer().then((b) => {
+          received.push(b.byteLength);
+          stored();
+        });
+        return new Response("accepted", { status: 202 });
+      }),
+    );
+    for (let i = 0; i < 10; i++) {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await sleep(2);
+          if (n++ === 5) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      const r = await fetchOverDuplex(
+        t.call,
+        new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
+      );
+      expect([r.status, await r.text()]).toEqual([202, "accepted"]);
+    }
+    await done;
+    for (let i = 0; i < 50 && received.length < 10; i++) await sleep(5);
+    await settle();
+    expect(received).toEqual(Array(10).fill(50));
+    expect(t.open()).toBe(0);
+  });
+
+  it("a response delivered in full never calls the handler's release", async () => {
+    let releases = 0;
+    const serve = (framing: "length" | "chunked") =>
+      httpServe(async () => ({
+        envelope: {
+          status: 200,
+          headers: framing === "length" ? [["content-length", "6"]] : [],
+        },
+        body: (async function* () {
+          yield new TextEncoder().encode("abc");
+          yield new TextEncoder().encode("def");
+        })(),
+        release: () => {
+          releases++;
+        },
+      }));
+    for (const framing of ["length", "chunked"] as const) {
+      const t = tracked(serve(framing));
+      const { body } = await httpFetch(t.call, { url: "http://x/", method: "GET", headers: [] });
+      let text = "";
+      for await (const c of body) text += new TextDecoder().decode(c);
+      expect(text).toBe("abcdef");
+      await settle();
+      expect(t.open()).toBe(0);
+    }
+    expect(releases).toBe(0);
   });
 });

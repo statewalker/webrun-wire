@@ -130,6 +130,7 @@ export async function fetchOverDuplex(
     envelope,
     body: respBody,
     release,
+    finish,
   } = await httpFetch(call, env, body, {
     ...options,
     signal: request.signal ?? undefined,
@@ -140,14 +141,17 @@ export async function fetchOverDuplex(
     headers: forwardableHeaders(envelope.headers),
   };
   // `new Response(body, { status })` throws for the null-body-status set, and
-  // HEAD/OPTIONS carry no body either, so return a bodyless Response and
-  // release the call: nobody will read the body, so leaving it cannot.
+  // HEAD/OPTIONS carry no body either, so return a bodyless Response. The
+  // caller has taken it in full: the call is finished as for any body read to
+  // its end — not abandoned, which would cut off an upload the handler is
+  // still reading.
   if (
     request.method === "HEAD" ||
     request.method === "OPTIONS" ||
     NULL_BODY_STATUSES.has(envelope.status)
   ) {
-    await release?.();
+    if (finish) finish();
+    else await release?.();
     return new Response(null, responseInit);
   }
   return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);
@@ -166,9 +170,12 @@ export function serveFetchOverDuplex(
       method: env.method,
       headers: forwardableHeaders(env.headers),
     };
+    let uploadEnded: Promise<void> | undefined;
     if (env.method !== "GET" && env.method !== "HEAD") {
       if (supportsRequestStreams()) {
-        reqInit.body = asyncIterableToReadable(body);
+        const upload = trackingEnd(body);
+        uploadEnded = upload.ended;
+        reqInit.body = asyncIterableToReadable(upload.source);
         (reqInit as RequestInit & { duplex?: string }).duplex = "half";
       } else {
         // Firefox again, and this is the half that fails *silently*. The
@@ -187,6 +194,21 @@ export function serveFetchOverDuplex(
     }
     const request = new Request(env.url, reqInit);
     const response = await handler(request);
+    // Once the response is out, the exchange ends when the handler is done
+    // with the request body too: a handler may answer first and read the
+    // upload afterwards (`202`, then store it). One it never took — not used,
+    // not locked — it will not read: cancel it, and the exchange ends now.
+    const settled = async () => {
+      if (!uploadEnded) return;
+      if (!request.bodyUsed && !request.body?.locked) {
+        try {
+          await request.body?.cancel();
+        } catch {
+          /* already finished */
+        }
+      }
+      await uploadEnded;
+    };
     const respEnv: ResponseEnvelope = {
       status: response.status,
       statusText: response.statusText,
@@ -202,7 +224,7 @@ export function serveFetchOverDuplex(
       NULL_BODY_STATUSES.has(response.status)
     ) {
       await response.body?.cancel();
-      return { envelope: respEnv, body: undefined };
+      return { envelope: respEnv, body: undefined, settled };
     }
     return {
       envelope: respEnv,
@@ -211,8 +233,50 @@ export function serveFetchOverDuplex(
       // through; cancel the stream itself. Once read, it is locked and this
       // rejects, harmlessly: the reader's own cancellation has run.
       release: () => response.body?.cancel(),
+      settled,
     };
   }, options);
+}
+
+/**
+ * `source`, and a promise that resolves once it is done: read to its end,
+ * failed, or abandoned — `return()` included before the first `next()`, which
+ * a generator's `finally` would not see.
+ */
+function trackingEnd(source: AsyncIterable<Uint8Array>): {
+  source: AsyncIterable<Uint8Array>;
+  ended: Promise<void>;
+} {
+  let end: () => void = () => {};
+  const ended = new Promise<void>((resolve) => {
+    end = resolve;
+  });
+  const it = source[Symbol.asyncIterator]();
+  const tracked: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return tracked;
+    },
+    async next() {
+      try {
+        const r = await it.next();
+        if (r.done) end();
+        return r;
+      } catch (error) {
+        end();
+        throw error;
+      }
+    },
+    async return(value?: unknown) {
+      end();
+      try {
+        await it.return?.(value);
+      } catch {
+        /* abandoned either way */
+      }
+      return { done: true, value: undefined };
+    },
+  };
+  return { source: tracked, ended };
 }
 
 async function* withAbort(
