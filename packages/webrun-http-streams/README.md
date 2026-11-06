@@ -138,26 +138,39 @@ Both take an optional last argument `{ codec }`. `fetchOverDuplex` plumbs
 `request.signal` into body iteration, so aborting the signal ends the call. An
 already-aborted signal rejects before anything is sent.
 
-On the serving side, the handler's `request.signal` aborts when the caller abandons the
-exchange — it aborted its fetch, stopped reading, or its transport went away — with
-`webrun-http-streams: the caller abandoned the exchange` (`EXCHANGE_ABANDONED_MESSAGE`). A
-handler that waits before it answers can stop then instead of holding on for nothing:
+On the serving side, the handler's `request.signal` aborts when the exchange is abandoned before
+it is over — the caller aborted its fetch, stopped reading, or its transport went away, or the
+serving side tore the stream down (its timeout, a shutdown) — with `webrun-http-streams: the
+exchange was abandoned before it was over` (`EXCHANGE_ABANDONED_MESSAGE`). A handler that waits
+before it answers can stop then instead of holding on for nothing:
 
 ```ts
+import { serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
+
 // A long poll: answer in 30 s, or stop at once when the caller leaves.
-const call = serveFetchOverDuplex(async (request) => {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, 30_000);
-    request.signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
+const handler = serveFetchOverDuplex(async (request) => {
+  if (!request.signal.aborted) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 30_000);
+      request.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
     });
-  });
+  }
   return new Response(request.signal.aborted ? null : "news");
 });
 ```
 
-It never aborts once the response went out in full.
+Check `signal.aborted` before waiting: the exchange may already be abandoned when the handler
+runs. The exchange is over once the response went out in full and the handler is done with the
+request body; until then it can still be abandoned, so a handler that answers `202` first and
+reads the upload afterwards sees an abort if the upload is cut. A completed exchange never aborts.
+`newHttpServerStub` builds its requests without this signal.
 
 ### Site host: `DuplexSiteBuilder`
 

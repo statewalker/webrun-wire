@@ -590,7 +590,7 @@ An abort unwinds a producing handler through `iter.return()`, not by throwing in
 `catch` never sees the abort reason; only `finally` runs. Put cleanup in `finally`.
 
 `serve` forwards that `return()` to the handler's output at once, even while the handler is still
-working on its first chunk. Its own tracking wrapper would otherwise queue it behind that pending
+working on its first chunk, with or without `maxMessageSize` (whose chunker would queue it too). Its own tracking wrapper would otherwise queue it behind that pending
 `next()`, as any async generator does. A handler that wraps its output to watch for `return()`
 therefore sees the abandonment when it happens, not when it next yields:
 `@statewalker/webrun-http-streams` aborts the served `Request.signal` that way.

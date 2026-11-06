@@ -44,7 +44,9 @@ describe("the served Request's signal", () => {
     await until(() => seen.signal != null);
     void output()?.return(undefined); // as a transport does: not awaited
     await until(() => seen.signal?.aborted === true);
-    expect(String((seen.signal?.reason as Error | undefined)?.message)).toContain("abandoned");
+    expect(String((seen.signal?.reason as Error | undefined)?.message)).toContain(
+      "abandoned before it was over",
+    );
   });
 
   it("aborts when the caller's own fetch is aborted before the answer", async () => {

@@ -92,21 +92,30 @@ export interface HttpDataHandlerResult {
 export type HttpDataHandler = (
   env: RequestEnvelope,
   body: AsyncIterable<Uint8Array>,
-  exchange?: HttpExchange,
+  exchange: HttpExchange,
 ) => Promise<HttpDataHandlerResult>;
 
 /** What a handler is told about the exchange it serves. */
 export interface HttpExchange {
   /**
-   * Aborts when the caller abandons the exchange before its response went out
-   * in full — it gave up, or its transport went away — so a handler that waits
-   * before it answers (a long poll) can stop. Never once the response is out.
+   * Aborts when the exchange is abandoned before it is over: the caller gave
+   * up or its transport went away, or the serving side tore the stream down
+   * (its own timeout, a shutdown). A handler that waits before it answers (a
+   * long poll) can stop then. The exchange is over once the response went out
+   * in full and the handler is done with the request body: a handler that
+   * answers first and reads the upload afterwards still sees an abort if the
+   * upload is cut. A completed exchange never aborts.
    */
   signal: AbortSignal;
 }
 
-/** The reason of `HttpExchange.signal` when the caller abandons the exchange. */
-export const EXCHANGE_ABANDONED_MESSAGE = "webrun-http-streams: the caller abandoned the exchange";
+/**
+ * The reason of `HttpExchange.signal` when the exchange is abandoned with no
+ * error of its own (`return()`); one abandoned by `throw(error)` aborts with
+ * that error.
+ */
+export const EXCHANGE_ABANDONED_MESSAGE =
+  "webrun-http-streams: the exchange was abandoned before it was over";
 
 /** Hard cap on the peer-error header (M3): see `encodeErrorResponse`. */
 const MAX_DETAIL_CHARS = 4096;
