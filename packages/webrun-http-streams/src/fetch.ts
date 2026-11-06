@@ -339,25 +339,25 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
  * reads the body. The listener is removed once the body ends, however it ends:
  * read to its end, cancelled, failed or aborted. A body nobody reads or cancels
  * keeps it until the signal aborts (and keeps the call open until then anyway).
+ * A cancel abandons the call the same way, a read in flight or not.
  */
 function responseBody(
   body: AsyncIterable<Uint8Array>,
   signal: AbortSignal | undefined,
   release: (() => Promise<void>) | undefined,
 ): ReadableStream<Uint8Array> {
-  if (!signal) return asyncIterableToReadable(body);
   const it = body[Symbol.asyncIterator]();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
   const end = () => {
     ended = true;
-    signal.removeEventListener("abort", onAbort);
+    signal?.removeEventListener("abort", onAbort);
   };
   const onAbort = () => {
     if (ended) return;
     end();
     try {
-      controller.error(abortReason(signal));
+      controller.error(abortReason(signal as AbortSignal));
     } catch {
       /* already closed or errored */
     }
@@ -366,8 +366,8 @@ function responseBody(
   return new ReadableStream<Uint8Array>({
     start(c) {
       controller = c;
-      if (signal.aborted) onAbort();
-      else signal.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
     },
     async pull(c) {
       try {
@@ -385,9 +385,13 @@ function responseBody(
         c.error(err);
       }
     },
-    async cancel() {
+    cancel() {
       end();
-      await it.return?.();
+      // Abandon the call here: with a read in flight, `it.return()` is queued behind it, and a
+      // peer that sends nothing more never answers that read. Releasing the call ends it (on
+      // webrun-rpc at once), which then lets `it` end too; the cancel does not wait for that.
+      void release?.();
+      void Promise.resolve(it.return?.()).catch(() => {});
     },
   });
 }

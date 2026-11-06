@@ -451,6 +451,19 @@ describe("every exchange ends its call", () => {
     expect(Date.now() - t0).toBeLessThan(100);
   });
 
+  it("a body cancelled while a read waits for a quiet peer: the cancel does not wait for the peer", async () => {
+    const t = tracked(serveFetchOverDuplex(async () => quiet()));
+    const response = await fetchOverDuplex(t.call, get());
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    expect((await reader.read()).value?.byteLength).toBe(8);
+    const pending = reader.read();
+    await sleep(10);
+    const t0 = Date.now();
+    await reader.cancel();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
+
   it("an abort while nobody reads the body errors it with the abort's reason", async () => {
     const state = { cancelled: false };
     const t = tracked(serveFetchOverDuplex(async () => endless(state)));

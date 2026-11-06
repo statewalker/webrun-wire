@@ -298,6 +298,39 @@ describe("a link gives every request's port back", () => {
     expect(link.inflight).toBe(0);
   });
 
+  for (const abortAfter of [false, true]) {
+    it(`a body cancelled while a read waits for a quiet peer gives the port back${abortAfter ? ", an abort after it too" : ""}`, async () => {
+      const { link } = await linked(async () => {
+        let sent = false;
+        return new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              async pull(controller) {
+                if (sent) return await new Promise<void>(() => {});
+                sent = true;
+                controller.enqueue(bytes(8));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        );
+      });
+      for (let i = 0; i < ROUNDS; i++) {
+        const controller = new AbortController();
+        const response = await link.send(new Request("http://x/", { signal: controller.signal }));
+        const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+        expect((await reader.read()).value?.byteLength).toBe(8);
+        const pending = reader.read();
+        await tick(2);
+        await reader.cancel();
+        expect(await pending).toEqual({ done: true, value: undefined });
+        if (abortAfter) controller.abort();
+        await settle();
+      }
+      expect(link.inflight).toBe(0);
+    });
+  }
+
   it("an abort while nobody reads the body gives the port back", async () => {
     const { link } = await linked(async () => endless());
     for (let i = 0; i < ROUNDS; i++) {
