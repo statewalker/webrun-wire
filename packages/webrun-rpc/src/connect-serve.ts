@@ -197,6 +197,8 @@ export interface OverPipeOptions {
   maxMessageSize?: number;
   /** The pipe's life: aborting it closes the mux. See `PortMuxOptions.signal`. */
   signal?: AbortSignal;
+  /** Experimental per-port flow control in bytes — see `PortMuxOptions.window`. */
+  window?: number;
 }
 
 /**

@@ -223,3 +223,53 @@ describe("msgpackCodec — what it refuses, without throwing", () => {
     expect(msgpackCodec.read(event(port2.sent[0]))).toBeUndefined();
   });
 });
+
+describe("msgpackCodec — exact sizes for a port's window", () => {
+  it("prepare encodes once and reports the frame's byte length; size reads it back", () => {
+    const envelope: PortEnvelope = { type: "message", id: 2, payload: new Uint8Array(100) };
+    const prepared = msgpackCodec.prepare?.(envelope);
+    expect(prepared?.size).toBe(serialize(envelope).byteLength);
+    const port = recordingPort();
+    prepared?.post(port);
+    expect(port.sent[0]).toEqual(serialize(envelope));
+    expect(msgpackCodec.size?.(event(port.sent[0]))).toBe(prepared?.size);
+  });
+
+  it("a window counts the encoded bytes, envelope included", async () => {
+    const { multiplexPort } = await import("@statewalker/webrun-rpc");
+    const channel = new MessageChannel();
+    let got = 0;
+    const frame = serialize({ type: "message", id: 0, payload: new Uint8Array(100) }).byteLength;
+    // Two frames fit; a third would not, though three 100-byte payloads would.
+    const window = 2 * frame + 50;
+    expect(3 * 100).toBeLessThan(window);
+    const a = multiplexPort(channel.port1, { codec: msgpackCodec, side: "initiator", window });
+    const b = multiplexPort(channel.port2, {
+      codec: msgpackCodec,
+      side: "responder",
+      onPort: (p) => {
+        p.addEventListener("message", () => {
+          got++;
+          return new Promise(() => {}); // never consumed
+        });
+        return true;
+      },
+    });
+    try {
+      const port = await a.openPort();
+      const deadline = Date.now() + 2000;
+      while (a.ports?.()[0]?.window == null && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      for (let i = 0; i < 5; i++) port.postMessage(new Uint8Array(100));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(got).toBe(2);
+      expect(a.ports?.()[0]?.outstanding).toBe(2 * frame);
+      expect(b.ports?.()[0]?.unconsumed).toBe(2 * frame);
+    } finally {
+      await Promise.allSettled([a.close(), b.close()]);
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+});

@@ -8,9 +8,11 @@ import type { MessageTarget } from "./message-target.js";
  * because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown }
+  | { type: "open"; id: number; meta?: unknown; window?: number }
   | { type: "message"; id: number; payload: unknown }
-  | { type: "close"; id: number; reason?: unknown };
+  | { type: "close"; id: number; reason?: unknown }
+  /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
+  | { type: "credit"; id: number; bytes: number };
 
 /**
  * How an envelope reaches the wire.
@@ -25,6 +27,17 @@ export interface PortCodec {
   post(port: MessageTarget, envelope: PortEnvelope, transfer?: Transferable[]): void;
   /** Recover an envelope from a message event, or `undefined` to ignore it. */
   read(event: MessageEvent): PortEnvelope | undefined;
+  /**
+   * Optional, with `size`: encode `envelope` once and report its exact size
+   * on the wire. A port with a window then counts real bytes instead of an
+   * estimate. `post` places the prepared envelope on the port.
+   */
+  prepare?(
+    envelope: PortEnvelope,
+    transfer?: Transferable[],
+  ): { size: number; post(port: MessageTarget): void };
+  /** Optional, with `prepare`: the wire size of a received message event. */
+  size?(event: MessageEvent): number;
 }
 
 export interface PortMuxOptions {
@@ -75,6 +88,25 @@ export interface PortMuxOptions {
    * pipe that dies silently otherwise leaves every port open, forever.
    */
   signal?: AbortSignal;
+  /**
+   * Per-port flow control, in bytes (off when unset). A port this mux opens
+   * asks for it in its `open`; the peer's mux then applies it to that port in
+   * both directions. Each side may have at most `window` bytes of a port's
+   * messages delivered but not yet consumed by the other side; what exceeds
+   * it waits in the port's send queue (`portBufferedAmount`,
+   * `whenPortReady`). A message counts as consumed once every listener has
+   * returned, or, for a listener that returns a promise, once it settles: a
+   * slow consumer holds its own port's budget, and no other port's.
+   *
+   * A message's size is its byte length (`ArrayBuffer`, typed arrays), a
+   * string's length, or for an object the sizes of its values (4 levels deep,
+   * at most 256 values), and at least 64. A message
+   * larger than the window is sent when nothing else is outstanding.
+   *
+   * Both ends must support it: an old peer never sends credit, and a port
+   * that asked for a window then stalls once the window is spent.
+   */
+  window?: number;
 }
 
 /** What `PortMux.ports()` reports for one open port. */
@@ -85,6 +117,21 @@ export interface PortInfo {
   openedAt: number;
   /** `Date.now()` of the last message in either direction. */
   lastActivity: number;
+  /**
+   * The window in force, once the peer acknowledged it. Absent on a port that
+   * asked for one from a peer that never answers credit (an older version).
+   */
+  window?: number;
+  /** With a window: bytes waiting in this port's send queue. */
+  queued?: number;
+  /** With a window: bytes sent and not yet granted back by the peer. */
+  outstanding?: number;
+  /**
+   * With a window: bytes delivered to this side's listeners and not yet
+   * consumed. A value that stays up names a listener whose promise never
+   * settles, which holds the port's window spent.
+   */
+  unconsumed?: number;
 }
 
 export interface OpenPortOptions {

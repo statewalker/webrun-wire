@@ -4,8 +4,12 @@ import type { MessageListener, MessageTarget } from "./message-target.js";
 export interface VirtualPortHandle {
   /** The consumer-facing end. Indistinguishable from a real `MessagePort`. */
   port: MessageTarget;
-  /** Multiplexer-only: hand an inbound payload to the consumer's listeners. */
-  deliver(payload: unknown): void;
+  /**
+   * Multiplexer-only: hand an inbound payload to the consumer's listeners.
+   * Returns a promise when a listener returned one (settled once they all
+   * have), so flow control can count the message as consumed only then.
+   */
+  deliver(payload: unknown, size?: number): Promise<unknown> | undefined;
   /**
    * Multiplexer-only: the port is finished; drop listeners and go inert.
    * `reason` becomes the reason of the port's close signal (see
@@ -73,16 +77,22 @@ export function newVirtualPort(
     deliver(payload) {
       if (closed) return;
       const event = new MessageEvent("message", { data: payload });
+      let pending: PromiseLike<unknown>[] | undefined;
       // Copy first: a listener may add or remove listeners while running.
       for (const listener of [...listeners]) {
         try {
-          void listener(event);
+          const result = listener(event) as unknown;
+          if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+            pending ??= [];
+            pending.push(result as PromiseLike<unknown>);
+          }
         } catch {
           // One consumer's fault is not the multiplexer's. Swallowing here
           // keeps a thrown listener from killing the inbound loop and every
           // other port with it.
         }
       }
+      return pending ? Promise.allSettled(pending) : undefined;
     },
     markClosed(reason) {
       closed = true;

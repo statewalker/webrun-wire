@@ -50,7 +50,7 @@ describe("newPubSubClient", () => {
     });
     client.subscribe("build", () => {});
     expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0]!.url).toBe("http://h/_events/build");
+    expect(FakeEventSource.instances[0]?.url).toBe("http://h/_events/build");
   });
 
   it("parses the JSON payload and reports the event id", () => {
@@ -60,7 +60,7 @@ describe("newPubSubClient", () => {
     });
     const seen: Array<[unknown, number]> = [];
     client.subscribe("build", (data, e) => seen.push([data, e.id]));
-    FakeEventSource.instances[0]!.emit("message", '{"changed":["/a.html"]}', "4");
+    FakeEventSource.instances[0]?.emit("message", '{"changed":["/a.html"]}', "4");
     expect(seen).toEqual([[{ changed: ["/a.html"] }, 4]]);
   });
 
@@ -71,7 +71,7 @@ describe("newPubSubClient", () => {
     });
     const off = client.subscribe("build", () => {});
     off();
-    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+    expect(FakeEventSource.instances[0]?.closed).toBe(true);
   });
 
   // (4) the client half of the gap contract
@@ -84,7 +84,7 @@ describe("newPubSubClient", () => {
     });
     const seen: unknown[] = [];
     client.subscribe("build", (d) => seen.push(d));
-    FakeEventSource.instances[0]!.emit("gap", '{"from":1}');
+    FakeEventSource.instances[0]?.emit("gap", '{"from":1}');
     expect(onGap).toHaveBeenCalledWith("build");
     expect(seen).toEqual([]);
   });
@@ -105,7 +105,7 @@ describe("newPubSubClient — event names", () => {
   it("listens for `message` and nothing else by default", () => {
     const client = newClient();
     client.subscribe("build", () => {});
-    expect(FakeEventSource.instances[0]!.listenerTypes()).toEqual([
+    expect(FakeEventSource.instances[0]?.listenerTypes()).toEqual([
       "error",
       "gap",
       "message",
@@ -117,7 +117,7 @@ describe("newPubSubClient — event names", () => {
     const client = newClient();
     const seen: Array<[unknown, string | undefined]> = [];
     client.subscribe("build", (d, e) => seen.push([d, e.event]), { events: ["cell-done"] });
-    FakeEventSource.instances[0]!.emit("cell-done", '{"cell":3}', "9");
+    FakeEventSource.instances[0]?.emit("cell-done", '{"cell":3}', "9");
     expect(seen).toEqual([[{ cell: 3 }, "cell-done"]]);
   });
 
@@ -125,8 +125,8 @@ describe("newPubSubClient — event names", () => {
     const client = newClient({ events: ["message", "rebuilt"] });
     const seen: unknown[] = [];
     client.subscribe("build", (d) => seen.push(d));
-    FakeEventSource.instances[0]!.emit("rebuilt", '{"n":1}');
-    FakeEventSource.instances[0]!.emit("message", '{"n":2}');
+    FakeEventSource.instances[0]?.emit("rebuilt", '{"n":1}');
+    FakeEventSource.instances[0]?.emit("message", '{"n":2}');
     expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
   });
 
@@ -134,7 +134,7 @@ describe("newPubSubClient — event names", () => {
     const client = newClient();
     const off = client.subscribe("build", () => {}, { events: ["message", "cell-done"] });
     off();
-    expect(FakeEventSource.instances[0]!.listenerTypes()).toEqual([]);
+    expect(FakeEventSource.instances[0]?.listenerTypes()).toEqual([]);
   });
 });
 
@@ -151,8 +151,8 @@ describe("newPubSubClient — a dead subscription", () => {
       onOpen,
     });
     client.subscribe("build", () => {});
-    FakeEventSource.instances[0]!.emitBare("open");
-    FakeEventSource.instances[0]!.emitBare("error");
+    FakeEventSource.instances[0]?.emitBare("open");
+    FakeEventSource.instances[0]?.emitBare("error");
     expect(onOpen).toHaveBeenCalledWith("build");
     expect(onError).toHaveBeenCalledWith("build", expect.objectContaining({ type: "error" }));
   });
