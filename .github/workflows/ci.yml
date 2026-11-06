@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only by default: `ci` and `browser` install and run dependency code. The release jobs below
+# declare the extra permissions each one needs.
+permissions:
+  contents: read
+
 jobs:
   ci:
     uses: statewalker/.github/.github/workflows/ci.yml@main

@@ -4,9 +4,10 @@ Packages are published to npm from CI with changesets. Nobody runs `changeset ve
 `changeset publish` by hand.
 
 1. CI runs on every push to `main`.
-2. After CI passes, a job compares each package's packed contents with the version on npm. For
-   every package that differs it writes a changeset: a patch bump, or a minor bump on a 0.x package
-   when one of its dependencies crosses a breaking line.
+2. After CI passes, a job writes a changeset for every package whose packed files or published
+   manifest (dependency ranges, `exports`) differ from npm's `latest`: a patch, or a minor on a 0.x
+   package when one of its dependencies moves to another breaking line. Dependents of a package that
+   crosses a breaking line get the same minor. A package with a changeset you wrote keeps yours.
 3. The job opens (or updates) a "chore: version packages" pull request with the version bumps and
    `CHANGELOG.md` entries.
 4. Merging that pull request packs every package whose version is not on npm yet. Nothing is
@@ -15,26 +16,36 @@ Packages are published to npm from CI with changesets. Nobody runs `changeset ve
 
 The checks do not run on the version pull request itself (GitHub Actions opened it); they run
 again on `main` after the merge, before anything is packed. The release waits for both the shared
-CI and the browser suites.
+CI and the `webrun-http-browser` browser suites (Chromium and Firefox); the other packages' browser
+suites are not run in CI.
 
 ## No npm token: trusted publishing
 
 GitHub holds no npm token. The `publish` job authenticates with npm trusted publishing (OIDC). Each
 package's trusted publisher names `statewalker/webrun-wire`, `ci.yml` and the `npm` environment, so
 a run that skips the approval cannot publish. Only `publish` may request an identity token, and it
-never installs or builds, so no dependency code runs where a publish token can be obtained.
+never checks out, installs the workspace's dependencies or builds; the only thing it installs is a
+pinned npm (trusted publishing needs 11.5.1 or later).
 
 A trusted publisher can only be added to a package that already exists, so a **new package's first
-version is published by hand** with the maintainer's 2FA (`pnpm pack` in the package, then
-`npm publish <tarball> --access public`), followed by:
+version is published by hand** with the maintainer's 2FA, logged in with `npm login` (npm 11 or
+later):
+
+1. Build it: `pnpm --filter @statewalker/<name>... run build`. Most packages build only in
+   `prepublishOnly`, which `pnpm pack` does not run; packing an unbuilt package ships no `dist/`.
+2. `pnpm pack` in the package, then `npm publish <tarball> --access public`. `pnpm pack` turns
+   `workspace:` and `catalog:` ranges into versions; publishing the folder directly would not.
+3. Add the trusted publisher:
 
 ```bash
 npm trust github @statewalker/<name> --repo statewalker/webrun-wire --file ci.yml --env npm --allow-publish
 ```
 
-Without it, `publish` fails with `E404 Not Found - PUT https://registry.npmjs.org/@statewalker%2f<name>`:
-npm reports a missing trusted publisher as "not found", not as a permission error. Re-run the failed
-job once the publisher is added; it reuses the packed tarballs and skips versions already on npm.
+If the package does not exist on npm yet, or has no trusted publisher, `publish` fails with
+`npm error 404 Not Found - PUT https://registry.npmjs.org/@statewalker%2f<name> - Not found`: npm
+reports a missing package or trusted publisher as "not found", not as a permission error. Publish the
+first version and add the publisher, then re-run the failed `publish` job (it needs the approval
+again); it reuses the packed tarballs and skips versions already on npm.
 
 ## Choosing the bump or the changelog text yourself
 
@@ -57,10 +68,18 @@ none of these packages makes yet. So:
   summary and the commit marked `!` (for example `feat(streams)!:`).
 - `major` applies once a package reaches `1.0.0`.
 
-## Why `updateInternalDependencies` is `minor`
+## Why a dependency's break bumps its dependents by minor
 
-`.changeset/config.json` sets `updateInternalDependencies` to `minor`, not the changesets default
-`patch`. Most packages depend on `@statewalker/webrun-streams`. Under `patch`, a breaking change in
-`webrun-streams` would reach every one of them as a patch release, a bump semver tells consumers is
-always safe, carrying an incompatible wire protocol. `minor` puts the break outside a `^0.x.y`
-range, so a consumer has to opt in. Do not lower it without a replacement mechanism.
+Most packages depend on `@statewalker/webrun-streams`. `.changeset/config.json` keeps
+`updateInternalDependencies` at the changesets default `patch`: when a package is released,
+changesets moves its dependents' `workspace:^` ranges to the new version and gives each of them a
+patch release. On its own, that would let a breaking `webrun-streams` release (`0.2.3` -> `0.3.0`)
+reach every dependent as a patch, which a consumer on `^0.x.y` installs automatically, carrying an
+incompatible wire protocol.
+
+The changeset job prevents this. When a package crosses a breaking line (a `minor` on 0.x, whether
+the job wrote that changeset or you did), every package that depends on it through `workspace:`, as
+a runtime or peer dependency, gets the same breaking bump. The break stays outside its consumers'
+ranges, so they have to opt in. If you write the changeset for a break yourself, you do not need to
+bump the dependents: the job adds their `minor` changesets (`.changeset/auto-*.md`) to the version
+pull request.
