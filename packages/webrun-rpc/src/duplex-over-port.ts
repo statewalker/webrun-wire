@@ -43,7 +43,7 @@ const CHUNK = "webrun-rpc:chunk";
 const CHUNK_OVERHEAD = 32;
 
 /** This end may pipeline its own chunks: agreed, and the window holds them. */
-const pipelined = (port: MessageTarget): boolean => {
+const mayPipeline = (port: MessageTarget): boolean => {
   const agreement = portAgreement(port);
   return !!agreement?.enforced && agreement.caps.has("pipeline");
 };
@@ -455,6 +455,8 @@ function receiveChunks(
       | undefined;
     if (data?.type !== CHUNK || data.channelName !== channelName || !data.chunk) return;
     if (poison) return;
+    // Agreed is enough here, unlike for sending: the peer pipelines only once
+    // the window holds its own sends, and agreeing told it that it may.
     const agreement = portAgreement(port);
     if (!agreement?.caps.has("pipeline")) {
       violate("webrun-rpc: peer sent a pipelined chunk where pipelining was not agreed");
@@ -561,10 +563,12 @@ async function sendChunks(
   const returnProducer = () => void Promise.resolve(producer.return?.()).catch(() => {});
   if (framed !== output) signal.addEventListener("abort", returnProducer, { once: true });
   // A pipelined sender waits only for room in the window, or for the abort.
+  let onAborted = () => {};
   const aborted = new Promise<void>((resolve) => {
-    if (signal.aborted) resolve();
-    else signal.addEventListener("abort", () => resolve(), { once: true });
+    onAborted = () => resolve();
   });
+  if (signal.aborted) onAborted();
+  else signal.addEventListener("abort", onAborted, { once: true });
   try {
     await sendIterator<Uint8Array>(async ({ done, value, error }) => {
       if (signal.aborted) return;
@@ -576,7 +580,7 @@ async function sendChunks(
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });
       // Decided per chunk: acknowledged calls until `pipeline` is agreed (the
       // opener learns it from the ack), plain messages from then on.
-      if (pipelined(port)) {
+      if (mayPipeline(port)) {
         port.postMessage({ type: CHUNK, channelName, chunk });
         touch();
         if (portBufferedAmount(port) > 0) await Promise.race([whenPortReady(port), aborted]);
@@ -596,5 +600,6 @@ async function sendChunks(
     throw err;
   } finally {
     signal.removeEventListener("abort", returnProducer);
+    signal.removeEventListener("abort", onAborted);
   }
 }

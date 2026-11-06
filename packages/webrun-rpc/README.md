@@ -344,7 +344,7 @@ each end counts bytes but holds nothing back, so a port to an older peer, or ove
 keeps running without flow control, as it always did; `ports()` reports `window` only once it is
 in force. A peer's `window` that is not a positive integer is ignored.
 
-**Capabilities.** A windowed `open` also lists `caps: ["pipeline"]`, what this mux speaks on the
+**A windowed port agrees capabilities in its handshake.** A windowed `open` also lists `caps: ["pipeline"]`, what this mux speaks on the
 port, and the responder's ack answers with the subset both speak, only to an opener that listed
 some: an older peer never receives a `caps` it could misread. There is no option to offer fewer.
 `duplexOverPort` reads the agreement (see "Flow control is one chunk, or the window where both
@@ -575,7 +575,7 @@ The cost: single-stream throughput is `chunk ÷ RTT`. In-process that is negligi
 round trip, a 10 MiB body in 12 KiB chunks is 854 sequential round trips, about 43 s.
 
 **On a port whose window both ends speak, chunks are pipelined.** Once the port's handshake has
-agreed `pipeline` (see "Capabilities" above) and the window holds this end's sends, each chunk
+agreed `pipeline` (see "A windowed port agrees capabilities in its handshake" above) and the window holds this end's sends, each chunk
 leaves as a plain message, `{ type: "webrun-rpc:chunk", channelName, chunk }`, with no
 confirmation of its own; the sender waits only for `whenPortReady`. The receiver's listener
 settles once its consumer pulls past the chunk, so the window's credit is the confirmation, and a
@@ -584,7 +584,7 @@ producer stopping about one window ahead. Until the agreement is known (the open
 the ack; the responder's own sends wait for the opener's answer) chunks go as confirmed calls, so
 the handshake adds no round trip to the first chunk. Chunks, results and errors are the same
 either way, an error still in the last chunk. Over `overPipe` without `window`, over
-`transferPortMux` and over a peer that answers no capabilities, nothing changes.
+`transferPortMux` and with a peer that answers no capabilities, every chunk is a confirmed call.
 
 A pipelining peer is held to two rules, each failing that stream and closing its port, holding
 nothing more:
