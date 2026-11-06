@@ -1,5 +1,13 @@
 # @statewalker/webrun-streams-libp2p
 
+## 0.1.8
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams ^0.2.2 -> ^0.2.3
+
 ## 0.1.7
 
 ### Patch Changes
