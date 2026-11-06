@@ -339,8 +339,17 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
  * reads the body. The listener is removed once the body ends, however it ends:
  * read to its end, cancelled, failed or aborted. A body nobody reads or cancels
  * keeps it until the signal aborts (and keeps the call open until then anyway).
- * A cancel abandons the call the same way, a read in flight or not.
+ * A cancel abandons the call too — unless the read in flight comes back with the
+ * body's end, which finishes it instead (see `cancel`).
  */
+/**
+ * How long a cancelled body waits for the read in flight before it abandons the call anyway.
+ * The read's answer tells a body that has ended (the call is finished: an upload the handler
+ * reads after answering goes on) from one that has not; a peer that sends nothing more never
+ * answers it.
+ */
+const CANCEL_GRACE_MS = 1_000;
+
 function responseBody(
   body: AsyncIterable<Uint8Array>,
   signal: AbortSignal | undefined,
@@ -349,6 +358,7 @@ function responseBody(
   const it = body[Symbol.asyncIterator]();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
+  let reading = false;
   const end = () => {
     ended = true;
     signal?.removeEventListener("abort", onAbort);
@@ -371,8 +381,11 @@ function responseBody(
     },
     async pull(c) {
       try {
-        const { done, value } = await it.next();
-        if (ended) return; // aborted while this read waited: the stream has its reason
+        reading = true;
+        const { done, value } = await it.next().finally(() => {
+          reading = false;
+        });
+        if (ended) return; // aborted or cancelled while this read waited
         if (done) {
           end();
           c.close();
@@ -387,11 +400,16 @@ function responseBody(
     },
     cancel() {
       end();
-      // Abandon the call here: with a read in flight, `it.return()` is queued behind it, and a
-      // peer that sends nothing more never answers that read. Releasing the call ends it (on
-      // webrun-rpc at once), which then lets `it` end too; the cancel does not wait for that.
-      void release?.();
-      void Promise.resolve(it.return?.()).catch(() => {});
+      const returned = Promise.resolve(it.return?.()).catch(() => {});
+      if (!reading) return; // `it` is at rest: its return abandons the call (releasingOnExit)
+      // A read is in flight, and `it.return()` is queued behind it: that read's answer decides.
+      // The body's end → the call is finished, not abandoned, so an upload the handler reads
+      // after answering goes on; a chunk → the return then abandons the call. A peer that never
+      // answers (sends nothing more, for good) would hold the call forever: abandon it after a
+      // grace, without waiting in `cancel()` either way.
+      const grace = setTimeout(() => void release?.(), CANCEL_GRACE_MS);
+      (grace as { unref?: () => void }).unref?.();
+      void returned.finally(() => clearTimeout(grace));
     },
   });
 }

@@ -315,21 +315,60 @@ describe("a link gives every request's port back", () => {
           ),
         );
       });
-      for (let i = 0; i < ROUNDS; i++) {
+      // The quiet peer never answers the read in flight: the call is abandoned after the
+      // cancel's grace (1 s). Five rounds against a ceiling of two: one port kept fails round 3.
+      for (let i = 0; i < 5; i++) {
         const controller = new AbortController();
         const response = await link.send(new Request("http://x/", { signal: controller.signal }));
         const reader = (response.body as ReadableStream<Uint8Array>).getReader();
         expect((await reader.read()).value?.byteLength).toBe(8);
         const pending = reader.read();
         await tick(2);
+        const t0 = Date.now();
         await reader.cancel();
+        expect(Date.now() - t0).toBeLessThan(100); // the cancel does not wait for the peer
         expect(await pending).toEqual({ done: true, value: undefined });
         if (abortAfter) controller.abort();
+        await tick(1_100);
         await settle();
       }
       expect(link.inflight).toBe(0);
-    });
+    }, 30_000);
   }
+
+  it("a body cancelled just after its last chunk leaves the handler the rest of the upload", async () => {
+    const received: number[] = [];
+    const { link } = await linked(async (q) => {
+      void q.arrayBuffer().then(
+        (b) => received.push(b.byteLength),
+        () => received.push(-1),
+      );
+      return new Response("accepted", { status: 202 });
+    });
+    for (let delay = 0; delay < 10; delay++) {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await tick(2);
+          if (n++ === 5) c.close();
+          else c.enqueue(bytes(10));
+        },
+      });
+      const response = await link.send(
+        new Request("http://x/", { method: "POST", body, duplex: "half" } as RequestInit),
+      );
+      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      expect((await reader.read()).value?.byteLength).toBe(8);
+      for (let k = 0; k < delay; k++) await Promise.resolve();
+      await reader.cancel();
+      for (let k = 0; k < 100 && received.length <= delay; k++) await tick(5);
+    }
+    // Every upload reached the handler whole: the cancel came after the body's end was on its
+    // way, so the call was finished, not abandoned.
+    expect(received).toEqual(Array(10).fill(50));
+    await settle();
+    expect(link.inflight).toBe(0);
+  });
 
   it("an abort while nobody reads the body gives the port back", async () => {
     const { link } = await linked(async () => endless());
