@@ -254,3 +254,18 @@ describe("review fixes (#48)", () => {
     expect(got).toEqual(["plain"]);
   });
 });
+
+describe("frameSize validation", () => {
+  it.each([0, -1, 1.5, Number.NaN])(
+    "refuses frameSize %s instead of hanging",
+    async (frameSize) => {
+      const { port1, port2 } = new MessageChannel();
+      try {
+        expect(() => multiplexPort(port1, { codec: msgpackCodec, frameSize })).toThrow(RangeError);
+      } finally {
+        port1.close();
+        port2.close();
+      }
+    },
+  );
+});

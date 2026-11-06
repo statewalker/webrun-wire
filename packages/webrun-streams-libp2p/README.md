@@ -55,9 +55,12 @@ runs (Node or browser).
 | `serve(params, handler)` | `Serve<ServeLibp2pParams>`. `node.handle(protocol)`; runs `handler` per inbound stream. Resolves to an idempotent teardown that calls `node.unhandle(protocol)`. |
 | `serveConnections(params, makeHandler)` | Like `serve`, but `makeHandler(context)` is called once per inbound stream with `{ remotePeer }`, and returns that stream's `Duplex`. |
 | `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
+| `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
+| `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
+| `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
 | `ConnectLibp2pParams`, `ServeLibp2pParams`, `ConnectionContext`, `ServeConnectionsHandler`, `DuplexOverStreamOptions` | Types, below. |
 
 `ConnectLibp2pParams`:
@@ -246,6 +249,21 @@ streams and that an unconfigured server stops at 32.
 
 - **Normal end.** Both sides finished: the stream is closed gracefully,
   bounded by the close timeout.
+- **The peer dies** (its process is killed, the network drops, the connection
+  is aborted). The call's output throws `PeerGoneError`, `webrun-streams-libp2p:
+  the stream ended before the call finished`, within milliseconds of libp2p
+  noticing, whether or not the caller's input is still open. It never ends
+  cleanly: a clean end requires the peer's own close-write
+  (`remoteCloseWrite`), because when a connection dies libp2p closes the
+  stream with no error and its iterator ends exactly as after a close-write.
+  Without that rule a truncated response reads as a complete one. A peer
+  that ended its side and then died while this side was still sending fails
+  the same way; the input is returned instead of waited on. A peer that
+  resets the stream before ending its side throws libp2p's `StreamResetError`;
+  one that resets it after (a tunnel whose far end gave up) throws
+  `PeerGoneError` with the `StreamResetError` as `cause`. Either way the
+  error says the call is incomplete — `PeerGoneError` does not prove the
+  peer died, only that the stream ended before both sides finished it.
 - **Caller cancels** (`.return()` on the call's generator). The adapter aborts
   the stream with `call cancelled` before the generator's own cleanup runs,
   because by then the stream is already marked closed and `abort` would do
@@ -262,6 +280,46 @@ streams and that an unconfigured server stops at 32.
   `[webrun-streams-libp2p] serve: inbound stream on protocol <p> failed: <message>`,
   so one failed stream never becomes an unhandled rejection that terminates
   the serving process. The handler's output is returned, so its `finally` runs.
+  A caller that sent its whole request and then stopped reading the response
+  (`.return()` mid-stream) is ordinary and is not logged.
+
+### A multiplexer over one stream closes with it
+
+`multiplexPort` (from `@statewalker/webrun-rpc`) can run many ports over one
+stream. A multiplexer cannot see its pipe die, so wire the stream's life to it:
+
+```ts
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { multiplexPort } from "@statewalker/webrun-rpc";
+import { messageTargetOverStream } from "@statewalker/webrun-streams-libp2p";
+
+const { target, signal } = messageTargetOverStream(await node.dialProtocol(peer, ["/my-mux/1.0.0"]));
+const mux = multiplexPort(target, { codec: msgpackCodec, side: "initiator", signal });
+```
+
+`signal` aborts on the stream's `close` (with `PeerGoneError` when the
+connection died) and on the peer's close-write — after the read loop has
+delivered every message the peer sent before it, so a reply followed by a
+close is not lost to a multiplexer that tears down on `signal`. Unwired, every port and every
+call on a dead stream waits forever. Wired, 100 ports on a SIGKILLed peer all
+close within the test's 1 s bound. A stream closes when its connection does,
+so this also covers a peer that dies while no data is flowing.
+
+Frames are `[varint length][bytes]`. Reading starts at once, so attach the
+`message` listener in the same tick (`multiplexPort` does). `postMessage`
+does not wait for room, and libp2p resets a stream whose write buffer passes
+`maxWriteBufferLength`. The target reports its state instead:
+`bufferedAmount` is the stream's write buffer, and `whenDrained()` resolves
+on libp2p's `drain` (or the stream's `close`, so no sender is left waiting),
+at once when the stream has room. A sender that must not overrun the buffer
+awaits it before posting more.
+
+A length prefix that is not a valid varint, or one past `maxMessageBytes`
+(default `DEFAULT_MAX_MESSAGE_BYTES`, 64 MiB), aborts the stream and `signal`
+with `webrun-streams-libp2p: a malformed message length` or `… exceeds
+maxMessageBytes`: a peer not speaking this framing would otherwise make the
+reader buffer without bound. Raise it with
+`messageTargetOverStream(stream, { maxMessageBytes })` for larger messages.
 
 ### Constraints
 
@@ -275,7 +333,10 @@ streams and that an unconfigured server stops at 32.
 
 `pnpm test` runs the backpressure, drain and close timeout, cancellation,
 identity, burst, stream-limit and serving-resilience tests against two real
-in-process TCP nodes. The shared conformance suite is opt-in because it spins
+in-process TCP nodes. `dead-peer.test.ts` kills the peer two ways, aborting
+its connection in-process and SIGKILLing a forked server
+(`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
+each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
 `skipHugeBody`, and L6's small window does not apply (there is no
 `emulateMux`), so L6 is an integrity check.
@@ -287,7 +348,8 @@ up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
 - `@libp2p/interface`, `@multiformats/multiaddr` (peers, types only) and
   `libp2p` (optional peer). Dev dependencies `@chainsafe/libp2p-noise`,
   `@chainsafe/libp2p-yamux`, `@libp2p/tcp` and `@libp2p/utils` build the test
-  nodes.
+  nodes; `@statewalker/webrun-rpc` and `@statewalker/webrun-msgpack` run the
+  multiplexer tests, and `tsx` runs the forked server.
 
 ## License
 

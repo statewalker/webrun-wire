@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-libp2p",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "type": "module",
   "description": "libp2p native multi-stream Connect/Serve adapter in the webrun-streams-* family",
@@ -56,11 +56,14 @@
     "@libp2p/tcp": "catalog:",
     "@libp2p/utils": "catalog:",
     "@multiformats/multiaddr": "catalog:",
+    "@statewalker/webrun-msgpack": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "libp2p": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
