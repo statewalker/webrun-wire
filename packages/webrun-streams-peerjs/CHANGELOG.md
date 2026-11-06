@@ -1,5 +1,13 @@
 # @statewalker/webrun-streams-peerjs
 
+## 0.2.4
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams ^0.2.2 -> ^0.2.3
+
 ## 0.2.3
 
 ### Patch Changes
