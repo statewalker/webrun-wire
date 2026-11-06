@@ -36,5 +36,5 @@ export function newHttpCodec(options: HttpCodecOptions = {}): MessageCodec {
   };
 }
 
-export const httpCodec: MessageCodec = newHttpCodec();
+export const httpCodec: MessageCodec = /* @__PURE__ */ newHttpCodec();
 export { HttpParseError } from "./errors.js";

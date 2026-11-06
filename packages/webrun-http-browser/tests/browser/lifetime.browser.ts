@@ -67,9 +67,20 @@ async function withPage<T>(scenario: (page: RawPage) => Promise<T>): Promise<T> 
   const browser = await launchRawChromium();
   try {
     const page = await browser.newPage(`${origin}${PAGE}`);
-    await page.evaluate(
-      `(async () => { while (!window.ready) await new Promise((r) => setTimeout(r, 50)); return await window.ready; })()`,
-    );
+    // `Target.createTarget` returns before its navigation commits, so the first
+    // evaluation may run in the initial about:blank document, whose context the
+    // navigation then destroys. Wait again in the page that replaced it.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await page.evaluate(
+          `(async () => { while (!window.ready) await new Promise((r) => setTimeout(r, 50)); return await window.ready; })()`,
+        );
+        break;
+      } catch (error) {
+        if (attempt >= 20 || !/Execution context was destroyed/.test(String(error))) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
     return await scenario(page);
   } finally {
     await browser.close();

@@ -1,4 +1,4 @@
-const utf8 = new TextEncoder();
+const utf8 = /* @__PURE__ */ new TextEncoder();
 
 export type ByteLike = Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string;
 

@@ -22,7 +22,7 @@
  */
 import type { MessageTarget } from "./message-target.js";
 
-const closeSignals = new WeakMap<MessageTarget, AbortSignal>();
+const closeSignals = /* @__PURE__ */ new WeakMap<MessageTarget, AbortSignal>();
 
 /**
  * Internal: register a port's close signal. Called once by `bindBytesToPort`.

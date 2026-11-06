@@ -12,6 +12,7 @@ import { callPort, NO_TIMEOUT } from "./call-port.js";
 import { getPortCloseSignal } from "./close-signal.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
+import { returningAtOnce } from "./return-at-once.js";
 import { throughAbort } from "./through-abort.js";
 
 /**
@@ -177,7 +178,7 @@ function runCallerSide(
     // the consumer's contract is the inbound half.
   });
 
-  return (async function* () {
+  const stream = (async function* () {
     try {
       yield* inbound.stream;
     } finally {
@@ -200,6 +201,13 @@ function runCallerSide(
       }
     }
   })();
+  // A caller that gives up while it waits for the peer's next chunk ends the
+  // stream now: the abort settles that wait, and the `finally` above runs.
+  return returningAtOnce(stream, () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error("webrun-rpc: the caller abandoned the stream"));
+    }
+  });
 }
 
 /**

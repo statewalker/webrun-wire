@@ -15,7 +15,7 @@ import {
   resolveFraming,
 } from "./headers.js";
 
-const VERSIONS = new Set(["HTTP/1.1", "HTTP/1.0"]);
+const VERSIONS = /* @__PURE__ */ new Set(["HTTP/1.1", "HTTP/1.0"]);
 const ABSOLUTE_FORM = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
 /**

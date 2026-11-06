@@ -2,7 +2,7 @@ import type { ByteSource } from "./message.js";
 
 const CR = 0x0d;
 const LF = 0x0a;
-const EMPTY = new Uint8Array(0);
+const EMPTY = /* @__PURE__ */ new Uint8Array(0);
 
 export class ByteStreamError extends Error {
   override readonly name = "ByteStreamError";

@@ -3,7 +3,7 @@ import { HttpParseError } from "./errors.js";
 
 export type HeaderList = [string, string][];
 
-const TCHAR = new Set(
+const TCHAR = /* @__PURE__ */ new Set(
   "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 );
 
