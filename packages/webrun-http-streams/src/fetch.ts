@@ -330,6 +330,15 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
 }
 
 /**
+ * How long a cancelled body waits for the read in flight before it abandons the call anyway.
+ * The read's answer tells a body that has ended (the call is finished: an upload the handler
+ * reads after answering goes on) from one that has not; a peer that sends nothing more never
+ * answers it. A body whose end comes later than this after the cancel is abandoned too, so a
+ * handler still streaming its response and still reading the upload then loses the upload.
+ */
+const CANCEL_GRACE_MS = 1_000;
+
+/**
  * The response body as a stream that the request's signal can end at any time.
  *
  * An abort errors the stream with the abort's reason at once — a read waiting
@@ -342,14 +351,6 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
  * A cancel abandons the call too — unless the read in flight comes back with the
  * body's end, which finishes it instead (see `cancel`).
  */
-/**
- * How long a cancelled body waits for the read in flight before it abandons the call anyway.
- * The read's answer tells a body that has ended (the call is finished: an upload the handler
- * reads after answering goes on) from one that has not; a peer that sends nothing more never
- * answers it.
- */
-const CANCEL_GRACE_MS = 1_000;
-
 function responseBody(
   body: AsyncIterable<Uint8Array>,
   signal: AbortSignal | undefined,
