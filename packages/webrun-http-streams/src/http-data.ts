@@ -27,9 +27,12 @@ export type HttpDataOptions = {
    * `serveFetchOverDuplex` only: once the response is out, how long the request
    * body may go unread before it is abandoned and the exchange ends (default
    * 30 s). A handler that answers first and reads the upload afterwards keeps
-   * it as long as it keeps reading; one that took the body and dropped it would
-   * otherwise keep the exchange — on a multiplexed transport, its port — open
-   * for good. `Infinity` waits for as long as it takes.
+   * it as long as it keeps reading — the time it spends on one chunk before it
+   * asks for the next counts as idle, so a handler that pauses longer between
+   * reads (one slow write per chunk) needs a larger bound; one that took the
+   * body and dropped it would otherwise keep the exchange — on a multiplexed
+   * transport, its port — open for good. `Infinity` waits for as long as it
+   * takes.
    */
   requestIdleMs?: number;
 };

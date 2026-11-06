@@ -394,9 +394,12 @@ describe("a link gives every request's port back", () => {
       "a reader taken, nothing read": async (q) => {
         (q.body as ReadableStream<Uint8Array>).getReader();
       },
-      "a clone nobody reads": async (q) => {
+      "a clone, neither branch read": async (q) => {
         void q.clone();
-        await q.text();
+      },
+      "a clone nobody reads, the original read": async (q) => {
+        void q.clone();
+        await (q.body as ReadableStream<Uint8Array>).getReader().read();
       },
     };
     for (const [name, take] of Object.entries(takers)) {

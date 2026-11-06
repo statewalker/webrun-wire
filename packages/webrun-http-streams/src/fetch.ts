@@ -202,11 +202,10 @@ export function serveFetchOverDuplex(
     const settled = async () => {
       if (!upload) return;
       if (!request.bodyUsed && !request.body?.locked) {
-        try {
-          await request.body?.cancel();
-        } catch {
-          /* already finished */
-        }
+        // Not awaited: the cancel of one branch of a tee (`request.clone()`)
+        // settles only once the other branch is cancelled too, and a clone
+        // nobody reads never is. The idle bound below ends that one.
+        void request.body?.cancel().catch(() => {});
       }
       await upload.settle(options.requestIdleMs ?? DEFAULT_REQUEST_IDLE_MS);
     };
