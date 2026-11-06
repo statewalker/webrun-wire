@@ -5,7 +5,7 @@ import {
   type PortCodec,
   type PortMux,
 } from "@statewalker/webrun-rpc";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { msgpackCodec } from "../src/index.js";
 
 // Fair framing (#39, proposal 9): with `frameSize`, a large message is split
@@ -15,6 +15,7 @@ import { msgpackCodec } from "../src/index.js";
 const KiB = 1024;
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -69,7 +70,7 @@ interface Arrival {
 }
 
 function pair(
-  options: { frameSize?: number; window?: number; maxReassembledBytes?: number },
+  options: { frameSize?: number; window?: number; maxReassembledBytes?: number; hold?: boolean },
   responderCodec: PortCodec = msgpackCodec,
 ) {
   const channel = new MessageChannel();
@@ -92,6 +93,7 @@ function pair(
     onPort: (port, meta) => {
       port.addEventListener("message", (e) => {
         arrivals.push({ port: String(meta), data: e.data as Uint8Array });
+        return options.hold ? new Promise<void>(() => {}) : undefined;
       });
       return true;
     },
@@ -295,12 +297,80 @@ describe("a message reassembled from frames is bounded (#50)", () => {
     channel.port1.start();
     const peer = (envelope: Parameters<typeof msgpackCodec.post>[1]) =>
       msgpackCodec.post(channel.port1, envelope);
-    peer({ type: "open", id: 0, window: options.window, exact: true });
-    await waitFor(() => b.ports().length === 1, "the port opens");
-    return { b, got, closes, peer };
+    const open = async (id: number) => {
+      peer({ type: "open", id, window: options.window, exact: true });
+      await waitFor(() => b.ports().some((p) => p.id === id), `port ${id} opens`);
+    };
+    await open(0);
+    return { b, got, closes, peer, open };
   }
 
-  it("frames past maxReassembledBytes close the port and free what they held", async () => {
+  /** `payload` on port `id`, encoded as the mux would and split into frames of `size`. */
+  function framesOf(id: number, payload: unknown, size: number) {
+    const bytes = msgpackCodec.encode?.({ type: "message", id, payload });
+    if (!bytes) throw new Error("msgpackCodec.encode is required");
+    const frames: Array<{ type: "frame"; id: number; data: Uint8Array; last?: boolean }> = [];
+    for (let at = 0; at < bytes.byteLength; at += size) {
+      const data = bytes.slice(at, at + size);
+      frames.push(
+        at + size >= bytes.byteLength
+          ? { type: "frame", id, data, last: true }
+          : { type: "frame", id, data },
+      );
+    }
+    return frames;
+  }
+
+  it("counts credit consumed but not yet granted back as owed", async () => {
+    // The grant of a small message waits for a timer; held here, it stays owed.
+    const { got, closes, peer } = await hostile({ window: 64 * KiB });
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      peer({ type: "message", id: 0, payload: pattern(10 * KiB, 0) });
+      peer({ type: "frame", id: 0, data: pattern(30 * KiB, 1) });
+      peer({ type: "frame", id: 0, data: pattern(30 * KiB, 2) });
+      const deadline = Date.now() + 5000;
+      while (!closes.length && Date.now() < deadline) await new Promise((r) => setImmediate(r));
+      expect(got).toHaveLength(1);
+      expect(closes).toEqual(["max-reassembled-bytes"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds the partial messages of all ports together, and frees what one delivers", async () => {
+    const { b, got, closes, peer, open } = await hostile({
+      window: 64 * KiB,
+      maxReassembledBytes: 256 * KiB,
+    });
+    await open(2);
+    const first = framesOf(0, pattern(160 * KiB, 0), 16 * KiB);
+    const last = first.pop();
+    for (const frame of first) peer(frame);
+    for (const frame of framesOf(2, pattern(160 * KiB, 1), 16 * KiB)) peer(frame);
+    await waitFor(() => closes.length > 0, "the second port closes");
+    expect(b.ports().map((p) => p.id)).toEqual([0]);
+    if (last) peer(last);
+    await waitFor(() => got.length === 1, "the first message arrives whole");
+    // What it held is free again: another port may now reassemble as much.
+    await open(4);
+    for (const frame of framesOf(4, pattern(200 * KiB, 2), 16 * KiB)) peer(frame);
+    await waitFor(() => got.length === 2, "the third message arrives whole");
+    expect(closes).toEqual(["max-reassembled-bytes"]);
+  });
+
+  it("a port that closes with messages still queued delivers them", async () => {
+    const { a, arrivals } = pair({ frameSize: 16 * KiB, window: 64 * KiB, hold: true });
+    const port = await a.openPort("closing");
+    await acknowledged(a, 1);
+    port.postMessage(pattern(40 * KiB, 0));
+    port.postMessage(pattern(40 * KiB, 1)); // waits for credit the held listener never gives
+    port.close();
+    await waitFor(() => arrivals.length === 2, "both messages arrive");
+    expect(arrivals[1]?.data).toEqual(pattern(40 * KiB, 1));
+  });
+
+  it("frames past maxReassembledBytes close the port", async () => {
     const { b, closes, peer } = await hostile({ window: 64 * KiB, maxReassembledBytes: 256 * KiB });
     for (let i = 0; i < 5; i++) peer({ type: "frame", id: 0, data: pattern(64 * KiB, i) });
     await waitFor(() => closes.length > 0, "the responder closes the port");

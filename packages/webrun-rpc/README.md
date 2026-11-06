@@ -379,14 +379,24 @@ or one whose codec cannot decode, gets whole messages. If the pipe's `whenDraine
 error, so the ports waiting behind it fail instead of hanging. 16-64 KiB frames cost one small envelope each (about 15 bytes with
 `msgpackCodec`).
 
-**A peer cannot make this side hold frames without limit.** A partial message is counted against
-the port's window as it arrives: an honest sender keeps what is owed back plus the message within
-the window, or starts a larger message only when nothing is owed, and then it may grow up to
-`maxReassembledBytes` (64 MiB by default). A peer that frames past either limit gets its port
-closed: the partial message is dropped, the port's close signal aborts with a `RangeError`
-("webrun-rpc: a framed message passed … bytes"), and the peer receives a `close` with reason
-`"max-reassembled-bytes"`. Set `maxReassembledBytes` above the largest message the peer
-legitimately sends; a message just past it looks like a closed port, not a lost message.
+**A peer cannot make this side hold frames without limit.** Two limits apply as frames arrive:
+
+- a message begun while this side still owed the port credit (delivered or consumed bytes not yet
+  granted back) must fit what the window left, since an honest sender counts at least that much as
+  outstanding; one begun with nothing owed may be larger than the window, as a whole message may;
+- all partial messages together, across every port, hold at most `maxReassembledBytes` (64 MiB by
+  default), so opening many ports does not multiply it.
+
+A frame past either limit closes its port: the partial message is dropped, the port's close signal
+aborts with a `RangeError` ("webrun-rpc: a framed message passed what the window left …" or
+"… passed maxReassembledBytes …"), and the peer's port closes as on any peer close. On the wire
+the close carries reason `"max-reassembled-bytes"`. A port that closes with messages still queued
+sends them whole, not framed, so they never trip the window check on the way out.
+
+The cap is the receiver's: a sender with `frameSize` that frames a message larger than the
+peer's `maxReassembledBytes` has its port closed, where the same message sent whole would arrive.
+Set it above the largest message the peer legitimately frames; a message just past it looks like
+a closed port, not a lost message.
 
 Frames carry no sequence number. Reassembly relies on what every `MessageTarget` already
 promises: an ordered, reliable pipe. Each port's frames leave from its own queue in order, and

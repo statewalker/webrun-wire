@@ -125,12 +125,15 @@ export interface PortMuxOptions {
    */
   frameSize?: number;
   /**
-   * Ceiling, in bytes, on one message this side reassembles from a peer's
-   * frames (default 64 MiB). Frames are also counted against the port's
-   * window: past what the window leaves — or past this cap, for a message
-   * started with nothing owed back, which may exceed the window — the mux
-   * drops the partial message, closes the port with a `RangeError` and sends
-   * the peer a close with reason `"max-reassembled-bytes"`.
+   * Ceiling, in bytes, on what this side holds of messages still being
+   * reassembled from a peer's frames, summed over all ports (default 64 MiB).
+   * A partial message is also counted against its port's window: one begun
+   * while this side still owed credit must fit what the window left; one
+   * begun with nothing owed may be larger than the window. A frame past
+   * either limit makes the mux drop that port's partial message, close the
+   * port with a `RangeError` and send the peer a close with reason
+   * `"max-reassembled-bytes"`. A framed message larger than this cap never
+   * arrives, though the same message sent whole would.
    */
   maxReassembledBytes?: number;
   /**
