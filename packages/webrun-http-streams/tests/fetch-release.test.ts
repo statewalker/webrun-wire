@@ -73,6 +73,23 @@ function endless(state: { cancelled: boolean }): Response {
   );
 }
 
+/** A response that sends one chunk of 8 bytes, then nothing, for good. */
+function quiet(): Response {
+  let sent = false;
+  return new Response(
+    new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          if (sent) return await new Promise<void>(() => {});
+          sent = true;
+          controller.enqueue(bytes(8));
+        },
+      },
+      { highWaterMark: 0 },
+    ),
+  );
+}
+
 interface Case {
   name: string;
   handler: (request: Request) => Promise<Response>;
@@ -415,6 +432,64 @@ describe("every exchange ends its call", () => {
     await expect(reader.read()).rejects.toThrow();
     await settle();
     expect([t.open(), state.cancelled]).toEqual([0, true]);
+  });
+
+  it("an abort while the body waits for a quiet peer rejects the read at once", async () => {
+    const t = tracked(serveFetchOverDuplex(async () => quiet()));
+    const controller = new AbortController();
+    const response = await fetchOverDuplex(
+      t.call,
+      new Request("http://x/", { signal: controller.signal }),
+    );
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    expect((await reader.read()).value?.byteLength).toBe(8);
+    const pending = reader.read();
+    await sleep(10);
+    const t0 = Date.now();
+    controller.abort(new Error("gave up"));
+    await expect(pending).rejects.toThrow("gave up");
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
+
+  it("an abort while nobody reads the body errors it with the abort's reason", async () => {
+    const state = { cancelled: false };
+    const t = tracked(serveFetchOverDuplex(async () => endless(state)));
+    const controller = new AbortController();
+    const response = await fetchOverDuplex(
+      t.call,
+      new Request("http://x/", { signal: controller.signal }),
+    );
+    await settle();
+    controller.abort(new Error("gave up"));
+    await settle();
+    // Released at the abort, not at the next read: the producer is cancelled already.
+    expect([t.open(), state.cancelled]).toEqual([0, true]);
+    await expect(response.text()).rejects.toThrow("gave up");
+  });
+
+  it("a signal reused across calls keeps no listener once each body is read", async () => {
+    const t = tracked(serveFetchOverDuplex(async () => new Response("hello")));
+    // Spied on the request's own signal: `new Request(url, { signal })` follows
+    // the given one with a listener of its own, which is not ours to count.
+    const req = new Request("http://x/", { signal: new AbortController().signal });
+    const signal = req.signal;
+    let listening = 0;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+      listening++;
+      add(...args);
+    }) as AbortSignal["addEventListener"];
+    signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+      listening--;
+      remove(...args);
+    }) as AbortSignal["removeEventListener"];
+    for (let i = 0; i < 10; i++) {
+      const r = await fetchOverDuplex(t.call, req);
+      expect(await r.text()).toBe("hello");
+    }
+    await settle();
+    expect([listening, t.open()]).toEqual([0, 0]);
   });
 
   it("a response that cannot be decoded ends the call", async () => {

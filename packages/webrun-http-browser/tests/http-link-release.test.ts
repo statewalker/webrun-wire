@@ -268,6 +268,49 @@ describe("a link gives every request's port back", () => {
     expect(link.inflight).toBe(0);
   });
 
+  it("an abort while the body waits for a quiet peer ends the read and gives the port back", async () => {
+    const { link } = await linked(async () => {
+      let sent = false;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              if (sent) return await new Promise<void>(() => {});
+              sent = true;
+              controller.enqueue(bytes(8));
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      );
+    });
+    for (let i = 0; i < ROUNDS; i++) {
+      const controller = new AbortController();
+      const response = await link.send(new Request("http://x/", { signal: controller.signal }));
+      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      expect((await reader.read()).value?.byteLength).toBe(8);
+      const pending = reader.read();
+      await tick(2);
+      controller.abort(new Error("gave up"));
+      await expect(pending, `round ${i + 1}`).rejects.toThrow("gave up");
+      await settle();
+    }
+    expect(link.inflight).toBe(0);
+  });
+
+  it("an abort while nobody reads the body gives the port back", async () => {
+    const { link } = await linked(async () => endless());
+    for (let i = 0; i < ROUNDS; i++) {
+      const controller = new AbortController();
+      const response = await link.send(new Request("http://x/", { signal: controller.signal }));
+      await settle();
+      controller.abort(new Error("gave up"));
+      await settle();
+      expect(link.inflight, `round ${i + 1}`).toBe(0);
+      await expect(response.text()).rejects.toThrow("gave up");
+    }
+  });
+
   it("as many requests at once as the ceiling allows, round after round", async () => {
     const { link } = await linked(async (q) => new Response(new URL(q.url).pathname));
     for (let round = 0; round < ROUNDS; round++) {

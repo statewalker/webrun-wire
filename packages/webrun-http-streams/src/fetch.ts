@@ -155,7 +155,7 @@ export async function fetchOverDuplex(
     else await release?.();
     return new Response(null, responseInit);
   }
-  return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);
+  return new Response(responseBody(respBody, request.signal, release), responseInit);
 }
 
 /**
@@ -329,16 +329,65 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
   return { source: tracked, settle };
 }
 
-async function* withAbort(
-  iter: AsyncIterable<Uint8Array>,
+/**
+ * The response body as a stream that the request's signal can end at any time.
+ *
+ * An abort errors the stream with the abort's reason at once — a read waiting
+ * for a peer that sends nothing more rejects then, not when a next chunk
+ * arrives, which may be never — and abandons the call (`release`), so on a
+ * multiplexed transport its port is given back whether or not anyone still
+ * reads the body. The listener is removed once the body ends, however it ends:
+ * read to its end, cancelled, failed or aborted. A body nobody reads or cancels
+ * keeps it until the signal aborts (and keeps the call open until then anyway).
+ */
+function responseBody(
+  body: AsyncIterable<Uint8Array>,
   signal: AbortSignal | undefined,
-): AsyncGenerator<Uint8Array> {
-  if (!signal) {
-    yield* iter;
-    return;
-  }
-  for await (const chunk of iter) {
-    if (signal.aborted) throw abortReason(signal);
-    yield chunk;
-  }
+  release: (() => Promise<void>) | undefined,
+): ReadableStream<Uint8Array> {
+  if (!signal) return asyncIterableToReadable(body);
+  const it = body[Symbol.asyncIterator]();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let ended = false;
+  const end = () => {
+    ended = true;
+    signal.removeEventListener("abort", onAbort);
+  };
+  const onAbort = () => {
+    if (ended) return;
+    end();
+    try {
+      controller.error(abortReason(signal));
+    } catch {
+      /* already closed or errored */
+    }
+    void release?.();
+  };
+  return new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    },
+    async pull(c) {
+      try {
+        const { done, value } = await it.next();
+        if (ended) return; // aborted while this read waited: the stream has its reason
+        if (done) {
+          end();
+          c.close();
+          return;
+        }
+        c.enqueue(value);
+      } catch (err) {
+        if (ended) return;
+        end();
+        c.error(err);
+      }
+    },
+    async cancel() {
+      end();
+      await it.return?.();
+    },
+  });
 }

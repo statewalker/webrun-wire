@@ -265,6 +265,9 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
       return { result, samples };
     `,
         );
+        // A failed read reports `{ ok: false, text }`; `toMatchObject` alone
+        // would leave the reason out of its diff (it failed so once in Firefox).
+        expect(result.ok, JSON.stringify(result)).toBe(true);
         expect(result).toMatchObject({ ok: true, read: 128 * MiB, corrupt: 0 });
         expect(result.ms).toBeGreaterThan(5_800);
         const running = samples.filter((x) => x.produced < 128 * MiB);
