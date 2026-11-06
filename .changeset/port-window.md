@@ -9,4 +9,5 @@ Per-port flow control for `multiplexPort` / `overPipe`, off unless `window` (byt
 - A message counts as consumed when its listeners return, or their promises settle. Credit goes back in batched `credit` envelopes.
 - Safe against older peers: the responder acknowledges the window with a zero-byte `credit`, and the opener applies the window only from then on. A peer that never answers credit keeps running without flow control.
 - `PortCodec` may implement `prepare(envelope)` / `size(event)` so the window counts exact wire bytes; `msgpackCodec` does, and accepts the `credit` envelope.
+- A port's close sends what it has queued at once, then the close, without waiting for credit. A queued message is copied when posted.
 - `mux.ports()` reports a windowed port's `window` (once in force), `queued`, `outstanding` and `unconsumed` bytes.
