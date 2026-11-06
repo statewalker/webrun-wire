@@ -29,7 +29,11 @@ function pair(maxPorts?: number) {
     read: (e: MessageEvent) => structuredCodec.read(e),
   };
   const a = multiplexPort(ch.port1, { codec, side: "initiator", maxPorts });
-  const b = multiplexPort(ch.port2, { codec: structuredCodec, side: "responder", onPort: () => true });
+  const b = multiplexPort(ch.port2, {
+    codec: structuredCodec,
+    side: "responder",
+    onPort: () => true,
+  });
   muxes.push(a, b);
   return { a, sent };
 }
@@ -89,7 +93,6 @@ describe("review of #42", () => {
     const closes = sent.filter((e) => e.type === "close").map((e) => e.id);
     expect(closes.length).toBe(new Set(closes).size); // none twice
     expect(closes.sort()).toEqual([0, 2]); // and both ports told
-
   });
 
   it("the maxPorts error says none are open when the table is empty", async () => {
