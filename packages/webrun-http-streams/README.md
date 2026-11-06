@@ -112,7 +112,8 @@ const { envelope, body } = await httpFetch(call, {
 ```
 
 Signatures: `httpFetch(call, env, body?, { codec? })` and
-`httpServe(handler, { codec? })`. Over a real transport, `call` comes from an
+`httpServe(handler, { codec? })`; the handler is `(env, body, exchange) => result`, where
+`exchange.signal` aborts when the caller abandons the exchange (see below). Over a real transport, `call` comes from an
 adapter's `connect` and `httpServe(...)` goes to its `serve`.
 
 A relative `url` works but does not survive the round trip verbatim. HTTP/1.1
@@ -136,6 +137,27 @@ await response.text(); // "hello /api/time"
 Both take an optional last argument `{ codec }`. `fetchOverDuplex` plumbs
 `request.signal` into body iteration, so aborting the signal ends the call. An
 already-aborted signal rejects before anything is sent.
+
+On the serving side, the handler's `request.signal` aborts when the caller abandons the
+exchange — it aborted its fetch, stopped reading, or its transport went away — with
+`webrun-http-streams: the caller abandoned the exchange` (`EXCHANGE_ABANDONED_MESSAGE`). A
+handler that waits before it answers can stop then instead of holding on for nothing:
+
+```ts
+// A long poll: answer in 30 s, or stop at once when the caller leaves.
+const call = serveFetchOverDuplex(async (request) => {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 30_000);
+    request.signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+  return new Response(request.signal.aborted ? null : "news");
+});
+```
+
+It never aborts once the response went out in full.
 
 ### Site host: `DuplexSiteBuilder`
 
@@ -246,7 +268,7 @@ Check `err.name`, not `instanceof`; see
 
 | Export | What it is |
 | --- | --- |
-| `httpFetch`, `httpServe` | Data layer. Types: `HttpDataHandler`, `HttpDataHandlerResult`, `HttpDataOptions`, `HttpFetchResult`. |
+| `httpFetch`, `httpServe` | Data layer. Types: `HttpDataHandler`, `HttpDataHandlerResult`, `HttpDataOptions`, `HttpExchange`, `HttpFetchResult`; `EXCHANGE_ABANDONED_MESSAGE`. |
 | `fetchOverDuplex`, `serveFetchOverDuplex` | Fetch layer. |
 | `DuplexSiteBuilder`, `SiteHandler` | Site host over an adapter's `Serve<P>`. |
 | `newHttpClientStub`, `newHttpServerStub` | Transport-agnostic stubs. Types: `HttpHandler`, `SerializedHttpEnvelope`, `SerializedHttpRequest`, `SerializedHttpResponse`. |
@@ -331,6 +353,18 @@ underlying `Duplex` call. `httpFetch` returns only `{ envelope, body }`, and
 producer's `finally` does not run. On a transport that multiplexes calls with a
 bounded stream table this holds one slot per such call. Closing it needs
 `httpFetch` to expose the call for cancellation.
+
+### How a handler that has not answered learns its caller left
+
+A transport tells the serving side a caller is gone by calling `return()` on the handler's
+output. On an async generator that call is queued behind the `next()` still pending inside it —
+the `await handler(request)` — so it would arrive only once the handler answered, which a long
+poll may never do. `httpServe` therefore hands the transport a generator whose `return()` and
+`throw()` abort the exchange's signal at once, then forward as usual; one that already finished
+aborts nothing. It relies on the transport calling `return()` without waiting for the pending
+`next()`: `@statewalker/webrun-rpc`'s `serve` and `@statewalker/webrun-streams-libp2p`'s `serve` do.
+A transport that only awaits `return()` after `next()` settles delivers the abandonment no
+earlier than the answer.
 
 ### Hop-by-hop headers are dropped at the fetch layer
 

@@ -589,6 +589,12 @@ caller without one does not.
 An abort unwinds a producing handler through `iter.return()`, not by throwing into it. A handler's
 `catch` never sees the abort reason; only `finally` runs. Put cleanup in `finally`.
 
+`serve` forwards that `return()` to the handler's output at once, even while the handler is still
+working on its first chunk. Its own tracking wrapper would otherwise queue it behind that pending
+`next()`, as any async generator does. A handler that wraps its output to watch for `return()`
+therefore sees the abandonment when it happens, not when it next yields:
+`@statewalker/webrun-http-streams` aborts the served `Request.signal` that way.
+
 ### `transferPortMux` moves real ports
 
 Each `openPort` creates a `MessageChannel`, posts `{ type: PORT_TRANSFER, meta }` with one end in
