@@ -52,6 +52,24 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
  */
 export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 
+/**
+ * The peer went away mid-call: its connection closed, reset or aborted before
+ * it ended its side of the stream. Distinct from a clean end on purpose — a
+ * response cut short by a dead peer must never read as a complete one.
+ * `cause` is the stream's close error, when libp2p gave one.
+ */
+export class PeerGoneError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      `webrun-streams-libp2p: the peer went away before ending the stream${
+        cause instanceof Error ? ` (${cause.message})` : ""
+      }`,
+      { cause },
+    );
+    this.name = "PeerGoneError";
+  }
+}
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -116,6 +134,30 @@ export async function* duplexOverStream(
     );
   };
 
+  // A CLEAN END IS THE PEER'S OWN `remoteCloseWrite`, NOTHING ELSE. When the
+  // connection dies (a killed process, a dropped network), libp2p closes the
+  // stream WITHOUT an error and its iterator ends exactly as it does after the
+  // peer's close — so a truncated response read as a complete one. Listened
+  // for before the first pull below, like the iterator's own listener.
+  let peerClosedWrite = false;
+  let closeError: unknown;
+  let onStreamClosed!: () => void;
+  const streamClosed = new Promise<void>((resolve) => {
+    onStreamClosed = resolve;
+  });
+  const onRemoteCloseWrite = (): void => {
+    peerClosedWrite = true;
+  };
+  const onClose = (evt: StreamCloseEvent): void => {
+    closeError = evt.error;
+    onStreamClosed();
+  };
+  stream.addEventListener("remoteCloseWrite", onRemoteCloseWrite);
+  stream.addEventListener("close", onClose);
+
+  // Set once every input chunk went out. A stream that closes before that lost
+  // part of this side's input, which is not a complete call either.
+  let inputSent = false;
   const outboundSource = framedOutbound(inputIterator);
   const outbound = (async () => {
     try {
@@ -134,6 +176,7 @@ export async function* duplexOverStream(
           await waitForDrain(stream, opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS);
         }
       }
+      inputSent = true;
       await closeStream(stream);
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
@@ -173,6 +216,11 @@ export async function* duplexOverStream(
         firePeerInputEnd(err);
         throw err;
       }
+    }
+    if (!peerClosedWrite) {
+      const gone = new PeerGoneError(closeError);
+      firePeerInputEnd(gone);
+      throw gone;
     }
     sourceCompleted = true;
     firePeerInputEnd();
@@ -214,9 +262,23 @@ export async function* duplexOverStream(
       }
       void outbound.catch(() => undefined);
     } else {
-      await outbound;
+      // The peer ended its side; ours may still be sending, waiting on an
+      // input that is still open (a tunnel). If the stream dies first, stop
+      // waiting for that input: it can never be sent now.
+      await Promise.race([outbound, streamClosed]);
+      if (!inputSent) {
+        cancelInput();
+        void Promise.resolve(outboundSource.return?.(undefined)).catch(() => undefined);
+        void outbound.catch(() => undefined);
+      } else {
+        await outbound;
+      }
     }
+    stream.removeEventListener("remoteCloseWrite", onRemoteCloseWrite);
+    stream.removeEventListener("close", onClose);
   }
+  // Reached only after a clean end from the peer.
+  if (!inputSent) throw new PeerGoneError(closeError);
 }
 
 /**
@@ -373,7 +435,7 @@ async function* parseFrames(
   }
 }
 
-function normalizeChunk(item: unknown): Uint8Array {
+export function normalizeChunk(item: unknown): Uint8Array {
   if (item instanceof Uint8Array) return item;
   const asList = item as { subarray?: () => Uint8Array };
   if (typeof asList.subarray === "function") {
@@ -410,7 +472,7 @@ function decodeError(payload: Uint8Array): Error {
   }
 }
 
-function encodeVarint(value: number): Uint8Array {
+export function encodeVarint(value: number): Uint8Array {
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`encodeVarint: ${value} is not a non-negative integer`);
   }
@@ -424,7 +486,7 @@ function encodeVarint(value: number): Uint8Array {
   return new Uint8Array(out);
 }
 
-function decodeVarint(buf: Uint8Array, start: number): { value: number; offset: number } {
+export function decodeVarint(buf: Uint8Array, start: number): { value: number; offset: number } {
   let value = 0;
   let shift = 0;
   let i = start;
