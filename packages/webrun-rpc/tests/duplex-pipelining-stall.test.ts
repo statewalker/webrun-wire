@@ -1,11 +1,12 @@
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import type { Duplex } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { connect, overPipe, serve, structuredCodec } from "../src/index.js";
 
 // A stalled reader on a pipelined stream: the producer runs about one window
 // ahead and then stops, and what the link holds for it is about one window.
-// The memory half collects garbage before it measures: the runs pass
-// `--expose-gc` (the package's `test` script and the root vitest config).
+// The memory half collects garbage before it measures.
 
 const KiB = 1024;
 const WINDOW = 256 * KiB;
@@ -13,14 +14,14 @@ const CHUNK = 4 * KiB;
 
 const MiB = 1024 * KiB;
 
-const gc = (globalThis as { gc?: () => void }).gc;
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function heap(): Promise<number> {
-  if (!gc) throw new Error("run with --expose-gc");
   for (let i = 0; i < 3; i++) {
-    gc?.();
+    gc();
     await settle(10);
   }
   const { heapUsed, arrayBuffers } = process.memoryUsage();
@@ -88,14 +89,19 @@ describe("duplexOverPort — a stalled reader on a pipelined stream", () => {
     expect(piped.held - baseline.held).toBeLessThanOrEqual(2 * WINDOW);
   });
 
-  it("a producer yielding views of one large buffer holds about one window too", async () => {
-    // `toChunks` and Node `Buffer` slices yield views; posted as they are,
-    // each chunk would carry the whole 4 MiB buffer past a window that counts 4 KiB.
-    const big = new Uint8Array(4 * MiB);
-    const view = (n: number) => big.subarray((n * CHUNK) % big.byteLength).subarray(0, CHUNK);
-    const baseline = await stall(0, view);
-    const piped = await stall(WINDOW, view);
-    expect(piped.producedLater).toBe(piped.producedAtStall);
-    expect(piped.held - baseline.held).toBeLessThanOrEqual(2 * WINDOW);
-  });
+  for (const [kind, big] of [
+    ["Uint8Array", new Uint8Array(4 * MiB)],
+    ["Node Buffer", Buffer.alloc(4 * MiB)],
+  ] as const) {
+    it(`a producer yielding ${kind} views of one large buffer holds about one window too`, async () => {
+      // `toChunks` and Node `Buffer` slices yield views; posted as they are,
+      // each chunk would carry the whole 4 MiB buffer past a window that
+      // counts 4 KiB.
+      const view = (n: number) => big.subarray((n * CHUNK) % big.byteLength).subarray(0, CHUNK);
+      const baseline = await stall(0, view);
+      const piped = await stall(WINDOW, view);
+      expect(piped.producedLater).toBe(piped.producedAtStall);
+      expect(piped.held - baseline.held).toBeLessThanOrEqual(2 * WINDOW);
+    });
+  }
 });

@@ -43,17 +43,56 @@ const CHUNK = "webrun-rpc:chunk";
 const CHUNK_OVERHEAD = 32;
 
 /**
- * `bytes`, or a copy when it is a view on a larger buffer. Structured clone
- * carries and keeps a view's whole `ArrayBuffer`, while the window and the
- * receiver's count see only the view: a 4 KiB `subarray` of a 4 MiB buffer
- * would cost 4 MiB per chunk. Copied on both ends — the sender so posts no
- * more than it counts, and the receiver holds no more than it counts whatever
- * the peer posts.
+ * The bytes of `view` as a plain `Uint8Array` that owns its whole buffer:
+ * `view` itself when it already is one, else a copy. Structured clone carries
+ * and keeps a view's whole `ArrayBuffer`, and a byte codec may decode into
+ * views of the frame, while the window and the receiver's count see only the
+ * view: a 4 KiB `subarray` of a 4 MiB buffer would cost 4 MiB per chunk.
+ * Copied with the `Uint8Array` constructor, not `slice()`: a Node `Buffer`'s
+ * `slice()` is another view on the same memory.
  */
-const ownBytes = (bytes: Uint8Array | undefined): Uint8Array | undefined =>
-  bytes instanceof Uint8Array && bytes.byteLength !== bytes.buffer.byteLength
-    ? bytes.slice()
-    : bytes;
+function ownBytes(view: ArrayBufferView): Uint8Array {
+  if (
+    view instanceof Uint8Array &&
+    view.constructor === Uint8Array &&
+    view.byteOffset === 0 &&
+    view.byteLength === view.buffer.byteLength
+  ) {
+    return view;
+  }
+  return new Uint8Array(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+}
+
+/**
+ * A producer's chunk as bytes this end may send, in either mode: any view or
+ * `ArrayBuffer`, normalised by `ownBytes`. Anything else fails the stream here,
+ * as the producer's own error, rather than reaching a peer that would refuse it.
+ */
+/**
+ * A received confirmed chunk's value, as its own bytes, put back in place of
+ * the original in `chunk`: `listenPort` keeps the request until the handler
+ * returns, and the original would keep its whole buffer that long. A function
+ * of its own, so that no temporary of the suspended handler holds the
+ * original either.
+ */
+function adoptValue(chunk: WireChunk): WireChunk["value"] {
+  const original: unknown = chunk.value;
+  if (ArrayBuffer.isView(original)) chunk.value = ownBytes(original);
+  return chunk.value;
+}
+
+function chunkBytes(value: unknown): Uint8Array {
+  if (ArrayBuffer.isView(value)) return ownBytes(value);
+  if (
+    value instanceof ArrayBuffer ||
+    Object.prototype.toString.call(value) === "[object ArrayBuffer]"
+  ) {
+    return new Uint8Array(value as ArrayBuffer);
+  }
+  throw new TypeError(
+    `webrun-rpc: a stream chunk must be bytes (a typed array, a DataView or an ArrayBuffer), got ${value === null ? "null" : typeof value}`,
+  );
+}
 
 const MIXED_MESSAGE =
   "webrun-rpc: peer mixed confirmed and pipelined chunks; the stream port is closed";
@@ -431,7 +470,9 @@ function receiveChunks(
   let held = 0;
   const off = listenPort<WireChunk, void>(
     port,
-    async ({ done, value, error }) => {
+    async (params) => {
+      const { done, error } = params;
+      const value = adoptValue(params);
       touch();
       if (poison) throw poison;
       // A confirmed chunk is held outside the pipelined count: one beside
@@ -453,7 +494,7 @@ function receiveChunks(
         if (finished) throw poison ?? new Error("webrun-rpc: the stream is closed");
         await deliver?.({
           done,
-          value: ownBytes(value),
+          value,
           error: error ? deserializeError(error) : undefined,
         });
       } finally {
@@ -488,7 +529,7 @@ function receiveChunks(
       return;
     }
     // What is held is counted by its bytes, so it must be bytes.
-    if (data.chunk.value !== undefined && !(data.chunk.value instanceof Uint8Array)) {
+    if (data.chunk.value !== undefined && !ArrayBuffer.isView(data.chunk.value)) {
       violate("webrun-rpc: peer sent a pipelined chunk whose value is not bytes");
       return;
     }
@@ -500,7 +541,7 @@ function receiveChunks(
     }
     touch();
     const { done, error } = data.chunk;
-    const value = ownBytes(data.chunk.value);
+    const value = data.chunk.value && ownBytes(data.chunk.value);
     const size = (value?.byteLength ?? 0) + CHUNK_OVERHEAD;
     held += size;
     return (async () => {
@@ -605,7 +646,7 @@ async function sendChunks(
       if (signal.aborted) return;
       const chunk: WireChunk = {
         done,
-        value: ownBytes(value),
+        value: done ? value : chunkBytes(value),
         error: error === undefined ? undefined : serializeError(error),
       };
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });

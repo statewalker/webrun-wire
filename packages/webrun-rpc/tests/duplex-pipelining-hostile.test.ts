@@ -1,3 +1,5 @@
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   duplexOverPort,
@@ -15,10 +17,11 @@ import {
 const KiB = 1024;
 const MiB = 1024 * KiB;
 
-/** Bytes of `ArrayBuffer`s alive after a full collection (the run passes `--expose-gc`). */
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+
+/** Bytes of `ArrayBuffer`s alive after a full collection. */
 async function liveBuffers(): Promise<number> {
-  const gc = (globalThis as { gc?: () => void }).gc;
-  if (!gc) throw new Error("run with --expose-gc");
   for (let i = 0; i < 3; i++) {
     gc();
     await new Promise((r) => setTimeout(r, 10));
@@ -291,5 +294,74 @@ describe("duplexOverPort — a peer that pipelines where it may not", () => {
     expect((error as Error)?.message).toMatch(/pipelining was not agreed/);
     await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
     expect(client.ports()).toEqual([]);
+  });
+
+  it("a confirmed chunk after pipelined ones fails the stream and closes the port", async () => {
+    const { wire, mux, release, ended } = responder();
+    const peer = hostile(wire);
+    peer.post({
+      type: "open",
+      id: 0,
+      meta: { kind: "stream" },
+      window: 64 * KiB,
+      caps: ["pipeline"],
+    });
+    await waitFor("the window is acknowledged", () => peer.received.length > 0);
+    peer.post({ type: "credit", id: 0, bytes: 0 });
+    // A pipelined chunk the stalled handler holds, then a confirmed one.
+    peer.post({ type: "message", id: 0, payload: chunk(16) });
+    const request = { type: "request", channelName: "in", callId: "c1", params: chunk(16).chunk };
+    peer.post({ type: "message", id: 0, payload: request });
+
+    await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
+    expect(mux.ports()).toEqual([]);
+    release();
+    await waitFor("the handler's input fails", () => ended.length > 0);
+    expect((ended[0] as Error).message).toMatch(/mixed confirmed and pipelined/);
+  });
+
+  it("a pipelined chunk whose value is not bytes fails the stream and closes the port", async () => {
+    const { wire, mux, release, ended } = responder();
+    const peer = hostile(wire);
+    peer.post({
+      type: "open",
+      id: 0,
+      meta: { kind: "stream" },
+      window: 64 * KiB,
+      caps: ["pipeline"],
+    });
+    await waitFor("the window is acknowledged", () => peer.received.length > 0);
+    peer.post({ type: "credit", id: 0, bytes: 0 });
+    const notBytes = { ...chunk(0), chunk: { done: false, value: { byteLength: -1e12 } } };
+    peer.post({ type: "message", id: 0, payload: notBytes });
+
+    await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
+    expect(mux.ports()).toEqual([]);
+    release();
+    await waitFor("the handler's input fails", () => ended.length > 0);
+    expect((ended[0] as Error).message).toMatch(/whose value is not bytes/);
+  });
+
+  it("a confirmed chunk that is a small view on a large buffer is held as its own bytes", async () => {
+    const { wire, mux } = responder();
+    const peer = hostile(wire);
+    peer.post({ type: "open", id: 0, meta: { kind: "stream" } });
+    await waitFor("the port opens", () => mux.ports().length === 1);
+    const before = await liveBuffers();
+    // Built in place, so this test keeps no reference to the buffer itself.
+    peer.post({
+      type: "message",
+      id: 0,
+      payload: {
+        type: "request",
+        channelName: "in",
+        callId: "c1",
+        params: { done: false, value: new Uint8Array(new ArrayBuffer(8 * MiB), 0, 1) },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const held = (await liveBuffers()) - before;
+    expect(mux.ports()).toHaveLength(1);
+    expect(held).toBeLessThan(MiB);
   });
 });

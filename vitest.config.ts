@@ -37,9 +37,6 @@ export default {
     globals: true,
     environment: "node",
     include: ["**/tests/**/*.test.ts"],
-    // Tests that bound memory (`duplex-pipelining-stall.test.ts`) collect
-    // garbage before they measure; the flag only exposes `gc()`.
-    execArgv: ["--expose-gc"],
     coverage: {
       reporter: ["text", "lcov"],
     },

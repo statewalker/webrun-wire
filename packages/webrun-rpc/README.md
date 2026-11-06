@@ -585,19 +585,30 @@ chunk, so the window's credit is the confirmation, and a stalled reader holds ab
 `tests/duplex-pipelining-stall.test.ts` measures the producer stopping about one window ahead,
 and the memory held staying within twice the window above an unwindowed link.
 
-**A chunk that is a view travels as its own bytes.** Structured clone carries a typed array's
-whole `ArrayBuffer`, while the window counts only the view. A producer yielding `subarray`s of
-one large buffer (`toChunks` does, and so do Node `Buffer` slices) would otherwise ship, and a
-stalled reader hold, the whole buffer once per chunk: 4 KiB views of a 4 MiB buffer behind a
-256 KiB window held about 248 MiB, which looks like a leak and is not one. So a view on a larger
-buffer is copied when sent, and copied again on receipt whatever the peer sent, confirmed or
-pipelined: what is held is what is counted. A chunk that covers its whole buffer is not copied.
+Until the agreement is known (the opener learns it from the ack; the responder's own sends wait
+for the opener's answer) chunks go as confirmed calls, so the handshake adds no round trip to the
+first chunk. Chunks, results and errors are the same either way, an error still in the last
+chunk. Over `overPipe` without `window`, over `transferPortMux` and with a peer that answers no
+capabilities, every chunk is a confirmed call.
 
-Until the agreement is known (the opener learns it from
-the ack; the responder's own sends wait for the opener's answer) chunks go as confirmed calls, so
-the handshake adds no round trip to the first chunk. Chunks, results and errors are the same
-either way, an error still in the last chunk. Over `overPipe` without `window`, over
-`transferPortMux` and with a peer that answers no capabilities, every chunk is a confirmed call.
+**A chunk travels as its own bytes.** Structured clone carries a typed array's whole
+`ArrayBuffer`, while the window counts only the view. A producer yielding `subarray`s of one large
+buffer (`toChunks` does, and so do Node `Buffer` slices) would otherwise ship, and a stalled
+reader hold, the whole buffer once per chunk: 4 KiB views of a 4 MiB buffer behind a 256 KiB
+window held about 248 MiB, which looks like a leak and is not one. So every chunk is sent as a
+plain `Uint8Array` that owns its buffer, in both modes: a view on a larger buffer, a Node
+`Buffer`, another typed array or a `DataView` is copied, and an `ArrayBuffer` is wrapped. The
+copy is made with the `Uint8Array` constructor, because a `Buffer`'s `slice()` is another view on
+the same memory. A plain `Uint8Array` that covers its whole buffer is sent as it is. Anything else
+ends the stream with the producer's own error, which reaches the peer like a handler's:
+`webrun-rpc: a stream chunk must be bytes (a typed array, a DataView or an ArrayBuffer), got
+<type>`.
+
+The receiver copies again, confirmed or pipelined, whatever the peer sent: what is held is what is
+counted. Over `msgpackCodec` that is one copy of every received chunk, because its decoder returns
+views of the frame (and over a Node transport, views of a frame `Buffer`). The copy stays: without
+it, a chunk would keep its whole frame alive, and a hostile frame of one byte of chunk beside 1 MiB
+of padding would hold that 1 MiB while counting 33 bytes.
 
 A pipelining peer is held to these rules, each failing that stream and closing its port, holding
 nothing more:
@@ -611,7 +622,7 @@ nothing more:
 - a confirmed chunk while pipelined ones are held, or a pipelined one while a confirmed one is:
   `webrun-rpc: peer mixed confirmed and pipelined chunks; the stream port is closed` (an honest
   sender switches to pipelining once, after its last confirmed chunk was answered);
-- a pipelined chunk whose value is not bytes:
+- a pipelined chunk whose value is not a typed array or `DataView`:
   `webrun-rpc: peer sent a pipelined chunk whose value is not bytes`.
 
 So the receiver holds at most the window plus one chunk of a stream's bytes. A hostile peer can
