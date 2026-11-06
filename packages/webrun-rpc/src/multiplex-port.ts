@@ -314,13 +314,13 @@ export function multiplexPort(
             sendOnPort(id, () => post({ type: "close", id, reason }));
             releaseWaiters(c);
           };
-          self.markClosed();
+          self.markClosed(reason);
           return;
         }
         // Behind this port's frames, so the peer gets the whole message first.
         sendOnPort(id, () => post({ type: "close", id, reason }));
         releaseWaiters(c);
-        self.markClosed();
+        self.markClosed(reason);
       },
     );
     if (c) {
@@ -489,6 +489,8 @@ export function multiplexPort(
     port.removeEventListener("message", listener);
     const closedNow = new Set<number>();
     for (const [id, { handle, credit }] of [...open]) {
+      // A port that a close-signal listener closed meanwhile is still sent its close here: its own
+      // close() posts nothing once the mux is closing.
       closedNow.add(id);
       codecPost({ type: "close", id });
       open.delete(id);
@@ -595,6 +597,7 @@ function describeKinds(entries: Iterable<PortInfo>): string {
     const name = typeof kind === "string" ? kind : "?";
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
+  if (!counts.size) return "none";
   return [...counts]
     .sort((x, y) => y[1] - x[1])
     .slice(0, 3)
