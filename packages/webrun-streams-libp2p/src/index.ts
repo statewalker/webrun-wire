@@ -13,4 +13,11 @@ export {
   DEFAULT_DRAIN_TIMEOUT_MS,
   type DuplexOverStreamOptions,
   duplexOverStream,
+  PeerGoneError,
 } from "./duplex-over-stream.js";
+export {
+  DEFAULT_MAX_MESSAGE_BYTES,
+  type MessageTargetOverStreamOptions,
+  messageTargetOverStream,
+  type StreamMessageTarget,
+} from "./message-target-over-stream.js";

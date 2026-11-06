@@ -159,15 +159,24 @@ describe("serveConnections maxInboundStreams", () => {
 
       const conn = await connect({ node: client, peer: addr });
       try {
-        const promises: Promise<string>[] = [];
+        // Settled as they go: the calls past the cap are reset and reject
+        // during the dial loop, long before the loop below collects them.
+        const promises: Promise<PromiseSettledResult<string>>[] = [];
         for (let i = 0; i < attempted; i++) {
-          promises.push(drain(conn.call(singleChunkSource(`msg-${i}`))));
+          promises.push(
+            drain(conn.call(singleChunkSource(`msg-${i}`))).then(
+              (value) => ({ status: "fulfilled", value }),
+              (reason) => ({ status: "rejected", reason }),
+            ),
+          );
           await new Promise((r) => setTimeout(r, DIAL_STAGGER_MS));
         }
         await new Promise((r) => setTimeout(r, SETTLE_WAIT_MS));
         release();
 
-        const results = await Promise.allSettled(promises);
+        const results = await Promise.all(promises);
+        // A reset call is an error, not an empty response.
+        expect(results.filter((r) => r.status === "rejected")).toHaveLength(attempted - defaultCap);
         const echoedCorrectly = results.filter(
           (r, i) => r.status === "fulfilled" && r.value === `msg-${i}`,
         ).length;

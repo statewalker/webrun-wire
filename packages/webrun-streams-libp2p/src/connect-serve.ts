@@ -8,7 +8,7 @@ import type {
 } from "@libp2p/interface";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
-import { closeStream, duplexOverStream } from "./duplex-over-stream.js";
+import { closeStream, duplexOverStream, PeerGoneError } from "./duplex-over-stream.js";
 
 export const DEFAULT_PROTOCOL = "/webrun-streams/1.0.0";
 
@@ -299,6 +299,9 @@ export async function serveConnections(
   });
 
   const onStream = (stream: Stream, connection: Connection): void => {
+    // The caller sent its whole request; a stream that dies after that is a
+    // caller that stopped reading the response — ordinary, not a fault.
+    let requestComplete = false;
     void (async () => {
       const handler = makeHandler({ remotePeer: connection.remotePeer });
       const inputQueue = makeInputQueue();
@@ -306,7 +309,10 @@ export async function serveConnections(
       try {
         for await (const chunk of duplexOverStream(stream, output, {
           drainTimeoutMs,
-          onPeerInputEnd: (err) => inputQueue.done(err),
+          onPeerInputEnd: (err) => {
+            if (err === undefined) requestComplete = true;
+            inputQueue.done(err);
+          },
         })) {
           inputQueue.push(chunk);
         }
@@ -323,6 +329,7 @@ export async function serveConnections(
       // unhandled, and Node's default for `unhandledRejection` is to
       // terminate. Logged rather than rethrown, and never rethrown from here:
       // there is no caller left to receive it.
+      if (requestComplete && err instanceof PeerGoneError) return;
       const e = err instanceof Error ? err : new Error(String(err));
       console.warn(
         `[webrun-streams-libp2p] serve: inbound stream on protocol ${proto} failed: ${e.message}`,
