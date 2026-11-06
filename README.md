@@ -160,7 +160,6 @@ Published consumers only ever see `dist`.
 | `vitest.config.ts` | shared test config; aliases `@statewalker/webrun-*` to `src` |
 | `tsconfig.base.json` | shared compiler options and `paths` to `src` |
 | `biome.json` | lint and format rules |
-| `CONTEXT.md` | glossary of the domain terms |
 | `tools/consumer-install/` | pack-and-install harness for published manifests |
 
 ### CI and releases
