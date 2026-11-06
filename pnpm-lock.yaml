@@ -303,6 +303,15 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.0.3(@types/node@26.6.4)(@vitest/browser-playwright@5.0.3)(@vitest/coverage-v8@5.0.3)(@vitest/ui@5.0.3)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+      webrun-rpc-0-5:
+        specifier: npm:@statewalker/webrun-rpc@0.5.1
+        version: '@statewalker/webrun-rpc@0.5.1'
+      webrun-rpc-0-7:
+        specifier: npm:@statewalker/webrun-rpc@0.7.0
+        version: '@statewalker/webrun-rpc@0.7.0'
+      webrun-rpc-0-8:
+        specifier: npm:@statewalker/webrun-rpc@0.8.0
+        version: '@statewalker/webrun-rpc@0.8.0'
 
   packages/webrun-rpc-http:
     dependencies:
@@ -1240,6 +1249,18 @@ packages:
   '@sindresorhus/fnv1a@3.1.0':
     resolution: {integrity: sha512-KV321z5m/0nuAg83W1dPLy85HpHDk7Sdi4fJbwvacWsEhAh+rZUW4ZfGcXmUIvjZg4ss2bcwNlRhJ7GBEUG08w==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  '@statewalker/webrun-rpc@0.5.1':
+    resolution: {integrity: sha512-DpnT0dJ0KpdL5QKqKTmN75CnGc1w24iHdZqYfJQLVpSKEIR/GjPb3Vzbzb4NIu9tCHsroW+Dq1CO84Jp6YCXzw==}
+
+  '@statewalker/webrun-rpc@0.7.0':
+    resolution: {integrity: sha512-hHd21ke+JJaGdCZ5EFrFT/rd16SsCJKabWAfAIiYvv9QoMVMgIXM5TXJnPWmrbqhDuhY+sML/y8CN0QIBTe7Xg==}
+
+  '@statewalker/webrun-rpc@0.8.0':
+    resolution: {integrity: sha512-0IS6Zc6LQrZMgin2uzKJuKpphwCJr1XnBALqeiz2j/gAvU6/wOO9TmJD1wp13CsvK8vq9aYkPR1NIkHGc2m8Hw==}
+
+  '@statewalker/webrun-streams@0.2.3':
+    resolution: {integrity: sha512-v4+32VDLjt8HzAhjgd7K3bgiasQosU7FooXhLaTU2dQzYyNZ6NbNMOI/24SL0bdmTHkSU3bxktASn0hO3sCwng==}
 
   '@turbo/darwin-64@2.11.7':
     resolution: {integrity: sha512-Z2LFOxwbiJueD1miByXJS/BrW21vv6YaQXZustty5jEX4vQYw6zyh101Sz1QO7WG0mqBzKagZ/DoAeeujI0/Sw==}
@@ -3909,6 +3930,20 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@sindresorhus/fnv1a@3.1.0': {}
+
+  '@statewalker/webrun-rpc@0.5.1':
+    dependencies:
+      '@statewalker/webrun-streams': 0.2.3
+
+  '@statewalker/webrun-rpc@0.7.0':
+    dependencies:
+      '@statewalker/webrun-streams': 0.2.3
+
+  '@statewalker/webrun-rpc@0.8.0':
+    dependencies:
+      '@statewalker/webrun-streams': 0.2.3
+
+  '@statewalker/webrun-streams@0.2.3': {}
 
   '@turbo/darwin-64@2.11.7':
     optional: true

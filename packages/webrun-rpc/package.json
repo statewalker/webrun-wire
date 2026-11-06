@@ -48,7 +48,10 @@
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "webrun-rpc-0-5": "npm:@statewalker/webrun-rpc@0.5.1",
+    "webrun-rpc-0-7": "npm:@statewalker/webrun-rpc@0.7.0",
+    "webrun-rpc-0-8": "npm:@statewalker/webrun-rpc@0.8.0"
   },
   "sideEffects": false,
   "publishConfig": {
