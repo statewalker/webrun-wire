@@ -15,7 +15,10 @@ export type PortEnvelope =
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
   | { type: "credit"; id: number; bytes: number; exact?: boolean }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
-  | { type: "frame"; id: number; data: Uint8Array; last?: boolean };
+  | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
+  /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */
+  | { type: "ping"; id: number }
+  | { type: "pong"; id: number };
 
 /**
  * How an envelope reaches the wire.
@@ -116,11 +119,23 @@ export interface PortMuxOptions {
    * and a message whose encoding is larger than `frameSize` goes as frames of
    * that size, reassembled by the peer. A small message then waits for one
    * frame of another port's large message, not for all of it. It needs
-   * `window`, a codec with `encode` / `decode`, and a peer that says it reads
-   * frames (in its `open` or its acknowledgement); otherwise messages go
+   * `window` and codecs with `encode` / `decode` on both ends, agreed in the
+   * window's `open` and acknowledgement (`exact`); otherwise messages go
    * whole. 16-64 KiB is a reasonable range.
    */
   frameSize?: number;
+  /**
+   * Liveness of the peer (off when unset). Every `intervalMs` the mux pings
+   * and the peer answers; anything from it counts as an answer. After `misses`
+   * pings in a row (default 3) with nothing back from a peer that has answered
+   * before, the mux closes with `webrun-rpc: the peer did not answer …`: the
+   * peer died or froze. A tick taken while this end's own pipe reports a
+   * backlog (`bufferedAmount`) is not counted. Every current mux answers pings,
+   * with or without this option; an older one never does and is never closed
+   * for it — nor is a peer that dies before its first answer, so wire
+   * `signal` too where the transport can report death.
+   */
+  keepalive?: { intervalMs: number; misses?: number };
   /**
    * Leak detection, for development (off when unset). A port its consumer
    * dropped without `close()` is reported here once the garbage collector

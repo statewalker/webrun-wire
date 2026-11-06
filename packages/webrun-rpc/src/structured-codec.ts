@@ -10,7 +10,9 @@ function isEnvelope(value: unknown): value is PortEnvelope {
     candidate.type === "message" ||
     candidate.type === "close" ||
     candidate.type === "credit" ||
-    candidate.type === "frame"
+    candidate.type === "frame" ||
+    candidate.type === "ping" ||
+    candidate.type === "pong"
   );
 }
 

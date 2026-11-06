@@ -16,6 +16,16 @@ import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
  */
 export const MUX_CLOSED_MESSAGE = "webrun-rpc: the multiplexer was closed";
 
+/**
+ * The id of keepalive's `ping` / `pong`: one no port ever takes. An older mux
+ * whose codec passes unknown envelopes through reads them as a close of that
+ * id, which must therefore not be a real port (0 is the initiator's first).
+ */
+const KEEPALIVE_ID = Number.MAX_SAFE_INTEGER;
+
+/** The longest delay a timer holds; past it `setInterval` fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
 export const DEFAULT_MAX_PORTS = 1024;
 
@@ -60,8 +70,24 @@ export function multiplexPort(
     signal,
     window,
     frameSize,
+    keepalive,
     onLeak,
   } = options;
+  const misses = keepalive?.misses ?? 3;
+  if (
+    keepalive &&
+    !(
+      Number.isFinite(keepalive.intervalMs) &&
+      keepalive.intervalMs > 0 &&
+      keepalive.intervalMs <= MAX_TIMER_MS &&
+      Number.isSafeInteger(misses) &&
+      misses > 0
+    )
+  ) {
+    throw new RangeError(
+      `webrun-rpc: keepalive needs an intervalMs in (0, ${MAX_TIMER_MS}] and a positive integer misses`,
+    );
+  }
   // A frame of no bytes would never advance the split: refuse it here.
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
     throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
@@ -405,6 +431,13 @@ export function multiplexPort(
 
   const handleEnvelope = (envelope: PortEnvelope, event: MessageEvent): void => {
     if (muxClosed) return;
+    // Anything from the peer shows it is alive.
+    heardSincePing = true;
+    if (envelope.type === "ping" || envelope.type === "pong") {
+      peerKeepsAlive = true;
+      if (envelope.type === "ping") post({ type: "pong", id: KEEPALIVE_ID });
+      return;
+    }
 
     if (envelope.type === "open") {
       // A duplicate id is a peer bug; ignoring it is safer than replacing a
@@ -522,8 +555,38 @@ export function multiplexPort(
     if (envelope) handleEnvelope(envelope, event);
   };
 
+  // KEEPALIVE: a MessagePort reports neither death nor a frozen peer, so the
+  // mux probes. It counts pings that went unanswered — nothing at all from the
+  // peer between one ping and the next tick — rather than time since the last
+  // message, so timer jitter cannot turn a prompt answer into a miss. It holds
+  // a peer to it only once that peer has answered or pinged: an older one,
+  // which never does, is never closed for it.
+  let peerKeepsAlive = false;
+  let heardSincePing = true;
+  let unanswered = 0;
+  let pinger: ReturnType<typeof setInterval> | undefined;
+  const tick = (): void => {
+    if (!keepalive) return;
+    // A ping still in this end's own transport buffer has not reached the
+    // peer: a backlog of ours is not the peer's silence.
+    const backlogged = (port.bufferedAmount ?? 0) > 0;
+    if (heardSincePing) unanswered = 0;
+    else if (peerKeepsAlive && !backlogged) unanswered++;
+    if (unanswered >= misses) {
+      close(
+        new Error(
+          `webrun-rpc: the peer did not answer ${misses} keepalive pings, ${keepalive.intervalMs} ms apart`,
+        ),
+      ).catch(() => {});
+      return;
+    }
+    heardSincePing = false;
+    post({ type: "ping", id: KEEPALIVE_ID });
+  };
+
   const close = async (reason?: unknown): Promise<void> => {
     if (muxClosed) return;
+    clearInterval(pinger);
     // Closed BEFORE the ports: `markClosed` runs their close-signal listeners
     // synchronously, and one that reopens (reconnect logic) must be refused
     // rather than add a port after the snapshot below, which nothing would
@@ -557,6 +620,13 @@ export function multiplexPort(
 
   port.addEventListener("message", listener);
   void port.start?.();
+  // Started only once the pipe is wired, so a constructor that throws above
+  // leaves no timer behind.
+  if (keepalive) {
+    pinger = setInterval(tick, keepalive.intervalMs);
+    // A probe must not keep a Node process alive on its own.
+    (pinger as { unref?: () => void }).unref?.();
+  }
   if (signal?.aborted) close(signal.reason).catch(() => {});
   else signal?.addEventListener("abort", onTransportAbort, { once: true });
 
