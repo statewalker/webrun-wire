@@ -3,9 +3,10 @@ import type { MessageTarget } from "./message-target.js";
 /**
  * What a multiplexer exchanges over the underlying port.
  *
- * Three types and nothing more. There is no DATA/ACK split, no credit and no
- * error type: `close` carries an opaque `reason` that layer 1 never inspects,
- * because stream semantics belong above this layer.
+ * `open`, `message` and `close`, plus `credit` (a port's window) and `frame`
+ * (a piece of a large message, with `frameSize`). There is no DATA/ACK split
+ * and no error type: `close` carries an opaque `reason` that layer 1 never
+ * inspects, because stream semantics belong above this layer.
  */
 export type PortEnvelope =
   | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }
@@ -118,8 +119,8 @@ export interface PortMuxOptions {
    * and a message whose encoding is larger than `frameSize` goes as frames of
    * that size, reassembled by the peer. A small message then waits for one
    * frame of another port's large message, not for all of it. It needs
-   * `window`, a codec with `encode` / `decode`, and a peer that says it reads
-   * frames (in its `open` or its acknowledgement); otherwise messages go
+   * `window` and codecs with `encode` / `decode` on both ends, agreed in the
+   * window's `open` and acknowledgement (`exact`); otherwise messages go
    * whole. 16-64 KiB is a reasonable range.
    */
   frameSize?: number;
@@ -135,6 +136,17 @@ export interface PortMuxOptions {
    * `signal` too where the transport can report death.
    */
   keepalive?: { intervalMs: number; misses?: number };
+  /**
+   * Leak detection, for development (off when unset). A port its consumer
+   * dropped without `close()` is reported here once the garbage collector
+   * reclaims it. If it has no listener left it is freed on both ends, as a
+   * close would free it; one that still has a listener is still receiving, so
+   * it is reported and left open. A listener that closes over its own port
+   * keeps it reachable from the mux, so such a port is never collected, and
+   * never reported. Each port costs a `FinalizationRegistry` entry, and when
+   * the collector runs is up to the runtime.
+   */
+  onLeak?: (info: PortInfo) => void;
 }
 
 /** What `PortMux.ports()` reports for one open port. */

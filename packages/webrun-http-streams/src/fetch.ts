@@ -155,7 +155,7 @@ export async function fetchOverDuplex(
     else await release?.();
     return new Response(null, responseInit);
   }
-  return new Response(asyncIterableToReadable(withAbort(respBody, request.signal)), responseInit);
+  return new Response(responseBody(respBody, request.signal, release), responseInit);
 }
 
 /**
@@ -329,16 +329,88 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
   return { source: tracked, settle };
 }
 
-async function* withAbort(
-  iter: AsyncIterable<Uint8Array>,
+/**
+ * How long a cancelled body waits for the read in flight before it abandons the call anyway.
+ * The read's answer tells a body that has ended (the call is finished: an upload the handler
+ * reads after answering goes on) from one that has not; a peer that sends nothing more never
+ * answers it. A body whose end comes later than this after the cancel is abandoned too, so a
+ * handler still streaming its response and still reading the upload then loses the upload.
+ */
+const CANCEL_GRACE_MS = 1_000;
+
+/**
+ * The response body as a stream that the request's signal can end at any time.
+ *
+ * An abort errors the stream with the abort's reason at once — a read waiting
+ * for a peer that sends nothing more rejects then, not when a next chunk
+ * arrives, which may be never — and abandons the call (`release`), so on a
+ * multiplexed transport its port is given back whether or not anyone still
+ * reads the body. The listener is removed once the body ends, however it ends:
+ * read to its end, cancelled, failed or aborted. A body nobody reads or cancels
+ * keeps it until the signal aborts (and keeps the call open until then anyway).
+ * A cancel abandons the call too — unless the read in flight comes back with the
+ * body's end, which finishes it instead (see `cancel`).
+ */
+function responseBody(
+  body: AsyncIterable<Uint8Array>,
   signal: AbortSignal | undefined,
-): AsyncGenerator<Uint8Array> {
-  if (!signal) {
-    yield* iter;
-    return;
-  }
-  for await (const chunk of iter) {
-    if (signal.aborted) throw abortReason(signal);
-    yield chunk;
-  }
+  release: (() => Promise<void>) | undefined,
+): ReadableStream<Uint8Array> {
+  const it = body[Symbol.asyncIterator]();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let ended = false;
+  let reading = false;
+  const end = () => {
+    ended = true;
+    signal?.removeEventListener("abort", onAbort);
+  };
+  const onAbort = () => {
+    if (ended) return;
+    end();
+    try {
+      controller.error(abortReason(signal as AbortSignal));
+    } catch {
+      /* already closed or errored */
+    }
+    void release?.();
+  };
+  return new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+    },
+    async pull(c) {
+      try {
+        reading = true;
+        const { done, value } = await it.next().finally(() => {
+          reading = false;
+        });
+        if (ended) return; // aborted or cancelled while this read waited
+        if (done) {
+          end();
+          c.close();
+          return;
+        }
+        c.enqueue(value);
+      } catch (err) {
+        if (ended) return;
+        end();
+        c.error(err);
+      }
+    },
+    cancel() {
+      end();
+      const returned = Promise.resolve(it.return?.()).catch(() => {});
+      if (!reading) return; // `it` is at rest: its return abandons the call (releasingOnExit)
+      // A read is in flight, and `it.return()` is queued behind it: that read's answer decides.
+      // The body's end → the call is finished, not abandoned, so an upload the handler reads
+      // after answering goes on; a chunk → the return then abandons the call. A peer that never
+      // answers (sends nothing more, for good) would hold the call forever: abandon it after a
+      // grace, without waiting in `cancel()` either way.
+      const grace = setTimeout(() => void release?.(), CANCEL_GRACE_MS);
+      (grace as { unref?: () => void }).unref?.();
+      void returned.finally(() => clearTimeout(grace));
+    },
+  });
 }

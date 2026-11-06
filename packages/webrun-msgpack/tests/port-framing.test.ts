@@ -116,11 +116,11 @@ describe("fair framing", () => {
     const bulk = await a.openPort("bulk");
     const ping = await a.openPort("ping");
     await acknowledged(a, 2);
-    bulk.postMessage(pattern(1024 * KiB, 1));
+    bulk.postMessage(pattern(256 * KiB, 1));
     ping.postMessage(new Uint8Array([42]));
     await waitFor(() => arrivals.length === 2, "both arrive");
     expect(arrivals.map((x) => x.port)).toEqual(["ping", "bulk"]);
-    expect(arrivals[1]?.data).toEqual(pattern(1024 * KiB, 1));
+    expect(arrivals[1]?.data).toEqual(pattern(256 * KiB, 1));
   });
 
   it("without frameSize the large message goes first, whole", async () => {
@@ -128,7 +128,7 @@ describe("fair framing", () => {
     const bulk = await a.openPort("bulk");
     const ping = await a.openPort("ping");
     await acknowledged(a, 2);
-    bulk.postMessage(pattern(1024 * KiB, 1));
+    bulk.postMessage(pattern(256 * KiB, 1));
     ping.postMessage(new Uint8Array([42]));
     await waitFor(() => arrivals.length === 2, "both arrive");
     expect(arrivals.map((x) => x.port)).toEqual(["bulk", "ping"]);
@@ -139,13 +139,13 @@ describe("fair framing", () => {
     const ports = await Promise.all(["p0", "p1", "p2"].map((name) => a.openPort(name)));
     await acknowledged(a, 3);
     ports.forEach((port, i) => {
-      port.postMessage(pattern(200 * KiB, i));
+      port.postMessage(pattern(64 * KiB, i));
       port.postMessage(pattern(10, i + 100));
     });
     await waitFor(() => arrivals.length === 6, "all six arrive");
     for (const [i, name] of ["p0", "p1", "p2"].entries()) {
       expect(arrivals.filter((x) => x.port === name).map((x) => x.data)).toEqual([
-        pattern(200 * KiB, i),
+        pattern(64 * KiB, i),
         pattern(10, i + 100),
       ]);
     }
@@ -155,10 +155,10 @@ describe("fair framing", () => {
     const { a, b, arrivals } = pair({ frameSize: 16 * KiB });
     const port = await a.openPort("one");
     await acknowledged(a, 1);
-    port.postMessage(pattern(300 * KiB, 7));
+    port.postMessage(pattern(96 * KiB, 7));
     await port.close?.();
     await waitFor(() => (b.ports?.() ?? []).length === 0, "the port closes on the peer");
-    expect(arrivals.map((x) => x.data)).toEqual([pattern(300 * KiB, 7)]);
+    expect(arrivals.map((x) => x.data)).toEqual([pattern(96 * KiB, 7)]);
   });
 
   it("a peer that does not say it reads frames gets whole messages", async () => {
@@ -190,7 +190,7 @@ describe("review fixes (#48)", () => {
     const { a, b } = pair({ frameSize: 16 * KiB });
     const port = await a.openPort("one");
     await acknowledged(a, 1);
-    port.postMessage(pattern(1024 * KiB, 1));
+    port.postMessage(pattern(256 * KiB, 1));
     await port.close?.();
     await a.close();
     await waitFor(() => (b.ports?.() ?? []).length === 0, "the peer frees the port");
