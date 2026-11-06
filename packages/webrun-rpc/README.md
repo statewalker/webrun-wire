@@ -344,6 +344,15 @@ each end counts bytes but holds nothing back, so a port to an older peer, or ove
 keeps running without flow control, as it always did; `ports()` reports `window` only once it is
 in force. A peer's `window` that is not a positive integer is ignored.
 
+**A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
+`caps: ["pipeline"]`, what this mux speaks on the port, and the responder's ack answers with the
+subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
+could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
+control is one chunk, or the window where both ends pipeline" below); nothing else changes
+meaning. The responder still holds its own sends back only once the opener has answered its ack,
+as above: a responder over a codec that drops credit envelopes would otherwise wedge its own port
+after one window.
+
 **Closing does not wait for credit.** A port closed with messages still queued sends them at once,
 then its close, regardless of the window: a peer that stopped returning credit (a listener that
 never settles) must still learn the port is closed, and nothing is kept for a port nobody holds.
@@ -415,8 +424,9 @@ the consumer that filled it (`"?"` counts ports without a kind). A duplicate `op
 peer is ignored rather than replacing a live port, and a local `openPort` skips ids the peer
 already claimed with the wrong parity.
 
-`PortEnvelope` is `{ type: "open", id, meta?, window?, exact? }`, `{ type: "message", id, payload }`,
-`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, exact? }`, with
+`PortEnvelope` is `{ type: "open", id, meta?, window?, exact?, caps? }`,
+`{ type: "message", id, payload }`, `{ type: "close", id, reason? }`, with a window
+`{ type: "credit", id, bytes, exact?, caps? }`, with
 `frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id }` /
 `{ type: "pong", id }` (on `Number.MAX_SAFE_INTEGER`). The codecs' `read` accept only objects with a non-negative integer `id`
 and one of those seven types, so other traffic on a shared port is
@@ -548,7 +558,7 @@ caller declines inbound ports. Whichever side called the factory owns the mux an
 that is built and dropped costs the peer nothing. Every port it opens carries `meta`
 `{ kind: "stream" }`, so a peer running other things over the same mux can tell stream ports apart.
 
-### Flow control is a window of one chunk
+### Flow control is one chunk, or the window where both ends pipeline
 
 `duplexOverPort` sends each direction as one `callPort` per chunk on its own channel (`"in"` for
 the caller's input, `"out"` for the handler's output). The reply to a chunk call is the
@@ -564,8 +574,60 @@ A peer that sends a second chunk before the first is confirmed gets `response:er
 closed. Other ports on the mux are untouched.
 
 The cost: single-stream throughput is `chunk ÷ RTT`. In-process that is negligible; over a 50 ms
-round trip, a 10 MiB body in 12 KiB chunks is 854 sequential round trips, about 43 s. Concurrency
-comes from running many streams, one port each, not from pipelining one.
+round trip, a 10 MiB body in 12 KiB chunks is 854 sequential round trips, about 43 s.
+
+**On a port whose window both ends speak, chunks are pipelined.** Once the port's handshake has
+agreed `pipeline` (see "A windowed port agrees capabilities in its handshake" above) and the
+window holds this end's sends, each chunk leaves as a plain message,
+`{ type: "webrun-rpc:chunk", channelName, chunk }`, with no confirmation of its own; the sender
+waits only for `whenPortReady`. The receiver's listener settles once its consumer pulls past the
+chunk, so the window's credit is the confirmation, and a stalled reader holds about one window:
+`tests/duplex-pipelining-stall.test.ts` measures the producer stopping about one window ahead,
+and the memory held staying within twice the window above an unwindowed link.
+
+Until the agreement is known (the opener learns it from the ack; the responder's own sends wait
+for the opener's answer) chunks go as confirmed calls, so the handshake adds no round trip to the
+first chunk. Chunks, results and errors are the same either way, an error still in the last
+chunk. Over `overPipe` without `window`, over `transferPortMux` and with a peer that answers no
+capabilities, every chunk is a confirmed call.
+
+**A chunk travels as its own bytes.** Structured clone carries a typed array's whole
+`ArrayBuffer`, while the window counts only the view. A producer yielding `subarray`s of one large
+buffer (`toChunks` does, and so do Node `Buffer` slices) would otherwise ship, and a stalled
+reader hold, the whole buffer once per chunk: 4 KiB views of a 4 MiB buffer behind a 256 KiB
+window held about 248 MiB, which looks like a leak and is not one. So every chunk is sent as a
+plain `Uint8Array` that owns its buffer, in both modes: a view on a larger buffer, a Node
+`Buffer`, another typed array or a `DataView` is copied, and an `ArrayBuffer` is wrapped. The
+copy is made with the `Uint8Array` constructor, because a `Buffer`'s `slice()` is another view on
+the same memory. A plain `Uint8Array` that covers its whole buffer is sent as it is. Anything else
+ends the stream with the producer's own error, which reaches the peer like a handler's:
+`webrun-rpc: a stream chunk must be bytes (a typed array, a DataView or an ArrayBuffer), got
+<type>`.
+
+The receiver copies again, confirmed or pipelined, whatever the peer sent: what is held is what is
+counted. Over `msgpackCodec` that is one copy of every received chunk, because its decoder returns
+views of the frame (and over a Node transport, views of a frame `Buffer`). The copy stays: without
+it, a chunk would keep its whole frame alive, and a hostile frame of one byte of chunk beside 1 MiB
+of padding would hold that 1 MiB while counting 33 bytes.
+
+A pipelining peer is held to these rules, each failing that stream and closing its port, holding
+nothing more:
+
+- a pipelined chunk where `pipeline` was not agreed:
+  `webrun-rpc: peer sent a pipelined chunk where pipelining was not agreed`;
+- one that arrives while the receiver already holds more than the window unconsumed (each chunk
+  counted as its bytes plus 32, less than either codec's window counts for it, so an honest sender
+  never trips it): `webrun-rpc: peer sent past the window (<n> bytes) without waiting for credit;
+  the stream port is closed`;
+- a confirmed chunk while pipelined ones are held, or a pipelined one while a confirmed one is:
+  `webrun-rpc: peer mixed confirmed and pipelined chunks; the stream port is closed` (an honest
+  sender switches to pipelining once, after its last confirmed chunk was answered);
+- a pipelined chunk whose value is not a typed array or `DataView`:
+  `webrun-rpc: peer sent a pipelined chunk whose value is not bytes`.
+
+So the receiver holds at most the window plus one chunk of a stream's bytes. A hostile peer can
+still make it receive a large buffer per message, briefly: the copy on receipt frees it once that
+message is handled, so it costs time, not memory held.
 
 **One stream per port.** Nothing enforces it: invoking the same `duplexOverPort` result twice on
 one port makes both invocations cross-talk on the same two channel names. Open a port per call.
@@ -589,8 +651,9 @@ direction resets it, and elapsing aborts the stream with `webrun-rpc: stream idl
 Unset, zero or non-finite means none.
 
 Know what you buy if you set it. The clock resets only when a chunk call returns, and that reply
-is withheld until the consumer has pulled past the value. The clock cannot tell "slow" from "dead":
-a consumer slower than the timeout **is** failed.
+is withheld until the consumer has pulled past the value (a pipelined chunk resets it when sent
+and when received, and the window holds the next one back the same way). The clock cannot tell
+"slow" from "dead": a consumer slower than the timeout **is** failed.
 
 ### How an abandoned stream is reported
 

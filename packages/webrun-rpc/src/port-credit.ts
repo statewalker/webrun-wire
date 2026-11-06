@@ -59,3 +59,34 @@ export function portBufferedAmount(port: MessageTarget): number {
 export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
   return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
 }
+
+/** A capability two ends agree on for one windowed port, in its `open` and the ack. */
+export type PortCap = "pipeline";
+
+/**
+ * What two ends have agreed for one windowed port so far. `caps`: what both
+ * speak, and so what the peer may send; empty until the handshake settles it
+ * (the opener learns it from the ack, the responder from the `open`).
+ * `enforced`: the window holds this end's own sends — what this end needs
+ * before it relies on the window instead of a confirmation per message.
+ */
+export interface PortAgreement {
+  window: number;
+  caps: ReadonlySet<PortCap>;
+  enforced: boolean;
+}
+
+const agreements = new WeakMap<MessageTarget, () => PortAgreement | undefined>();
+
+/** @internal Registered by the multiplexer for each port with a window. */
+export function setPortAgreement(port: MessageTarget, agreement: () => PortAgreement | undefined) {
+  agreements.set(port, agreement);
+}
+
+/**
+ * @internal What has been agreed with the peer on `port` so far; `undefined`
+ * on a port without a window. Not exported from the package.
+ */
+export function portAgreement(port: MessageTarget): PortAgreement | undefined {
+  return agreements.get(port)?.();
+}
