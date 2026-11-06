@@ -179,6 +179,8 @@ export interface OverPipeOptions {
    * transport's real ceiling — see `PortMuxOptions.maxMessageSize`.
    */
   maxMessageSize?: number;
+  /** Experimental per-port flow control in bytes — see `PortMuxOptions.window`. */
+  window?: number;
 }
 
 /**

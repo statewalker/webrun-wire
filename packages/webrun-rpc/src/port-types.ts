@@ -8,9 +8,11 @@ import type { MessageTarget } from "./message-target.js";
  * because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown }
+  | { type: "open"; id: number; meta?: unknown; window?: number }
   | { type: "message"; id: number; payload: unknown }
-  | { type: "close"; id: number; reason?: unknown };
+  | { type: "close"; id: number; reason?: unknown }
+  /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
+  | { type: "credit"; id: number; bytes: number };
 
 /**
  * How an envelope reaches the wire.
@@ -67,6 +69,25 @@ export interface PortMuxOptions {
    * delivered a body as zero bytes with no error on either side.
    */
   maxMessageSize?: number;
+  /**
+   * Per-port flow control, in bytes (off when unset). A port this mux opens
+   * asks for it in its `open`; the peer's mux then applies it to that port in
+   * both directions. Each side may have at most `window` bytes of a port's
+   * messages delivered but not yet consumed by the other side; what exceeds
+   * it waits in the port's send queue (`portBufferedAmount`,
+   * `whenPortReady`). A message counts as consumed once every listener has
+   * returned, or, for a listener that returns a promise, once it settles: a
+   * slow consumer holds its own port's budget, and no other port's.
+   *
+   * A message's size is its byte length (`ArrayBuffer`, typed arrays), a
+   * string's length, or for an object the sizes of its values (4 levels deep,
+   * at most 256 values), and at least 64. A message
+   * larger than the window is sent when nothing else is outstanding.
+   *
+   * Both ends must support it: an old peer never sends credit, and a port
+   * that asked for a window then stalls once the window is spent.
+   */
+  window?: number;
 }
 
 /** One port in, many ports out. */

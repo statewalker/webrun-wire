@@ -1,6 +1,27 @@
 import type { MessageTarget } from "./message-target.js";
+import { setPortSendState } from "./port-credit.js";
 import type { PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
+
+/**
+ * What a message costs a port's window (`PortMuxOptions.window`): its bytes and string
+ * lengths, found in its values up to 4 levels deep (at most 256 values), and at least 64.
+ */
+function messageSize(payload: unknown): number {
+  let budget = 256;
+  const walk = (v: unknown, depth: number): number => {
+    if (budget-- <= 0) return 0;
+    if (typeof v === "string") return v.length;
+    if (v instanceof ArrayBuffer) return v.byteLength;
+    if (ArrayBuffer.isView(v)) return v.byteLength;
+    if (v === null || typeof v !== "object" || depth >= 4) return 8;
+    let n = 16;
+    if (Array.isArray(v)) for (const x of v) n += walk(x, depth + 1);
+    else for (const k in v) n += k.length + walk((v as Record<string, unknown>)[k], depth + 1);
+    return n;
+  };
+  return Math.max(64, walk(payload, 0));
+}
 
 /**
  * The message of the error that fails the calls still in flight on a
@@ -24,6 +45,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     side = "initiator",
     maxPorts = DEFAULT_MAX_PORTS,
     maxMessageSize,
+    window,
   } = options;
 
   const open = new Map<number, VirtualPortHandle>();
@@ -40,16 +62,127 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     }
   };
 
-  const attach = (id: number): VirtualPortHandle => {
+  // Flow control per port (`window`): the send side's queue and outstanding bytes, and the
+  // receive side's consumed bytes not yet granted back.
+  interface Credit {
+    window: number;
+    outstanding: number;
+    queue: { payload: unknown; transfer?: Transferable[]; size: number }[];
+    queued: number;
+    waiters: { below: number; resolve: () => void }[];
+    toGrant: number;
+    grantScheduled: boolean;
+    closeAfterFlush?: () => void;
+  }
+  const credits = new Map<number, Credit>();
+
+  const flush = (id: number, c: Credit): void => {
+    while (c.queue.length) {
+      const next = c.queue[0];
+      // A message larger than the window goes out once nothing else is outstanding.
+      if (c.outstanding > 0 && c.outstanding + next.size > c.window) break;
+      c.queue.shift();
+      c.queued -= next.size;
+      c.outstanding += next.size;
+      post({ type: "message", id, payload: next.payload }, next.transfer);
+    }
+    for (const w of [...c.waiters])
+      if (c.queued <= w.below) {
+        c.waiters.splice(c.waiters.indexOf(w), 1);
+        w.resolve();
+      }
+    if (!c.queue.length && c.closeAfterFlush) {
+      const close = c.closeAfterFlush;
+      c.closeAfterFlush = undefined;
+      close();
+    }
+  };
+
+  // Credit goes back in batches: at once from a quarter of the window, else on the next
+  // task (so a burst of small messages costs one credit envelope, and a quiet port still
+  // gets its last bytes back).
+  const grant = (id: number, c: Credit, bytes: number): void => {
+    c.toGrant += bytes;
+    const send = () => {
+      c.grantScheduled = false;
+      if (!c.toGrant || !open.has(id)) return;
+      post({ type: "credit", id, bytes: c.toGrant });
+      c.toGrant = 0;
+    };
+    if (c.toGrant >= c.window / 4) {
+      send();
+      return;
+    }
+    if (c.grantScheduled) return;
+    c.grantScheduled = true;
+    setTimeout(send, 0);
+  };
+
+  const attach = (id: number, portWindow?: number): VirtualPortHandle => {
     let self!: VirtualPortHandle;
+    const c: Credit | undefined =
+      portWindow && portWindow > 0
+        ? {
+            window: portWindow,
+            outstanding: 0,
+            queue: [],
+            queued: 0,
+            waiters: [],
+            toGrant: 0,
+            grantScheduled: false,
+          }
+        : undefined;
+    if (c) credits.set(id, c);
+    const finish = (reason?: unknown) => {
+      post({ type: "close", id, reason });
+      open.delete(id);
+      credits.delete(id);
+      for (const w of c?.waiters ?? []) w.resolve();
+      self.markClosed();
+    };
     self = newVirtualPort(
-      (payload, transfer) => post({ type: "message", id, payload }, transfer),
+      (payload, transfer) => {
+        if (!c) {
+          post({ type: "message", id, payload }, transfer);
+          return;
+        }
+        const size = messageSize(payload);
+        c.queue.push({ payload, transfer, size });
+        c.queued += size;
+        flush(id, c);
+      },
       (reason) => {
-        post({ type: "close", id, reason });
-        open.delete(id);
-        self.markClosed();
+        // What is queued still goes out before the close, as it would without a window.
+        if (c?.queue.length) {
+          open.delete(id); // the consumer is done: no new port may take the id meanwhile
+          c.closeAfterFlush = () => {
+            post({ type: "close", id, reason });
+            credits.delete(id);
+            for (const w of c.waiters) w.resolve();
+          };
+          self.markClosed();
+          return;
+        }
+        finish(reason);
       },
     );
+    if (c) {
+      const deliver = self.deliver.bind(self);
+      self.deliver = (payload) => {
+        const done = deliver(payload);
+        const size = messageSize(payload);
+        if (done) void done.then(() => grant(id, c, size));
+        else grant(id, c, size);
+        return done;
+      };
+      setPortSendState(self.port, {
+        bufferedAmount: () => c.queued,
+        ready: (below = 0) =>
+          c.queued <= below
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => c.waiters.push({ below, resolve })),
+      });
+    }
     open.set(id, self);
     return self;
   };
@@ -65,7 +198,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      const handle = attach(envelope.id);
+      const handle = attach(envelope.id, envelope.window);
       let accepted = false;
       if (onPort) {
         try {
@@ -82,6 +215,14 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       return;
     }
 
+    if (envelope.type === "credit") {
+      const c = credits.get(envelope.id);
+      if (!c || !(envelope.bytes > 0)) return;
+      c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
+      flush(envelope.id, c);
+      return;
+    }
+
     const handle = open.get(envelope.id);
 
     if (envelope.type === "message") {
@@ -95,6 +236,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
     if (!handle) return;
     open.delete(envelope.id);
+    for (const w of credits.get(envelope.id)?.waiters ?? []) w.resolve();
+    credits.delete(envelope.id);
     handle.markClosed(new Error("webrun-rpc: the peer closed the port"));
   };
 
@@ -120,8 +263,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id);
-      post({ type: "open", id, meta });
+      const handle = attach(id, window);
+      post(window ? { type: "open", id, meta, window } : { type: "open", id, meta });
       return handle.port;
     },
 
@@ -132,6 +275,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         open.delete(id);
         handle.markClosed(new Error(MUX_CLOSED_MESSAGE));
       }
+      for (const c of credits.values()) for (const w of c.waiters) w.resolve();
+      credits.clear();
       muxClosed = true;
       port.removeEventListener("message", listener);
       await port.close?.();

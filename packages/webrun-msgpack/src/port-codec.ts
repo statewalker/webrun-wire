@@ -11,7 +11,12 @@ function isEnvelope(value: unknown): value is PortEnvelope {
   const candidate = value as { type?: unknown; id?: unknown };
   if (typeof candidate.id !== "number") return false;
   if (!Number.isInteger(candidate.id) || candidate.id < 0) return false;
-  return candidate.type === "open" || candidate.type === "message" || candidate.type === "close";
+  return (
+    candidate.type === "open" ||
+    candidate.type === "message" ||
+    candidate.type === "close" ||
+    candidate.type === "credit"
+  );
 }
 
 /** Accept whatever byte shape a transport pump hands over. */

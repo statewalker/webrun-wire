@@ -62,7 +62,7 @@ Stream tier and adapter:
 | `serve(params: PortParams, handler)` | Registers a `Duplex` handler. Resolves an idempotent teardown that abandons live streams, then closes the mux. |
 | `PortParams` | `{ mux: PortMuxFactory; timeout?: number }`. |
 | `PortMuxFactory`, `OnPort` | `(onPort?: OnPort) => PortMux \| Promise<PortMux>`; `(port, meta?) => boolean \| undefined`, `false` rejects. |
-| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`. |
+| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `window`. |
 | `overPorts(factory)` | Pass-through, for a mux this package knows nothing about. |
 | `duplexOverPort(port, options?)` | A `Duplex` running one stream on `port`. |
 | `serveDuplexOverPort(port, handler, options?)` | The serving half. Returns an idempotent teardown that abandons the stream and notifies the peer. |
@@ -292,6 +292,36 @@ port cannot grow memory here.
 | `side` | `"initiator"` (default) allocates even ids, `"responder"` odd, so both ends can open concurrently with no negotiation. The two ends of one pipe must disagree. |
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
+| `window` | Experimental. Per-port flow control in bytes, off when unset. See "Per-port window" below. |
+
+### Per-port window (experimental)
+
+With `window: n`, each port this mux opens asks for flow control in its `open`, and the peer's mux
+applies it to that port in both directions. Each side may then have at most `n` bytes of a port's
+messages delivered to the other side and not yet consumed. What exceeds the window waits in the
+port's send queue:
+
+- `portBufferedAmount(port)` returns the queued bytes;
+- `whenPortReady(port, below = 0)` resolves once at most `below` bytes are queued.
+
+A sender that must not queue without bound waits for `whenPortReady` before posting more.
+
+A message counts as consumed once every listener has returned, or, for a listener that returns a
+promise, once it settles. A consumer that takes messages from its own queue returns a promise
+that settles when it takes them. A slow consumer then holds its own port's window and no other
+port's.
+
+Credit goes back in batches: at once from a quarter of the window, else on the next task.
+
+How size is counted:
+
+- a message's size is its byte length (`ArrayBuffer`, typed arrays) or a string's length;
+- an object costs the sizes of its values, 4 levels deep and at most 256 values;
+- every message costs at least 64 bytes;
+- a message larger than the window is sent once nothing else is outstanding.
+
+Both ends must support it: an old peer never sends credit, so a port that asked for a window
+stalls once the window is spent.
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
 peer to accept. That keeps layer 1 free of round trips: messages posted before a rejection are
