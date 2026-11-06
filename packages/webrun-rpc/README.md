@@ -298,6 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
+| `onLeak` | Development aid, off when unset: called with a port's `PortInfo` when its consumer dropped it without `close()`, and the port is freed. See "A port lives until its transport or its user lets go" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -416,11 +417,50 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
   cast is needed because the declared type leaves `Symbol.dispose` out: naming it would require
   every consumer to compile with the `esnext.disposable` lib.
 
+What aborts `signal` depends on the transport. A Node worker reports its death:
+
+```ts
+import { Worker } from "node:worker_threads";
+
+const worker = new Worker(new URL("./worker.js", import.meta.url));
+const { port1, port2 } = new MessageChannel();
+worker.postMessage({ port: port2 }, [port2]);
+const exited = new AbortController();
+worker.once("exit", (code) => exited.abort(new Error(`the worker exited (${code})`)));
+const mux = multiplexPort(port1, { codec: structuredCodec, signal: exited.signal });
+```
+
+A browser realm (a tab, an iframe, a worker) reports nothing, but the browser releases its
+[Web Locks](https://developer.mozilla.org/docs/Web/API/Web_Locks_API) when it ends. The other realm
+holds a lock for its whole life, and this side asks for the same lock, which it gets only then:
+
+```ts
+// In the other realm, before it says it is ready:
+navigator.locks.request("realm:editor", () => new Promise(() => {}));
+
+// Here, once the other realm has said it holds the lock — asked earlier, it is granted at once:
+const gone = new AbortController();
+navigator.locks.request("realm:editor", () => gone.abort(new Error("the editor realm is gone")));
+const mux = multiplexPort(port, { codec: structuredCodec, signal: gone.signal });
+```
+
+Locks are per browser profile, so this works between realms of one origin, never across a
+network. In Node 24 a worker's locks are not visible to the thread that started it (the parent's
+request is granted while the worker holds the lock), so use `exit` there.
+
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.
 
-Weak references are not the fix: the mux must hold each port strongly to deliver to it, and an
-abandoned port's listeners usually close over the port, so it stays reachable from the table.
+**A dropped port can be reported (`onLeak`).** Weak references cannot free leaks on their own:
+the mux must deliver to every open port, and an abandoned port's listeners usually close over the
+port, so it stays reachable from the table. What they can do is catch the ports nothing else
+holds. The mux keeps only its own record of a port, never the consumer's object, so with
+`onLeak` a port its consumer dropped without `close()` is reported once the collector reclaims it
+(`onLeak(info)`, with its `meta`), and freed on both ends as a close would free it: the peer sees
+reason `"leaked"`, and the port's close signal aborts with `webrun-rpc: the port was dropped
+without close()`. A port whose own listener refers to it is never collected, so never reported;
+when the collector runs is up to the runtime. It is a development aid: each port costs a
+`FinalizationRegistry` entry.
 
 ### No close is observable at layer 1
 

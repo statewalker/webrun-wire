@@ -60,6 +60,7 @@ export function multiplexPort(
     signal,
     window,
     frameSize,
+    onLeak,
   } = options;
   // A frame of no bytes would never advance the split: refuse it here.
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
@@ -97,13 +98,38 @@ export function multiplexPort(
     toGrant: number;
     grantScheduled: boolean;
   }
+  /**
+   * What the mux keeps of a port: never the consumer's `port` object itself,
+   * so a port its consumer dropped can be collected and reported (`onLeak`).
+   */
+  type PortRecord = Pick<VirtualPortHandle, "deliver" | "markClosed" | "isClosed">;
   interface Entry extends PortInfo {
-    handle: VirtualPortHandle;
+    handle: PortRecord;
     credit?: Credit;
     /** The frames of a message still arriving. */
     partial?: { chunks: Uint8Array[]; bytes: number };
   }
   const open = new Map<number, Entry>();
+  // A port collected while still open: report it, then free its slot on both
+  // ends as its close would. Only with `onLeak` — a registry costs per port.
+  const leaks = onLeak
+    ? new FinalizationRegistry<{
+        id: number;
+        record: PortRecord;
+        release: (reason: unknown) => void;
+      }>(({ id, record, release }) => {
+        const entry = open.get(id);
+        if (entry?.handle !== record) return;
+        const { handle: _, credit: __, partial: ___, ...info } = entry;
+        release("leaked");
+        record.markClosed(new Error("webrun-rpc: the port was dropped without close()"));
+        try {
+          onLeak?.(info);
+        } catch {
+          // A reporter's fault must not escape into the finalizer.
+        }
+      })
+    : undefined;
   const touch = (id: number): void => {
     const entry = open.get(id);
     if (entry) entry.lastActivity = Date.now();
@@ -238,7 +264,6 @@ export function multiplexPort(
     opener: boolean,
     exact: boolean,
   ): VirtualPortHandle => {
-    let self!: VirtualPortHandle;
     // A peer's window must be a positive integer; anything else means none.
     const c: Credit | undefined =
       typeof portWindow === "number" && Number.isSafeInteger(portWindow) && portWindow > 0
@@ -259,7 +284,7 @@ export function multiplexPort(
             grantScheduled: false,
           }
         : undefined;
-    self = newVirtualPort(
+    const self = newVirtualPort(
       (payload, transfer) => {
         touch(id);
         const envelope: PortEnvelope = { type: "message", id, payload };
@@ -309,24 +334,31 @@ export function multiplexPort(
         flush(c);
       },
       (reason) => {
-        open.delete(id);
-        // What is queued goes out now, before the close and regardless of the
-        // window: a peer that stopped returning credit (a listener that never
-        // settles) must still learn that the port is closed, and nothing is
-        // kept for a port nobody holds. Without a window it would all have
-        // gone out at once anyway.
-        if (c?.queue.length) {
-          for (const item of c.queue.splice(0)) item.send();
-          c.queued = 0;
-        }
-        // Behind this port's frames, so the peer gets the whole message first.
-        sendOnPort(id, () => post({ type: "close", id, reason }));
-        releaseWaiters(c);
-        self.markClosed(reason);
+        release(reason);
+        record.markClosed(reason);
       },
     );
+    function release(reason: unknown): void {
+      open.delete(id);
+      leaks?.unregister(record);
+      // What is queued goes out now, before the close and regardless of the
+      // window: a peer that stopped returning credit (a listener that never
+      // settles) must still learn that the port is closed, and nothing is
+      // kept for a port nobody holds. Without a window it would all have
+      // gone out at once anyway.
+      if (c?.queue.length) {
+        for (const item of c.queue.splice(0)) item.send();
+        c.queued = 0;
+      }
+      // Behind this port's frames, so the peer gets the whole message first.
+      sendOnPort(id, () => post({ type: "close", id, reason }));
+      releaseWaiters(c);
+    }
+    // No closure below may refer to `self`: closures in one scope share it, and
+    // the ones the mux keeps would then hold the consumer's port (`onLeak`).
+    const { markClosed, isClosed } = self;
     if (c) {
-      const deliver = self.deliver.bind(self);
+      const deliver = self.deliver;
       self.deliver = (payload, size = estimateMessageSize(payload)) => {
         c.unconsumed += size;
         const done = deliver(payload);
@@ -338,13 +370,15 @@ export function multiplexPort(
         bufferedAmount: () => c.queued,
         ready: (below = 0) =>
           new Promise<void>((resolve) => {
-            if (c.queued <= below || self.isClosed()) nextTask(resolve);
+            if (c.queued <= below || isClosed()) nextTask(resolve);
             else c.waiters.push({ below, resolve: () => nextTask(resolve) });
           }),
       });
     }
+    const record: PortRecord = { deliver: self.deliver, markClosed, isClosed };
+    leaks?.register(self.port, { id, record, release }, record);
     const now = Date.now();
-    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: self, credit: c });
+    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: record, credit: c });
     return self;
   };
 
@@ -532,7 +566,9 @@ export function multiplexPort(
           : { type: "open", id, meta },
       );
       if (portSignal) {
-        const onAbort = () => void handle.port.close?.(portSignal.reason);
+        // Weakly: a long-lived signal must not keep a dropped port reachable.
+        const ref = new WeakRef(handle.port);
+        const onAbort = () => void ref.deref()?.close?.(portSignal.reason);
         portSignal.addEventListener("abort", onAbort, { once: true });
         getPortCloseSignal(handle.port)?.addEventListener(
           "abort",

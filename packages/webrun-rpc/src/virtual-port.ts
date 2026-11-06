@@ -72,7 +72,16 @@ export function newVirtualPort(
   // which would require consumers to compile with `esnext.disposable`.
   const dispose = (Symbol as { dispose?: symbol }).dispose;
   if (dispose) {
-    Object.defineProperty(port, dispose, { value: () => port.close?.(), configurable: true });
+    // A method, not a closure over `port`: closures here share one scope, and
+    // one that captured `port` would make `deliver` and `markClosed` — which
+    // the mux keeps — hold the consumer's port too, so it could never be
+    // collected (see `onLeak`).
+    Object.defineProperty(port, dispose, {
+      value(this: MessageTarget) {
+        return this.close?.();
+      },
+      configurable: true,
+    });
   }
 
   return {
