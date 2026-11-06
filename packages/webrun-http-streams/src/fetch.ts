@@ -166,10 +166,12 @@ export function serveFetchOverDuplex(
   handler: (request: Request) => Promise<Response>,
   options: HttpDataOptions = {},
 ): Duplex {
-  return httpServe(async (env, body) => {
+  return httpServe(async (env, body, exchange) => {
     const reqInit: RequestInit = {
       method: env.method,
       headers: forwardableHeaders(env.headers),
+      // Aborts when the caller abandons the exchange (see `HttpExchange`).
+      signal: exchange?.signal,
     };
     let upload: ReturnType<typeof trackingEnd> | undefined;
     if (env.method !== "GET" && env.method !== "HEAD") {

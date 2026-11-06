@@ -600,3 +600,24 @@ describe("a link gives every request's port back", () => {
     await expect(link.send(new Request("http://x/"))).rejects.toThrow(/closed/);
   });
 });
+
+describe("a handler learns its caller left", () => {
+  it("the served Request's signal aborts when the caller aborts before the answer", async () => {
+    let served: AbortSignal | undefined;
+    const { link } = await linked(async (request) => {
+      served = request.signal;
+      await new Promise((resolve) => request.signal.addEventListener("abort", resolve));
+      return new Response("too late");
+    });
+    const controller = new AbortController();
+    const pending = link
+      .send(new Request("http://x/poll", { signal: controller.signal }))
+      .catch(() => "aborted");
+    const deadline = Date.now() + 2000;
+    while (!served && Date.now() < deadline) await tick(1);
+    controller.abort();
+    while (!served?.aborted && Date.now() < deadline) await tick(1);
+    expect(served?.aborted).toBe(true);
+    expect(await pending).toBe("aborted");
+  });
+});

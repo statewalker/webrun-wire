@@ -1,5 +1,6 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { deserializeError, serializeError } from "@statewalker/webrun-streams";
+import { asyncDisposable } from "./async-dispose.js";
 import { discard } from "./bytes.js";
 import { defaultCodec } from "./codec-default.js";
 import { HttpParseError } from "./http1/errors.js";
@@ -91,7 +92,30 @@ export interface HttpDataHandlerResult {
 export type HttpDataHandler = (
   env: RequestEnvelope,
   body: AsyncIterable<Uint8Array>,
+  exchange: HttpExchange,
 ) => Promise<HttpDataHandlerResult>;
+
+/** What a handler is told about the exchange it serves. */
+export interface HttpExchange {
+  /**
+   * Aborts when the exchange is abandoned before it is over: the caller gave
+   * up or its transport went away, or the serving side tore the stream down
+   * (its own timeout, a shutdown). A handler that waits before it answers (a
+   * long poll) can stop then. The exchange is over once the response went out
+   * in full and the handler is done with the request body: a handler that
+   * answers first and reads the upload afterwards still sees an abort if the
+   * upload is cut. A completed exchange never aborts.
+   */
+  signal: AbortSignal;
+}
+
+/**
+ * The reason of `HttpExchange.signal` when the exchange is abandoned with no
+ * error of its own (`return()`); one abandoned by `throw(error)` aborts with
+ * that error.
+ */
+export const EXCHANGE_ABANDONED_MESSAGE =
+  "webrun-http-streams: the exchange was abandoned before it was over";
 
 /** Hard cap on the peer-error header (M3): see `encodeErrorResponse`. */
 const MAX_DETAIL_CHARS = 4096;
@@ -337,7 +361,16 @@ async function drain(output: AsyncGenerator<Uint8Array>): Promise<void> {
  */
 export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {}): Duplex {
   const codec = options.codec ?? defaultCodec;
-  return async function* httpHandlerDuplex(input) {
+  return (input) => {
+    const abandoned = new AbortController();
+    return abortingOnReturn(exchange(input, { signal: abandoned.signal }), (reason) =>
+      abandoned.abort(reason ?? new Error(EXCHANGE_ABANDONED_MESSAGE)),
+    );
+  };
+  async function* exchange(
+    input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+    context: HttpExchange,
+  ): AsyncGenerator<Uint8Array> {
     // A refusal to parse the request must still produce a response. Left
     // uncaught, the exception propagates out of this generator and NOTHING is
     // written — a real peer waits, then sees the connection end with no status
@@ -366,7 +399,7 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
     const replyCodec = decoded.codec ?? codec;
     let result: HttpDataHandlerResult;
     try {
-      result = await handler(decoded.envelope, decoded.body);
+      result = await handler(decoded.envelope, decoded.body, context);
     } catch (error) {
       yield* encodeErrorResponse(replyCodec, error, decoded.envelope.method);
       return;
@@ -387,5 +420,39 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
         }
       }
     }
+  }
+}
+
+/**
+ * `gen`, except that `return()` and `throw()` from its consumer call `abandon`
+ * at once — before they are queued behind a `next()` still parked inside the
+ * generator (the handler's `await`) — unless the generator already finished.
+ */
+function abortingOnReturn<T>(
+  gen: AsyncGenerator<T>,
+  abandon: (reason?: unknown) => void,
+): AsyncGenerator<T> {
+  let finished = false;
+  const settle = (r: IteratorResult<T>) => {
+    if (r.done) finished = true;
+    return r;
   };
+  const wrapped: AsyncGenerator<T> = {
+    next: (...args: [] | [unknown]) => gen.next(...args).then(settle),
+    return(value) {
+      if (!finished) abandon();
+      finished = true;
+      return gen.return(value);
+    },
+    throw(error) {
+      if (!finished) abandon(error);
+      finished = true;
+      return gen.throw(error);
+    },
+    [Symbol.asyncIterator]() {
+      return wrapped;
+    },
+  };
+  // `await using` ends it as leaving a `for await` early does.
+  return asyncDisposable(wrapped, () => wrapped.return(undefined));
 }

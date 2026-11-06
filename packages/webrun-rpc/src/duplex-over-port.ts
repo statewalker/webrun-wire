@@ -481,6 +481,12 @@ async function sendChunks(
 ): Promise<void> {
   const framed = maxMessageSize ? toChunks(maxMessageSize)(output) : output;
   const stream = throughAbort(framed, signal);
+  // `throughAbort` returns `framed`; when chunking wraps the output, that
+  // `return()` is queued behind the chunker's pending `next()`, so the abort
+  // would reach the producer only once it yields. Return the producer itself.
+  const producer = output as Partial<AsyncIterator<Uint8Array>>;
+  const returnProducer = () => void Promise.resolve(producer.return?.()).catch(() => {});
+  if (framed !== output) signal.addEventListener("abort", returnProducer, { once: true });
   try {
     await sendIterator<Uint8Array>(async ({ done, value, error }) => {
       if (signal.aborted) return;
@@ -502,5 +508,7 @@ async function sendChunks(
     // anything else is a genuine transport failure worth surfacing.
     if (signal.aborted) return;
     throw err;
+  } finally {
+    signal.removeEventListener("abort", returnProducer);
   }
 }

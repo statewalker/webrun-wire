@@ -139,15 +139,24 @@ export const serve: Serve<PortParams> = async ({ mux: factory, timeout }, handle
     // reaches it as `return()` through `throughAbort`, so the `finally` runs
     // on every ending — normal exhaustion, handler throw, peer abort, local
     // teardown. `serveDuplexOverPort` reports no completion of its own.
-    const tracked: Duplex = (input) =>
-      (async function* () {
-        try {
-          yield* handler(input);
-        } finally {
-          finished = true;
-          if (off) live.delete(off);
-        }
-      })();
+    const tracked: Duplex = (input) => {
+      const output = handler(input);
+      // `return()` on this wrapper is queued behind its pending `next()`, as on
+      // any async generator, so the abandonment would reach the handler only
+      // once it answers. Forwarded at once, a handler still waiting (an HTTP
+      // long poll) learns now that its caller left.
+      return returningAtOnce(
+        (async function* () {
+          try {
+            yield* output;
+          } finally {
+            finished = true;
+            if (off) live.delete(off);
+          }
+        })(),
+        () => void output.return(undefined).catch(() => {}),
+      );
+    };
     off = serveDuplexOverPort(port, tracked, streamOptions);
     // `serveDuplexOverPort` invokes the handler synchronously. The generator
     // body above is lazy, so today it cannot have finished by the time `off`

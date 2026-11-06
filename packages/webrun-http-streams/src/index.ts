@@ -9,9 +9,11 @@ export {
 } from "./envelope.js";
 export { fetchOverDuplex, serveFetchOverDuplex } from "./fetch.js";
 export {
+  EXCHANGE_ABANDONED_MESSAGE,
   type HttpDataHandler,
   type HttpDataHandlerResult,
   type HttpDataOptions,
+  type HttpExchange,
   type HttpFetchResult,
   httpFetch,
   httpServe,
