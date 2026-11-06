@@ -67,14 +67,42 @@ export interface PortMuxOptions {
    * delivered a body as zero bytes with no error on either side.
    */
   maxMessageSize?: number;
+  /**
+   * The transport's life. When it aborts, the mux closes with
+   * `signal.reason`: every port's close signal aborts and the calls in flight
+   * on them reject at once. Wire it to whatever reports the pipe's death — a
+   * worker's `exit`, a libp2p stream's `close`, a liveness lock — because a
+   * pipe that dies silently otherwise leaves every port open, forever.
+   */
+  signal?: AbortSignal;
+}
+
+/** What `PortMux.ports()` reports for one open port. */
+export interface PortInfo {
+  id: number;
+  meta?: unknown;
+  /** `Date.now()` when the port was opened. */
+  openedAt: number;
+  /** `Date.now()` of the last message in either direction. */
+  lastActivity: number;
+}
+
+export interface OpenPortOptions {
+  /** Closes the port when it aborts, so the port lives no longer than its user. */
+  signal?: AbortSignal;
 }
 
 /** One port in, many ports out. */
 export interface PortMux {
   /** Allocate a port, announce it, and return the local end. */
-  openPort(meta?: unknown): Promise<MessageTarget>;
-  /** Close every virtual port, then release the underlying port. */
-  close(): Promise<void>;
+  openPort(meta?: unknown, options?: OpenPortOptions): Promise<MessageTarget>;
+  /**
+   * Close every virtual port, then release the underlying port. `reason`
+   * becomes the reason of every port's close signal.
+   */
+  close(reason?: unknown): Promise<void>;
+  /** The ports open now, to find who holds a full table. */
+  ports?(): PortInfo[];
   /** See {@link PortMuxOptions.maxMessageSize}. */
   readonly maxMessageSize?: number;
 }

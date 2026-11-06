@@ -60,6 +60,13 @@ export function newVirtualPort(
     },
   };
   setPortCloseSignal(port, closing.signal);
+  // `using port = await mux.openPort()` closes it on scope exit. Installed
+  // only where the runtime has the symbol, and kept off the declared type,
+  // which would require consumers to compile with `esnext.disposable`.
+  const dispose = (Symbol as { dispose?: symbol }).dispose;
+  if (dispose) {
+    Object.defineProperty(port, dispose, { value: () => port.close?.(), configurable: true });
+  }
 
   return {
     port,

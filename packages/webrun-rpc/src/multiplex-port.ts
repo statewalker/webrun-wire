@@ -1,5 +1,12 @@
+import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import type { PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
+import type {
+  OpenPortOptions,
+  PortEnvelope,
+  PortInfo,
+  PortMux,
+  PortMuxOptions,
+} from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
 
 /**
@@ -24,9 +31,17 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     side = "initiator",
     maxPorts = DEFAULT_MAX_PORTS,
     maxMessageSize,
+    signal,
   } = options;
 
-  const open = new Map<number, VirtualPortHandle>();
+  interface Entry extends PortInfo {
+    handle: VirtualPortHandle;
+  }
+  const open = new Map<number, Entry>();
+  const touch = (id: number): void => {
+    const entry = open.get(id);
+    if (entry) entry.lastActivity = Date.now();
+  };
   let nextId = side === "initiator" ? 0 : 1;
   let muxClosed = false;
 
@@ -40,17 +55,21 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     }
   };
 
-  const attach = (id: number): VirtualPortHandle => {
+  const attach = (id: number, meta: unknown): VirtualPortHandle => {
     let self!: VirtualPortHandle;
     self = newVirtualPort(
-      (payload, transfer) => post({ type: "message", id, payload }, transfer),
+      (payload, transfer) => {
+        touch(id);
+        post({ type: "message", id, payload }, transfer);
+      },
       (reason) => {
         post({ type: "close", id, reason });
         open.delete(id);
         self.markClosed();
       },
     );
-    open.set(id, self);
+    const now = Date.now();
+    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: self });
     return self;
   };
 
@@ -65,7 +84,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      const handle = attach(envelope.id);
+      const handle = attach(envelope.id, envelope.meta);
       let accepted = false;
       if (onPort) {
         try {
@@ -82,13 +101,14 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       return;
     }
 
-    const handle = open.get(envelope.id);
+    const handle = open.get(envelope.id)?.handle;
 
     if (envelope.type === "message") {
       // Drop, never queue. An id that was rejected, never opened, or already
       // closed has no consumer, and holding its traffic would be exactly the
       // buffering layer 1 refuses to do.
       if (!handle) return;
+      touch(envelope.id);
       handle.deliver(envelope.payload);
       return;
     }
@@ -103,16 +123,36 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     if (envelope) handleEnvelope(envelope);
   };
 
+  const close = async (reason?: unknown): Promise<void> => {
+    if (muxClosed) return;
+    signal?.removeEventListener("abort", onTransportAbort);
+    for (const [id, { handle }] of [...open]) {
+      post({ type: "close", id });
+      open.delete(id);
+      handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
+    }
+    muxClosed = true;
+    port.removeEventListener("message", listener);
+    await port.close?.();
+  };
+  const onTransportAbort = (): void => {
+    void close(signal?.reason);
+  };
+
   port.addEventListener("message", listener);
   void port.start?.();
+  if (signal?.aborted) void close(signal.reason);
+  else signal?.addEventListener("abort", onTransportAbort, { once: true });
 
   return {
     maxMessageSize,
 
-    async openPort(meta?: unknown): Promise<MessageTarget> {
+    async openPort(meta?: unknown, { signal: portSignal }: OpenPortOptions = {}) {
       if (muxClosed) throw new Error("webrun-rpc: the multiplexer is closed");
       if (open.size >= maxPorts) {
-        throw new RangeError(`webrun-rpc: maxPorts (${maxPorts}) reached`);
+        throw new RangeError(
+          `webrun-rpc: maxPorts (${maxPorts}) reached; open ports by kind: ${describeKinds(open.values())}`,
+        );
       }
       // A hostile or misconfigured peer may have opened using our own
       // parity. Skipping a claimed id costs one line and keeps a local open
@@ -120,21 +160,45 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id);
+      const handle = attach(id, meta);
       post({ type: "open", id, meta });
+      if (portSignal) {
+        const onAbort = () => void handle.port.close?.();
+        if (portSignal.aborted) onAbort();
+        else {
+          portSignal.addEventListener("abort", onAbort, { once: true });
+          getPortCloseSignal(handle.port)?.addEventListener(
+            "abort",
+            () => portSignal.removeEventListener("abort", onAbort),
+            { once: true },
+          );
+        }
+      }
       return handle.port;
     },
 
-    async close(): Promise<void> {
-      if (muxClosed) return;
-      for (const [id, handle] of [...open]) {
-        post({ type: "close", id });
-        open.delete(id);
-        handle.markClosed(new Error(MUX_CLOSED_MESSAGE));
-      }
-      muxClosed = true;
-      port.removeEventListener("message", listener);
-      await port.close?.();
+    close,
+
+    ports(): PortInfo[] {
+      return [...open.values()].map(({ handle: _, ...info }) => info);
     },
   };
+}
+
+/**
+ * `"http: 1000, ws: 24"`: the three commonest `meta.kind`s among `entries`, so
+ * a full table names who filled it. A port without a kind counts as `"?"`.
+ */
+function describeKinds(entries: Iterable<PortInfo>): string {
+  const counts = new Map<string, number>();
+  for (const { meta } of entries) {
+    const kind = (meta as { kind?: unknown } | undefined)?.kind;
+    const name = typeof kind === "string" ? kind : "?";
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, 3)
+    .map(([name, n]) => `${name}: ${n}`)
+    .join(", ");
 }

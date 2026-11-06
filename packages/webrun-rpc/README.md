@@ -62,7 +62,7 @@ Stream tier and adapter:
 | `serve(params: PortParams, handler)` | Registers a `Duplex` handler. Resolves an idempotent teardown that abandons live streams, then closes the mux. |
 | `PortParams` | `{ mux: PortMuxFactory; timeout?: number }`. |
 | `PortMuxFactory`, `OnPort` | `(onPort?: OnPort) => PortMux \| Promise<PortMux>`; `(port, meta?) => boolean \| undefined`, `false` rejects. |
-| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`. |
+| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`. |
 | `overPorts(factory)` | Pass-through, for a mux this package knows nothing about. |
 | `duplexOverPort(port, options?)` | A `Duplex` running one stream on `port`. |
 | `serveDuplexOverPort(port, handler, options?)` | The serving half. Returns an idempotent teardown that abandons the stream and notifies the peer. |
@@ -75,7 +75,8 @@ Port multiplexing:
 | --- | --- |
 | `multiplexPort(port, options: PortMuxOptions)` | Emulated multiplexing over one port. |
 | `transferPortMux(target, options?: TransferPortMuxOptions)` | Multiplexing with real transferred `MessagePort`s. |
-| `PortMux` | `openPort(meta?)`, `close()`, `maxMessageSize`. |
+| `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
+| `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
 | `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`. |
 | `structuredCodec` | Envelopes passed through unencoded. |
 | `DEFAULT_MAX_PORTS` | `1024`. |
@@ -292,13 +293,16 @@ port cannot grow memory here.
 | `side` | `"initiator"` (default) allocates even ids, `"responder"` odd, so both ends can open concurrently with no negotiation. The two ends of one pipe must disagree. |
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
+| `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
 peer to accept. That keeps layer 1 free of round trips: messages posted before a rejection are
 dropped at the far end and the port goes inert. It is asynchronous because a natively multiplexed
 transport cannot produce a port synchronously and both must share one shape. Its guard failures
 are rejections, not synchronous throws: `RangeError: webrun-rpc: maxPorts (<n>) reached` and
-`Error: webrun-rpc: the multiplexer is closed`. A duplicate `open` id from the peer is ignored
+`Error: webrun-rpc: the multiplexer is closed`. The `RangeError` goes on with the three commonest
+`meta.kind`s among the open ports, `open ports by kind: http: 1000, ws: 24`, so a full table names
+the consumer that filled it (`"?"` counts ports without a kind). A duplicate `open` id from the peer is ignored
 rather than replacing a live port, and a local `openPort` skips ids the peer already claimed with
 the wrong parity.
 
@@ -307,6 +311,26 @@ the wrong parity.
 integer `id` and one of those three types, so other traffic on a shared port is ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
+
+### A port lives until its transport or its user lets go
+
+A port leaves the table only when one side closes it or the mux closes. Nothing else frees it, and
+a full table refuses every new port. So both lifetimes are wired in explicitly:
+
+- **The transport.** A `MessagePort`, a terminated worker or a dead libp2p stream gives no close
+  event, so the mux cannot notice by itself. Pass `signal` and abort it from whatever does notice
+  (a worker's `exit`, a stream's `close`, a liveness lock): the mux closes with `signal.reason`,
+  every port's close signal aborts with it, and calls in flight reject at once instead of hanging.
+  `close(reason)` does the same by hand.
+- **The user.** `openPort(meta, { signal })` closes the port when `signal` aborts. Ports are also
+  disposable where the runtime defines `Symbol.dispose`, so `using port = await mux.openPort()`
+  closes it on scope exit.
+
+`ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
+message either way), for finding a consumer that never closes.
+
+Weak references are not the fix: the mux must hold each port strongly to deliver to it, and an
+abandoned port's listeners usually close over the port, so it stays reachable from the table.
 
 ### No close is observable at layer 1
 
