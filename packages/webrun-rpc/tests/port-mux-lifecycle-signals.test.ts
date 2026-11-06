@@ -162,3 +162,75 @@ describe("leaks are visible", () => {
     await expect(a.openPort({ kind: "http" })).rejects.toThrow(/http: 2.*ws: 1/);
   });
 });
+
+describe("review fixes (#42)", () => {
+  it("a transport abort whose pipe.close() rejects is not an unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const transport = new AbortController();
+      const pipe: MessageTarget = {
+        addEventListener() {},
+        removeEventListener() {},
+        postMessage() {},
+        close: () => Promise.reject(new Error("stream already reset")),
+      };
+      multiplexPort(pipe, { codec: structuredCodec, signal: transport.signal });
+      transport.abort(new Error("gone"));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("a port opened from a close-signal listener during close is refused, not leaked", async () => {
+    const { a } = pair();
+    const port = await a.openPort();
+    let reopened: Promise<unknown> | undefined;
+    getPortCloseSignal(port)?.addEventListener("abort", () => {
+      reopened = a.openPort().catch((error) => error);
+    });
+    await a.close();
+    expect(await reopened).toBeInstanceOf(Error);
+    expect(a.ports()).toEqual([]);
+  });
+
+  it("openPort's signal reason reaches the port's close signal", async () => {
+    const { a } = pair();
+    const user = new AbortController();
+    const port = await a.openPort(undefined, { signal: user.signal });
+    const reason = new Error("user gave up");
+    user.abort(reason);
+    expect(getPortCloseSignal(port)?.reason).toBe(reason);
+  });
+
+  it("openPort with an already-aborted signal rejects with its reason and opens nothing", async () => {
+    const { a, b } = pair();
+    const reason = new Error("too late");
+    await expect(a.openPort(undefined, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(a.ports()).toEqual([]);
+    expect(b.ports()).toEqual([]);
+  });
+
+  it("transferPortMux honours openPort's signal too", async () => {
+    const { transferPortMux } = await import("../src/transfer-port-mux.js");
+    const channel = new MessageChannel();
+    rawPorts.push(channel.port1, channel.port2);
+    const server = transferPortMux(channel.port2, { onPort: () => true });
+    const client = transferPortMux(channel.port1);
+    muxes.push(server, client);
+    const user = new AbortController();
+    const port = (await client.openPort(undefined, { signal: user.signal })) as MessagePort;
+    let closed = false;
+    const close = port.close.bind(port);
+    port.close = () => {
+      closed = true;
+      close();
+    };
+    user.abort();
+    expect(closed).toBe(true);
+  });
+});
