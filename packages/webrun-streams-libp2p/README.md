@@ -55,11 +55,12 @@ runs (Node or browser).
 | `serve(params, handler)` | `Serve<ServeLibp2pParams>`. `node.handle(protocol)`; runs `handler` per inbound stream. Resolves to an idempotent teardown that calls `node.unhandle(protocol)`. |
 | `serveConnections(params, makeHandler)` | Like `serve`, but `makeHandler(context)` is called once per inbound stream with `{ remotePeer }`, and returns that stream's `Duplex`. |
 | `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
-| `PeerGoneError` | What a call fails with when the peer's connection died before the peer ended the stream. `cause` is libp2p's close error, if any. |
-| `messageTargetOverStream(stream)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. See below. |
+| `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
+| `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
+| `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
 | `ConnectLibp2pParams`, `ServeLibp2pParams`, `ConnectionContext`, `ServeConnectionsHandler`, `DuplexOverStreamOptions` | Types, below. |
 
 `ConnectLibp2pParams`:
@@ -250,7 +251,7 @@ streams and that an unconfigured server stops at 32.
   bounded by the close timeout.
 - **The peer dies** (its process is killed, the network drops, the connection
   is aborted). The call's output throws `PeerGoneError`, `webrun-streams-libp2p:
-  the peer went away before ending the stream`, within milliseconds of libp2p
+  the stream ended before the call finished`, within milliseconds of libp2p
   noticing, whether or not the caller's input is still open. It never ends
   cleanly: a clean end requires the peer's own close-write
   (`remoteCloseWrite`), because when a connection dies libp2p closes the
@@ -258,7 +259,11 @@ streams and that an unconfigured server stops at 32.
   Without that rule a truncated response reads as a complete one. A peer
   that ended its side and then died while this side was still sending fails
   the same way; the input is returned instead of waited on. A peer that
-  resets the stream explicitly still throws libp2p's `StreamResetError`.
+  resets the stream before ending its side throws libp2p's `StreamResetError`;
+  one that resets it after (a tunnel whose far end gave up) throws
+  `PeerGoneError` with the `StreamResetError` as `cause`. Either way the
+  error says the call is incomplete — `PeerGoneError` does not prove the
+  peer died, only that the stream ended before both sides finished it.
 - **Caller cancels** (`.return()` on the call's generator). The adapter aborts
   the stream with `call cancelled` before the generator's own cleanup runs,
   because by then the stream is already marked closed and `abort` would do
@@ -275,6 +280,8 @@ streams and that an unconfigured server stops at 32.
   `[webrun-streams-libp2p] serve: inbound stream on protocol <p> failed: <message>`,
   so one failed stream never becomes an unhandled rejection that terminates
   the serving process. The handler's output is returned, so its `finally` runs.
+  A caller that sent its whole request and then stopped reading the response
+  (`.return()` mid-stream) is ordinary and is not logged.
 
 ### A multiplexer over one stream closes with it
 
@@ -291,7 +298,9 @@ const mux = multiplexPort(target, { codec: msgpackCodec, side: "initiator", sign
 ```
 
 `signal` aborts on the stream's `close` (with `PeerGoneError` when the
-connection died) and on the peer's close-write. Unwired, every port and every
+connection died) and on the peer's close-write — after the read loop has
+delivered every message the peer sent before it, so a reply followed by a
+close is not lost to a multiplexer that tears down on `signal`. Unwired, every port and every
 call on a dead stream waits forever. Wired, 100 ports on a SIGKILLed peer all
 close within the test's 1 s bound. A stream closes when its connection does,
 so this also covers a peer that dies while no data is flowing.
@@ -302,8 +311,15 @@ does not wait for room, and libp2p resets a stream whose write buffer passes
 `maxWriteBufferLength`. The target reports its state instead:
 `bufferedAmount` is the stream's write buffer, and `whenDrained()` resolves
 on libp2p's `drain` (or the stream's `close`, so no sender is left waiting),
-at once when the stream has room. `multiplexPort` with `frameSize` waits on it
-between frames, which is what lets ports take turns on the stream.
+at once when the stream has room. A sender that must not overrun the buffer
+awaits it before posting more.
+
+A length prefix that is not a valid varint, or one past `maxMessageBytes`
+(default `DEFAULT_MAX_MESSAGE_BYTES`, 64 MiB), aborts the stream and `signal`
+with `webrun-streams-libp2p: a malformed message length` or `… exceeds
+maxMessageBytes`: a peer not speaking this framing would otherwise make the
+reader buffer without bound. Raise it with
+`messageTargetOverStream(stream, { maxMessageBytes })` for larger messages.
 
 ### Constraints
 

@@ -53,15 +53,15 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
 export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 
 /**
- * The peer went away mid-call: its connection closed, reset or aborted before
- * it ended its side of the stream. Distinct from a clean end on purpose — a
- * response cut short by a dead peer must never read as a complete one.
- * `cause` is the stream's close error, when libp2p gave one.
+ * The stream ended before the call finished: the peer died, the connection
+ * dropped, or the stream was reset or refused before both sides ended it.
+ * Distinct from a clean end on purpose — a response cut short must never read
+ * as a complete one. `cause` is the stream's close error, when libp2p gave one.
  */
 export class PeerGoneError extends Error {
   constructor(cause?: unknown) {
     super(
-      `webrun-streams-libp2p: the peer went away before ending the stream${
+      `webrun-streams-libp2p: the stream ended before the call finished${
         cause instanceof Error ? ` (${cause.message})` : ""
       }`,
       { cause },

@@ -115,6 +115,10 @@ describe("a dead peer fails every call, never ends it cleanly", () => {
         connection.abort(new Error("network dropped"));
       }
       expect(await settle(outcomes)).toEqual({ error: CHANNELS, done: 0, pending: 0 });
+      const errors = outcomes.map((o) => (o as { error?: unknown }).error);
+      expect(
+        errors.every((e) => e instanceof PeerGoneError || (e as Error).name === "StreamResetError"),
+      ).toBe(true);
     });
 
     it(`peer process SIGKILLed, ${mode}`, async () => {
@@ -258,5 +262,92 @@ describe("messageTargetOverStream reports when the stream is full", () => {
     const waiting = target.whenDrained();
     stream.dispatchEvent(new Event("close"));
     await expect(waiting).resolves.toBeUndefined();
+  });
+});
+
+describe("review fixes (#44)", () => {
+  it("a message the peer sent just before closing is delivered before signal aborts", async () => {
+    const serverNode = await createNode();
+    await serverNode.handle("/test-last/1.0.0", (stream) => {
+      const { target } = messageTargetOverStream(stream);
+      target.addEventListener("message", async () => {
+        target.postMessage(new Uint8Array([42]));
+        await target.close();
+      });
+    });
+    const addr = serverNode.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    const clientNode = await createNode();
+    let late = 0;
+    for (let i = 0; i < 10; i++) {
+      const { target, signal } = messageTargetOverStream(
+        await clientNode.dialProtocol(addr, ["/test-last/1.0.0"]),
+      );
+      const outcome = await new Promise<string>((resolve) => {
+        target.addEventListener("message", () => resolve(signal.aborted ? "late" : "ok"));
+        signal.addEventListener("abort", () => setTimeout(() => resolve("never"), 100));
+        target.postMessage(new Uint8Array([1]));
+      });
+      if (outcome !== "ok") late++;
+    }
+    expect(late).toBe(0);
+  });
+
+  it("a caller that cancels a response it no longer wants is not logged as a dead peer", async () => {
+    const serverNode = await createNode();
+    let finished = 0;
+    await serve({ node: serverNode }, (input) =>
+      (async function* () {
+        try {
+          for await (const _ of input);
+          for (;;) {
+            yield new Uint8Array([1]);
+            await new Promise((r) => setTimeout(r, 10));
+          }
+        } finally {
+          finished++;
+        }
+      })(),
+    );
+    const addr = serverNode.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    const client = await connect({ node: await createNode(), peer: addr });
+    const warn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message: unknown) => warnings.push(String(message));
+    try {
+      for (let i = 0; i < 3; i++) {
+        const out = client.call([new Uint8Array([0])])[Symbol.asyncIterator]();
+        await out.next();
+        await out.return?.(undefined);
+      }
+      const deadline = Date.now() + 2000;
+      while (finished < 3 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      console.warn = warn;
+    }
+    expect(finished).toBe(3);
+    expect(warnings.filter((w) => w.includes("went away"))).toEqual([]);
+  });
+
+  it("a malformed length or one past maxMessageBytes aborts the stream instead of buffering", async () => {
+    const serverNode = await createNode();
+    const signals: AbortSignal[] = [];
+    await serverNode.handle("/test-bad/1.0.0", (stream) => {
+      const { signal } = messageTargetOverStream(stream, { maxMessageBytes: 1024 });
+      signals.push(signal);
+    });
+    const addr = serverNode.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    const clientNode = await createNode();
+    const bad = await clientNode.dialProtocol(addr, ["/test-bad/1.0.0"]);
+    bad.send(new Uint8Array([0xff, 0xff, 0xff, 0xff, 0xff, 0xff])); // a varint that never ends
+    const big = await clientNode.dialProtocol(addr, ["/test-bad/1.0.0"]);
+    big.send(new Uint8Array([0x80, 0x80, 0x04])); // claims 64 KiB, over the 1 KiB cap
+    const deadline = Date.now() + 2000;
+    while ((signals.length < 2 || !signals.every((s) => s.aborted)) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(signals.map((s) => s.aborted)).toEqual([true, true]);
   });
 });

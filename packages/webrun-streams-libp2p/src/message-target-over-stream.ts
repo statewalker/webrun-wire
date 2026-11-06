@@ -24,19 +24,34 @@ export interface StreamMessageTarget {
     readonly bufferedAmount: number;
     /**
      * Resolves once the stream can take more (libp2p's `drain`), or has
-     * closed; at once when it can now. A multiplexer with `frameSize` waits
-     * on it between frames.
+     * closed; at once when it can now.
      */
     whenDrained(): Promise<void>;
   };
   /**
-   * Aborts when the stream is over. The reason is a {@link PeerGoneError}
-   * when the connection died, or an `Error` when the peer closed the stream.
+   * Aborts when the stream is over, after every message the peer sent has
+   * been delivered. The reason is a {@link PeerGoneError} when the stream
+   * ended without the peer finishing it, or an `Error` when the peer closed
+   * it or sent bytes that are not this framing.
    * Pass it as `multiplexPort`'s / `overPipe`'s `signal`, so a dead peer
    * closes the multiplexer and every port on it at once.
    */
   signal: AbortSignal;
 }
+
+/** Options for {@link messageTargetOverStream}. */
+export interface MessageTargetOverStreamOptions {
+  /**
+   * The largest message accepted, in bytes. A length prefix past it — or one
+   * that is not a valid varint — means the peer is not speaking this framing,
+   * so the stream is aborted rather than buffered without bound. Default
+   * {@link DEFAULT_MAX_MESSAGE_BYTES}.
+   */
+  maxMessageBytes?: number;
+}
+
+/** 64 MiB: room for a large unframed message, short of exhausting memory. */
+export const DEFAULT_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 /**
  * One libp2p stream as a pipe of messages, for a multiplexer to run over:
@@ -48,28 +63,29 @@ export interface StreamMessageTarget {
  *
  * Frames are `[varint length][bytes]`. Reading starts at once, so attach the
  * `message` listener in the same tick: a message with no listener is dropped,
- * as on a `MessagePort`. `postMessage` hands the frame to `stream.send()` and
- * does not wait for room; libp2p buffers up to the stream's
- * `maxWriteBufferLength`, past which it resets the stream. A sender that must
- * wait — `multiplexPort` with `frameSize` — awaits `whenDrained()`.
+ * as on a `MessagePort`. Every message the peer sent before closing is
+ * delivered before `signal` aborts. `postMessage` hands the frame to
+ * `stream.send()` and does not wait for room; libp2p buffers up to the
+ * stream's `maxWriteBufferLength`, past which it resets the stream. A sender
+ * that must wait awaits `whenDrained()`.
  */
-export function messageTargetOverStream(stream: Stream): StreamMessageTarget {
+export function messageTargetOverStream(
+  stream: Stream,
+  { maxMessageBytes = DEFAULT_MAX_MESSAGE_BYTES }: MessageTargetOverStreamOptions = {},
+): StreamMessageTarget {
   const listeners = new Set<Listener>();
   const life = new AbortController();
   let peerClosedWrite = false;
 
   const onRemoteCloseWrite = (): void => {
+    // The read loop may still hold the peer's last messages; it aborts
+    // `signal` once it has delivered them.
     peerClosedWrite = true;
-    life.abort(new Error("webrun-streams-libp2p: the peer closed the stream"));
-    void closeStream(stream);
   };
   const onClose = (evt: StreamCloseEvent): void => {
     stream.removeEventListener("remoteCloseWrite", onRemoteCloseWrite);
-    life.abort(
-      peerClosedWrite && evt.error == null
-        ? new Error("webrun-streams-libp2p: the stream was closed")
-        : new PeerGoneError(evt.error),
-    );
+    if (peerClosedWrite && evt.error == null) return; // the read loop ends it
+    life.abort(new PeerGoneError(evt.error));
   };
   stream.addEventListener("remoteCloseWrite", onRemoteCloseWrite);
   stream.addEventListener("close", onClose, { once: true });
@@ -78,38 +94,56 @@ export function messageTargetOverStream(stream: Stream): StreamMessageTarget {
     const event = new MessageEvent("message", { data });
     for (const listener of [...listeners]) {
       try {
-        void listener(event);
-      } catch {
-        // One listener's fault must not stop the read loop.
-      }
+        // One listener's fault — thrown or rejected — must not stop the read loop.
+        Promise.resolve(listener(event)).catch(() => undefined);
+      } catch {}
     }
   };
 
   void (async () => {
+    // Unread bytes are `buf[start, end)`; the buffer grows by doubling, so a
+    // large message arriving in many chunks is copied a bounded number of times.
     let buf = new Uint8Array(0);
+    let start = 0;
+    let end = 0;
     for await (const item of stream) {
       const incoming = normalizeChunk(item);
-      const merged = new Uint8Array(buf.byteLength + incoming.byteLength);
-      merged.set(buf, 0);
-      merged.set(incoming, buf.byteLength);
-      buf = merged;
+      if (end + incoming.byteLength > buf.byteLength) {
+        const size = end - start + incoming.byteLength;
+        const next = new Uint8Array(Math.max(size, buf.byteLength * 2));
+        next.set(buf.subarray(start, end), 0);
+        buf = next;
+        end -= start;
+        start = 0;
+      }
+      buf.set(incoming, end);
+      end += incoming.byteLength;
       for (;;) {
-        let header: { value: number; offset: number };
-        try {
-          header = decodeVarint(buf, 0);
-        } catch {
-          break; // the length is not all here yet
+        const header = readLength(buf.subarray(start, end));
+        if (header === undefined) break; // the length is not all here yet
+        if (header.value > maxMessageBytes) {
+          throw new Error(
+            `webrun-streams-libp2p: a ${header.value}-byte message exceeds maxMessageBytes (${maxMessageBytes})`,
+          );
         }
-        const end = header.offset + header.value;
-        if (buf.byteLength < end) break;
-        deliver(buf.slice(header.offset, end));
-        buf = buf.subarray(end);
+        const stop = start + header.offset + header.value;
+        if (end < stop) break;
+        deliver(buf.slice(start + header.offset, stop));
+        start = stop;
       }
     }
-  })().catch(() => {
-    // A reset ends the loop with an error; `close` reports it through `signal`.
+    if (peerClosedWrite) {
+      life.abort(new Error("webrun-streams-libp2p: the peer closed the stream"));
+      await closeStream(stream);
+    }
+  })().catch((err: unknown) => {
+    // A reset ends the loop with an error, which `close` reports through
+    // `signal`; a malformed frame is reported here.
+    life.abort(err);
+    try {
+      stream.abort(err instanceof Error ? err : new Error(String(err)));
+    } catch {}
   });
-
   return {
     signal: life.signal,
     target: {
@@ -152,4 +186,14 @@ export function messageTargetOverStream(stream: Stream): StreamMessageTarget {
       },
     },
   };
+}
+
+/** The length prefix of `bytes`, or `undefined` while it is incomplete; throws when malformed. */
+function readLength(bytes: Uint8Array): { value: number; offset: number } | undefined {
+  try {
+    return decodeVarint(bytes, 0);
+  } catch (err) {
+    if (bytes.byteLength < 5) return undefined;
+    throw new Error("webrun-streams-libp2p: a malformed message length", { cause: err });
+  }
 }
