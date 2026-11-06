@@ -22,11 +22,14 @@ type Rpc = Pick<typeof current, "connect" | "serve" | "overPipe" | "structuredCo
 /** An envelope as it arrived on one end's pipe; `to` says which end got it. */
 type Seen = {
   to: "new" | "old";
+  /** `performance.now()` when it arrived. */
+  at: number;
   envelope: {
     type?: string;
     id?: number;
     caps?: unknown;
     window?: number;
+    bytes?: number;
     payload?: { type?: string; channelName?: string };
   };
 };
@@ -50,8 +53,12 @@ async function pair(opener: Rpc, responder: Rpc, newRole: "opener" | "responder"
   const wire: Seen[] = [];
   const openerGets = newRole === "opener" ? "new" : "old";
   const responderGets = newRole === "opener" ? "old" : "new";
-  ch.port1.addEventListener("message", (e) => wire.push({ to: openerGets, envelope: e.data }));
-  ch.port2.addEventListener("message", (e) => wire.push({ to: responderGets, envelope: e.data }));
+  ch.port1.addEventListener("message", (e) =>
+    wire.push({ to: openerGets, at: performance.now(), envelope: e.data }),
+  );
+  ch.port2.addEventListener("message", (e) =>
+    wire.push({ to: responderGets, at: performance.now(), envelope: e.data }),
+  );
   // Each end places envelopes with its own version's codec.
   const teardown = await responder.serve(
     {
@@ -86,11 +93,14 @@ async function runEcho(call: (input: Iterable<Uint8Array>) => AsyncIterable<Uint
   expect(seen).toEqual(input.flatMap((c) => [...c]));
 }
 
-/** Waits until the stream's port has been closed over the wire. */
+/** Waits until the stream's port has been closed over the wire, after its last confirmation. */
 async function closed(wire: Seen[]) {
   while (!wire.some((s) => s.envelope.type === "close")) {
     await new Promise((r) => setTimeout(r, 5));
   }
+  const close = wire.findIndex((s) => s.envelope.type === "close");
+  const afterClose = wire.slice(close);
+  expect(afterClose.some((s) => s.envelope.payload?.type === "response:result")).toBe(false);
 }
 
 /** Nothing the old end could misread crossed the wire, in either direction. */
@@ -117,13 +127,15 @@ function confirmations(wire: Seen[]) {
   return { in: count("in"), out: count("out") };
 }
 
-for (const [version, old] of [
-  ["0.7.0", v07],
-  ["0.8.0", v08],
-] as const) {
+// The published packages' types come from their own `webrun-streams`; their
+// shape is the same, so they are taken as this one's.
+const published = { "0.5.1": v05, "0.7.0": v07, "0.8.0": v08 } as unknown as Record<string, Rpc>;
+
+for (const version of ["0.7.0", "0.8.0"]) {
+  const old = published[version] as Rpc;
   describe(`mixed versions — paired with ${version} (window, no capabilities)`, () => {
     it(`new opener, ${version} responder: acknowledged chunks, done, close`, async () => {
-      const { call, wire } = await pair(current, old as unknown as Rpc, "opener");
+      const { call, wire } = await pair(current, old, "opener");
       await runEcho(call);
       await closed(wire);
 
@@ -131,20 +143,20 @@ for (const [version, old] of [
       expect(open?.envelope.window).toBe(WINDOW);
       expect(open?.envelope.caps).toEqual(expect.arrayContaining(["pipeline"]));
       const ack = wire.find((s) => s.to === "new" && s.envelope.type === "credit");
-      expect(ack).toBeDefined();
+      expect(ack?.envelope.bytes).toBe(0);
       expectNothingNew(wire);
       expect(confirmations(wire)).toEqual({ in: CHUNKS + 1, out: CHUNKS + 1 });
     });
 
     it(`${version} opener, new responder: acknowledged chunks, done, close`, async () => {
-      const { call, wire } = await pair(old as unknown as Rpc, current, "responder");
+      const { call, wire } = await pair(old, current, "responder");
       await runEcho(call);
       await closed(wire);
 
       const open = wire.find((s) => s.to === "new" && s.envelope.type === "open");
       expect(open?.envelope.window).toBe(WINDOW);
       const ack = wire.find((s) => s.to === "old" && s.envelope.type === "credit");
-      expect(ack).toBeDefined();
+      expect(ack?.envelope.bytes).toBe(0);
       expectNothingNew(wire);
       expect(confirmations(wire)).toEqual({ in: CHUNKS + 1, out: CHUNKS + 1 });
     });
@@ -152,10 +164,13 @@ for (const [version, old] of [
 }
 
 describe("mixed versions — paired with 0.5.1 (no window)", () => {
+  // 0.5.1 never acks the window, and the stream carries more than a window
+  // each way: a new end that held its sends to the window, or waited on the
+  // ack, would hang or stall here.
   it("new opener asking for a window, 0.5.1 responder: the first chunk goes before anything comes back, and the stream completes", {
-    timeout: 5000,
+    timeout: 2000,
   }, async () => {
-    const { call, wire } = await pair(current, v05 as unknown as Rpc, "opener");
+    const { call, wire } = await pair(current, published["0.5.1"] as Rpc, "opener");
     await runEcho(call);
     await closed(wire);
 
@@ -167,11 +182,9 @@ describe("mixed versions — paired with 0.5.1 (no window)", () => {
     const firstBack = wire.findIndex((s) => s.to === "new");
     expect(firstChunk).toBeGreaterThan(open);
     expect(firstChunk).toBeLessThan(firstBack);
-    // 0.5.1 never acks the window, and more than a window went out with no
-    // credit back: the new end did not hold its sends to it. (The new end
-    // still grants credit for what it reads; 0.5.1's codec drops `credit`.)
-    expect(wire.some((s) => s.to === "new" && s.envelope.type === "credit")).toBe(false);
-    expect(CHUNKS * CHUNK_SIZE).toBeGreaterThan(WINDOW);
+    // No timed fallback either: the whole stream takes far less than any
+    // wait for an ack that never comes would.
+    expect((wire.at(-1)?.at ?? Infinity) - (wire[open]?.at ?? 0)).toBeLessThan(500);
     expectNothingNew(wire);
     expect(confirmations(wire)).toEqual({ in: CHUNKS + 1, out: CHUNKS + 1 });
   });
