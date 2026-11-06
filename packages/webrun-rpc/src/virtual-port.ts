@@ -55,8 +55,11 @@ export function newVirtualPort(
       closed = true;
       const notify = requestClose;
       listeners.clear();
+      // The mux frees the port first (its slot and its entry in `ports()`), then the close
+      // signal fires with the caller's reason: a listener that reopens (reconnect logic) finds
+      // the slot free. `notify` passes the reason on to `markClosed`, which aborts with it.
+      notify(reason);
       abort(reason);
-      notify();
     },
   };
   setPortCloseSignal(port, closing.signal);
