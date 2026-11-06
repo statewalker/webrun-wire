@@ -1,5 +1,21 @@
 # @statewalker/webrun-http-browser
 
+## 0.10.0
+
+### Minor Changes
+
+- cf94377: A `Request` served by `serveHttpLink` now has a `signal` that aborts when the caller leaves before the exchange is over, so a long-polling handler can stop waiting. The self-contained `sw-worker.js` bundle carries it; `relay-sw.js` serves no `Request` and gets only the rpc fix.
+  
+  The re-exported `@statewalker/webrun-http-streams` API now has `HttpExchange` and `EXCHANGE_ABANDONED_MESSAGE`. Breaking: `HttpDataHandler`'s third argument `exchange: HttpExchange` is required, so code that calls a handler itself must pass one.
+
+### Patch Changes
+
+- Updated dependencies [eec24c8]
+- Updated dependencies [cf94377]
+- Updated dependencies [12048dd]
+  - @statewalker/webrun-rpc@0.8.0
+  - @statewalker/webrun-http-streams@0.4.0
+
 ## 0.9.0
 
 ### Minor Changes
