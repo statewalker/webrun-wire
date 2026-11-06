@@ -1,5 +1,15 @@
 # @statewalker/webrun-rpc
 
+## 0.5.1
+
+### Patch Changes
+
+- b224431: Ready for `await using` where the runtime has `Symbol.asyncDispose`: `connect`'s calls and `duplexOverPort`'s caller streams dispose as `return()` (the stream ends at once, even with a `next()` pending), and an `HttpLink` disposes as `close()`. Native async generators get this from `AsyncIteratorPrototype` in runtimes that implement it; these hand-written iterators carry it themselves. Installed at run time only, and kept off the declared types, which would otherwise require the `esnext.disposable` lib.
+- a7d06aa: Module-level constants (text encoders, the close-signal table) are annotated pure, so bundlers drop them with the code that uses them.
+- 839e6f7: A caller that gives up on a stream (`return()` or `throw()` on `connect`'s call, or on `duplexOverPort`'s) while it waits for the peer's next chunk ends the stream at once: the stream is aborted, the peer is told, and the port is closed; a `next()` that was pending resolves done. Before, an async generator queued the `return()` behind the pending `next()`, so a stream to a peer that never answered — an aborted request to a hung handler — kept its port for good.
+- Updated dependencies [a7d06aa]
+  - @statewalker/webrun-streams@0.2.3
+
 ## 0.5.0
 
 ### Minor Changes
