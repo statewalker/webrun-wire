@@ -480,6 +480,8 @@ class WorkerLinkImpl implements WorkerLink {
   private readonly _ownerLock?: string;
   private _attaching?: Promise<void>;
   private _detached = false;
+  /** The `seq` of the last link sent to the worker. */
+  private _sent = 0;
 
   constructor(
     private readonly _adapter: SwHttpAdapter,
@@ -494,6 +496,10 @@ class WorkerLinkImpl implements WorkerLink {
     _control.onmessage = (event) => {
       const message = event.data as WorkerControlMessage;
       if (message?.type === "relink") {
+        // The worker has not received the latest link yet: it is on its way
+        // (a call made before it arrived asks too). Attaching again would
+        // replace the link a call is about to run on.
+        if (message.seen !== undefined && message.seen < this._sent) return;
         // Starts the ServiceWorker if it was stopped; the attach follows.
         this._adapter._poke(WAKE_MESSAGE);
         void this.attach().catch(() => {});
@@ -555,6 +561,7 @@ class WorkerLinkImpl implements WorkerLink {
             type: "link",
             key: this.key,
             routerLock: reply.routerLock,
+            seq: ++this._sent,
           } satisfies WorkerControlMessage,
           [down.port2, ctl.port2, up.port2],
         );

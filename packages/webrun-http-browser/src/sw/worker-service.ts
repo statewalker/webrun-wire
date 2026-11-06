@@ -64,12 +64,23 @@ export function serveHttpInWorker(
   const ownerLock = newLockName("webrun-http-owner");
   const held = holdLock(ownerLock);
   const controls = new Set<MessagePort>();
+  // Per control port, the `seq` of the last link received on it. A relink
+  // request carries it: the page attaches again only if this worker has its
+  // latest link, not while that link is still on its way.
+  const seen = new Map<MessagePort, number>();
   const tellPages = (message: WorkerControlMessage) => {
     for (const control of controls) control.postMessage(message);
   };
   const endpoint = new HandlerEndpoint(handler, {
     ...options,
-    requestRelink: () => tellPages({ type: "relink" }),
+    requestRelink: () => {
+      for (const control of controls) {
+        control.postMessage({
+          type: "relink",
+          seen: seen.get(control) ?? 0,
+        } satisfies WorkerControlMessage);
+      }
+    },
     keepAlive: () => tellPages({ type: "keepalive" }),
   });
 
@@ -82,6 +93,7 @@ export function serveHttpInWorker(
     control.onmessage = (message) => {
       const msg = message.data as WorkerControlMessage;
       if (msg?.type === "link") {
+        if (msg.seq !== undefined) seen.set(control, msg.seq);
         const [down, ctl, up] = message.ports;
         if (down) void endpoint.link(msg.key, { down, ctl, up }, msg.routerLock);
       } else if (msg?.type === "unlink") {
@@ -127,6 +139,7 @@ export function serveHttpInWorker(
       await endpoint.close();
       for (const control of controls) control.close();
       controls.clear();
+      seen.clear();
       (await held)();
     },
   };
