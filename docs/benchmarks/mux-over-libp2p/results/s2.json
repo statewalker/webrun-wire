@@ -1,0 +1,6398 @@
+[
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.17433699999992314,
+        "p95": 0.3953910000000178,
+        "p99": 1.519555999999966,
+        "max": 3.1460759999999937,
+        "mean": 0.22425255400000105
+      },
+      "during": {
+        "n": 171,
+        "p50": 19.436438999999837,
+        "p95": 78.84478099999978,
+        "p99": 106.68144499999971,
+        "max": 153.9987369999999,
+        "mean": 29.30699807602342
+      },
+      "consumedMiB": 10,
+      "producedMiB": 685,
+      "timeline": [
+        {
+          "t": 508,
+          "producedMiB": 109,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1014,
+          "producedMiB": 213,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1515,
+          "producedMiB": 309,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2036,
+          "producedMiB": 357,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2556,
+          "producedMiB": 425,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3058,
+          "producedMiB": 469,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3585,
+          "producedMiB": 520,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4093,
+          "producedMiB": 580,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4600,
+          "producedMiB": 636,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 141795328,
+          "peak": 916963328,
+          "end": 916963328,
+          "growthPeak": 775168000
+        },
+        "heapUsed": {
+          "start": 16454864,
+          "peak": 20828736,
+          "end": 20828736,
+          "growthPeak": 4373872
+        },
+        "external": {
+          "start": 3377192,
+          "peak": 787796524,
+          "end": 787796524,
+          "growthPeak": 784419332
+        },
+        "arrayBuffers": {
+          "start": 85044,
+          "peak": 784509283,
+          "end": 784509283,
+          "growthPeak": 784424239
+        },
+        "n": 43
+      },
+      "memServer": "same-process",
+      "wallMs": 5748.137195,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.14014100000008511,
+        "p95": 0.29849300000000767,
+        "p99": 0.5415980000000218,
+        "max": 4.894587000000001,
+        "mean": 0.17664929799999937
+      },
+      "during": {
+        "n": 191,
+        "p50": 17.22342299999991,
+        "p95": 86.33511499999986,
+        "p99": 129.58929599999965,
+        "max": 149.82330999999976,
+        "mean": 26.17673253403141
+      },
+      "consumedMiB": 10,
+      "producedMiB": 764,
+      "timeline": [
+        {
+          "t": 503,
+          "producedMiB": 132,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1011,
+          "producedMiB": 256,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1531,
+          "producedMiB": 344,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2050,
+          "producedMiB": 392,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2566,
+          "producedMiB": 496,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3075,
+          "producedMiB": 552,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3653,
+          "producedMiB": 620,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4169,
+          "producedMiB": 668,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4743,
+          "producedMiB": 720,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 174682112,
+          "peak": 1002594304,
+          "end": 1002594304,
+          "growthPeak": 827912192
+        },
+        "heapUsed": {
+          "start": 17111704,
+          "peak": 21112784,
+          "end": 15349520,
+          "growthPeak": 4001080
+        },
+        "external": {
+          "start": 40393667,
+          "peak": 878924709,
+          "end": 878924709,
+          "growthPeak": 838531042
+        },
+        "arrayBuffers": {
+          "start": 37101519,
+          "peak": 846557505,
+          "end": 3221972,
+          "growthPeak": 809455986
+        },
+        "n": 43
+      },
+      "memServer": "same-process",
+      "wallMs": 5713.328299,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.1811959999999999,
+        "p95": 0.532921999999985,
+        "p99": 1.1294549999998935,
+        "max": 1.5556029999999055,
+        "mean": 0.22928945200000247
+      },
+      "during": {
+        "n": 185,
+        "p50": 18.91916500000025,
+        "p95": 74.24359300000015,
+        "p99": 90.91698199999973,
+        "max": 112.37003800000002,
+        "mean": 27.030463113513495
+      },
+      "consumedMiB": 10,
+      "producedMiB": 741,
+      "timeline": [
+        {
+          "t": 505,
+          "producedMiB": 101,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1006,
+          "producedMiB": 201,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1513,
+          "producedMiB": 321,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2038,
+          "producedMiB": 392,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2544,
+          "producedMiB": 445,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3068,
+          "producedMiB": 525,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3582,
+          "producedMiB": 573,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4089,
+          "producedMiB": 637,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4611,
+          "producedMiB": 689,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 163659776,
+          "peak": 979845120,
+          "end": 979845120,
+          "growthPeak": 816185344
+        },
+        "heapUsed": {
+          "start": 16827504,
+          "peak": 21020376,
+          "end": 15391200,
+          "growthPeak": 4192872
+        },
+        "external": {
+          "start": 29190020,
+          "peak": 853854575,
+          "end": 853854575,
+          "growthPeak": 824664555
+        },
+        "arrayBuffers": {
+          "start": 25897872,
+          "peak": 835169471,
+          "end": 4941281,
+          "growthPeak": 809271599
+        },
+        "n": 45
+      },
+      "memServer": "same-process",
+      "wallMs": 5717.931031,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4947910000000775,
+        "p95": 1.0854980000001433,
+        "p99": 3.1292469999998502,
+        "max": 4.991565000000037,
+        "mean": 0.5864434900000044
+      },
+      "during": {
+        "n": 108,
+        "p50": 29.94074400000045,
+        "p95": 142.40590499999962,
+        "p99": 158.54666999999972,
+        "max": 209.6213130000001,
+        "mean": 47.04250802777775
+      },
+      "consumedMiB": 10,
+      "producedMiB": 898,
+      "timeline": [
+        {
+          "t": 531,
+          "producedMiB": 175,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1034,
+          "producedMiB": 313,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1539,
+          "producedMiB": 389,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2071,
+          "producedMiB": 521,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2631,
+          "producedMiB": 582,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3109,
+          "producedMiB": 658,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3614,
+          "producedMiB": 720,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4138,
+          "producedMiB": 777,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4642,
+          "producedMiB": 845,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 139247616,
+          "peak": 1134718976,
+          "end": 1134718976,
+          "growthPeak": 995471360
+        },
+        "heapUsed": {
+          "start": 16335192,
+          "peak": 21804504,
+          "end": 21804504,
+          "growthPeak": 5469312
+        },
+        "external": {
+          "start": 23839365,
+          "peak": 1015473598,
+          "end": 1015473598,
+          "growthPeak": 991634233
+        },
+        "arrayBuffers": {
+          "start": 20519606,
+          "peak": 1012158746,
+          "end": 1012158746,
+          "growthPeak": 991639140
+        },
+        "n": 47
+      },
+      "memServer": {
+        "rss": {
+          "start": 145264640,
+          "peak": 171282432,
+          "end": 165068800,
+          "growthPeak": 26017792
+        },
+        "heapUsed": {
+          "start": 16194024,
+          "peak": 17194608,
+          "end": 14799712,
+          "growthPeak": 1000584
+        },
+        "external": {
+          "start": 17175491,
+          "peak": 54999423,
+          "end": 54999423,
+          "growthPeak": 37823932
+        },
+        "arrayBuffers": {
+          "start": 13726148,
+          "peak": 51291778,
+          "end": 15036515,
+          "growthPeak": 37565630
+        },
+        "n": 50
+      },
+      "wallMs": 6428.8973639999995,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4183259999999791,
+        "p95": 1.6743329999999332,
+        "p99": 6.216844999999921,
+        "max": 11.133698999999979,
+        "mean": 0.6733693799999989
+      },
+      "during": {
+        "n": 100,
+        "p50": 40.67523399999982,
+        "p95": 126.09291600000006,
+        "p99": 242.00375200000008,
+        "max": 242.00375200000008,
+        "mean": 50.91103318000001
+      },
+      "consumedMiB": 10,
+      "producedMiB": 861,
+      "timeline": [
+        {
+          "t": 518,
+          "producedMiB": 178,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1028,
+          "producedMiB": 345,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1604,
+          "producedMiB": 433,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2099,
+          "producedMiB": 505,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2652,
+          "producedMiB": 555,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3095,
+          "producedMiB": 615,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3636,
+          "producedMiB": 678,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4200,
+          "producedMiB": 740,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4666,
+          "producedMiB": 799,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 147353600,
+          "peak": 1083138048,
+          "end": 1083138048,
+          "growthPeak": 935784448
+        },
+        "heapUsed": {
+          "start": 16260232,
+          "peak": 21224400,
+          "end": 20925616,
+          "growthPeak": 4964168
+        },
+        "external": {
+          "start": 41664042,
+          "peak": 958091595,
+          "end": 958091595,
+          "growthPeak": 916427553
+        },
+        "arrayBuffers": {
+          "start": 34469399,
+          "peak": 954776743,
+          "end": 954776743,
+          "growthPeak": 920307344
+        },
+        "n": 46
+      },
+      "memServer": {
+        "rss": {
+          "start": 144146432,
+          "peak": 191045632,
+          "end": 157822976,
+          "growthPeak": 46899200
+        },
+        "heapUsed": {
+          "start": 16811168,
+          "peak": 17289960,
+          "end": 14639032,
+          "growthPeak": 478792
+        },
+        "external": {
+          "start": 29761451,
+          "peak": 82458314,
+          "end": 21438859,
+          "growthPeak": 52696863
+        },
+        "arrayBuffers": {
+          "start": 26312108,
+          "peak": 79008971,
+          "end": 92197,
+          "growthPeak": 52696863
+        },
+        "n": 51
+      },
+      "wallMs": 6468.198404999999,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3875550000000203,
+        "p95": 1.1133960000001935,
+        "p99": 2.3589049999998224,
+        "max": 3.764368999999988,
+        "mean": 0.5093684399999979
+      },
+      "during": {
+        "n": 85,
+        "p50": 43.60010299999976,
+        "p95": 146.90430199999992,
+        "p99": 182.24699500000042,
+        "max": 182.24699500000042,
+        "mean": 59.0109411764706
+      },
+      "consumedMiB": 10,
+      "producedMiB": 915,
+      "timeline": [
+        {
+          "t": 514,
+          "producedMiB": 136,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1013,
+          "producedMiB": 328,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1578,
+          "producedMiB": 451,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2077,
+          "producedMiB": 526,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2569,
+          "producedMiB": 603,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3106,
+          "producedMiB": 668,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3584,
+          "producedMiB": 733,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4110,
+          "producedMiB": 806,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4654,
+          "producedMiB": 864,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 142086144,
+          "peak": 1124777984,
+          "end": 1124777984,
+          "growthPeak": 982691840
+        },
+        "heapUsed": {
+          "start": 16095608,
+          "peak": 21825600,
+          "end": 21544472,
+          "growthPeak": 5729992
+        },
+        "external": {
+          "start": 26910854,
+          "peak": 1006579971,
+          "end": 1006579971,
+          "growthPeak": 979669117
+        },
+        "arrayBuffers": {
+          "start": 23591095,
+          "peak": 1003265119,
+          "end": 1003265119,
+          "growthPeak": 979674024
+        },
+        "n": 47
+      },
+      "memServer": {
+        "rss": {
+          "start": 127127552,
+          "peak": 185532416,
+          "end": 184651776,
+          "growthPeak": 58404864
+        },
+        "heapUsed": {
+          "start": 16106600,
+          "peak": 17057472,
+          "end": 14726888,
+          "growthPeak": 950872
+        },
+        "external": {
+          "start": 8777821,
+          "peak": 66196369,
+          "end": 15794922,
+          "growthPeak": 57418548
+        },
+        "arrayBuffers": {
+          "start": 5328478,
+          "peak": 55543047,
+          "end": 12350486,
+          "growthPeak": 50214569
+        },
+        "n": 51
+      },
+      "wallMs": 6255.9795730000005,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4336009999999533,
+        "p95": 0.9503109999999424,
+        "p99": 2.500633999999991,
+        "max": 3.2447819999999865,
+        "mean": 0.5200030079999999
+      },
+      "during": {
+        "n": 13633,
+        "p50": 0.29522399999996196,
+        "p95": 0.6377929999998742,
+        "p99": 1.9495629999998982,
+        "max": 18.11081700000068,
+        "mean": 0.36576243629428606
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2501,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3001,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3501,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4001,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5001,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 156397568,
+          "peak": 170876928,
+          "end": 170876928,
+          "growthPeak": 14479360
+        },
+        "heapUsed": {
+          "start": 19358472,
+          "peak": 39900384,
+          "end": 29889112,
+          "growthPeak": 20541912
+        },
+        "external": {
+          "start": 4971575,
+          "peak": 18834489,
+          "end": 10284915,
+          "growthPeak": 13862914
+        },
+        "arrayBuffers": {
+          "start": 129712,
+          "peak": 13998117,
+          "end": 5448543,
+          "growthPeak": 13868405
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 6064.710623,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4289330000000291,
+        "p95": 0.8389959999999519,
+        "p99": 2.239659999999958,
+        "max": 3.0856109999999717,
+        "mean": 0.48964271599999915
+      },
+      "during": {
+        "n": 14772,
+        "p50": 0.2697299999999814,
+        "p95": 0.6683419999999387,
+        "p99": 1.7570799999998599,
+        "max": 30.280549999999494,
+        "mean": 0.3375936552937979
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 499,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1499,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1999,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2499,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2999,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3499,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3999,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4499,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4999,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 175026176,
+          "peak": 188260352,
+          "end": 188260352,
+          "growthPeak": 13234176
+        },
+        "heapUsed": {
+          "start": 24632976,
+          "peak": 43106128,
+          "end": 43106128,
+          "growthPeak": 18473152
+        },
+        "external": {
+          "start": 7237825,
+          "peak": 18780033,
+          "end": 10528961,
+          "growthPeak": 11542208
+        },
+        "arrayBuffers": {
+          "start": 2395962,
+          "peak": 12825743,
+          "end": 5692589,
+          "growthPeak": 10429781
+        },
+        "n": 51
+      },
+      "memServer": "same-process",
+      "wallMs": 6027.119219,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4495050000000447,
+        "p95": 0.8288929999999937,
+        "p99": 1.882818000000043,
+        "max": 3.894779999999969,
+        "mean": 0.5101198800000024
+      },
+      "during": {
+        "n": 11893,
+        "p50": 0.3279540000000907,
+        "p95": 0.8542159999997239,
+        "p99": 2.0818899999999303,
+        "max": 17.26272599999993,
+        "mean": 0.4193029260068926
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4001,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 156405760,
+          "peak": 168202240,
+          "end": 168202240,
+          "growthPeak": 11796480
+        },
+        "heapUsed": {
+          "start": 25131976,
+          "peak": 40538848,
+          "end": 39082648,
+          "growthPeak": 15406872
+        },
+        "external": {
+          "start": 7243824,
+          "peak": 16933153,
+          "end": 10478698,
+          "growthPeak": 9689329
+        },
+        "arrayBuffers": {
+          "start": 2401961,
+          "peak": 11855641,
+          "end": 5642326,
+          "growthPeak": 9453680
+        },
+        "n": 51
+      },
+      "memServer": "same-process",
+      "wallMs": 5991.6346300000005,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 1.0499529999999595,
+        "p95": 2.351908999999978,
+        "p99": 4.541176999999834,
+        "max": 6.29138399999988,
+        "mean": 1.2122101359999962
+      },
+      "during": {
+        "n": 7513,
+        "p50": 0.5064600000005157,
+        "p95": 1.456434000000172,
+        "p99": 2.352468999999928,
+        "max": 15.79139699999996,
+        "mean": 0.6638534296552613
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2002,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4001,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.00018405914306640625,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 149929984,
+          "peak": 158683136,
+          "end": 158683136,
+          "growthPeak": 8753152
+        },
+        "heapUsed": {
+          "start": 18550976,
+          "peak": 39668128,
+          "end": 26129848,
+          "growthPeak": 21117152
+        },
+        "external": {
+          "start": 5073664,
+          "peak": 13403906,
+          "end": 12370417,
+          "growthPeak": 8330242
+        },
+        "arrayBuffers": {
+          "start": 204190,
+          "peak": 8534432,
+          "end": 7500943,
+          "growthPeak": 8330242
+        },
+        "n": 52
+      },
+      "memServer": {
+        "rss": {
+          "start": 125046784,
+          "peak": 130420736,
+          "end": 130420736,
+          "growthPeak": 5373952
+        },
+        "heapUsed": {
+          "start": 21259104,
+          "peak": 36342736,
+          "end": 31291904,
+          "growthPeak": 15083632
+        },
+        "external": {
+          "start": 10331622,
+          "peak": 10594780,
+          "end": 10472920,
+          "growthPeak": 263158
+        },
+        "arrayBuffers": {
+          "start": 5447832,
+          "peak": 5710990,
+          "end": 5589130,
+          "growthPeak": 263158
+        },
+        "n": 51
+      },
+      "wallMs": 6946.161623999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.8411490000000867,
+        "p95": 2.1490470000001096,
+        "p99": 5.023073000000068,
+        "max": 11.136489999999867,
+        "mean": 1.0648068260000032
+      },
+      "during": {
+        "n": 7273,
+        "p50": 0.5435179999999491,
+        "p95": 1.3483100000003105,
+        "p99": 2.397484999999506,
+        "max": 10.635369000000082,
+        "mean": 0.6856282139419785
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3002,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4001,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5001,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.00018405914306640625,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 150024192,
+          "peak": 156512256,
+          "end": 156512256,
+          "growthPeak": 6488064
+        },
+        "heapUsed": {
+          "start": 20505656,
+          "peak": 34643616,
+          "end": 29228888,
+          "growthPeak": 14137960
+        },
+        "external": {
+          "start": 9234569,
+          "peak": 13848539,
+          "end": 12788529,
+          "growthPeak": 4613970
+        },
+        "arrayBuffers": {
+          "start": 4365095,
+          "peak": 8979065,
+          "end": 7919055,
+          "growthPeak": 4613970
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 123703296,
+          "peak": 134758400,
+          "end": 134758400,
+          "growthPeak": 11055104
+        },
+        "heapUsed": {
+          "start": 21642112,
+          "peak": 38377456,
+          "end": 27443416,
+          "growthPeak": 16735344
+        },
+        "external": {
+          "start": 10338818,
+          "peak": 10581516,
+          "end": 10382945,
+          "growthPeak": 242698
+        },
+        "arrayBuffers": {
+          "start": 5455028,
+          "peak": 5697726,
+          "end": 5499155,
+          "growthPeak": 242698
+        },
+        "n": 51
+      },
+      "wallMs": 6906.02876,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 1.184573999999884,
+        "p95": 2.2062019999998483,
+        "p99": 3.5164740000000165,
+        "max": 9.659393999999793,
+        "mean": 1.2738168079999983
+      },
+      "during": {
+        "n": 7727,
+        "p50": 0.5318559999996069,
+        "p95": 1.1735790000002453,
+        "p99": 2.2010599999998703,
+        "max": 12.006687000000056,
+        "mean": 0.6453734032612893
+      },
+      "consumedMiB": 10,
+      "producedMiB": 9,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 1,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.00018405914306640625,
+      "serverAdapterMaxQueuedMiB": 1.0001249313354492,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 143548416,
+          "peak": 151224320,
+          "end": 151224320,
+          "growthPeak": 7675904
+        },
+        "heapUsed": {
+          "start": 20931432,
+          "peak": 39567904,
+          "end": 29080088,
+          "growthPeak": 18636472
+        },
+        "external": {
+          "start": 8988203,
+          "peak": 14678569,
+          "end": 12406814,
+          "growthPeak": 5690366
+        },
+        "arrayBuffers": {
+          "start": 4118729,
+          "peak": 9809095,
+          "end": 7537340,
+          "growthPeak": 5690366
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 140914688,
+          "peak": 151662592,
+          "end": 151662592,
+          "growthPeak": 10747904
+        },
+        "heapUsed": {
+          "start": 22570288,
+          "peak": 40901656,
+          "end": 36033784,
+          "growthPeak": 18331368
+        },
+        "external": {
+          "start": 10363464,
+          "peak": 10574936,
+          "end": 10434926,
+          "growthPeak": 211472
+        },
+        "arrayBuffers": {
+          "start": 5479674,
+          "peak": 5691146,
+          "end": 5551136,
+          "growthPeak": 211472
+        },
+        "n": 51
+      },
+      "wallMs": 7094.096799999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.2435449999999264,
+        "p95": 0.47369800000001305,
+        "p99": 0.945604000000003,
+        "max": 3.4778119999999717,
+        "mean": 0.27897720399999754
+      },
+      "during": {
+        "n": 322,
+        "p50": 12.15246500000012,
+        "p95": 32.03623900000002,
+        "p99": 37.197229000000334,
+        "max": 48.39820099999997,
+        "mean": 15.535018180124213
+      },
+      "consumedMiB": 10,
+      "producedMiB": 646,
+      "timeline": [
+        {
+          "t": 503,
+          "producedMiB": 89,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1004,
+          "producedMiB": 191,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1509,
+          "producedMiB": 292,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2013,
+          "producedMiB": 337,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2522,
+          "producedMiB": 388,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3034,
+          "producedMiB": 443,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3541,
+          "producedMiB": 496,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4043,
+          "producedMiB": 551,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4544,
+          "producedMiB": 603,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 635,
+      "memClient": {
+        "rss": {
+          "start": 169897984,
+          "peak": 1000837120,
+          "end": 1000837120,
+          "growthPeak": 830939136
+        },
+        "heapUsed": {
+          "start": 17963872,
+          "peak": 17963872,
+          "end": 16841384,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 35642056,
+          "peak": 708599269,
+          "end": 688730320,
+          "growthPeak": 672957213
+        },
+        "arrayBuffers": {
+          "start": 30800193,
+          "peak": 703762897,
+          "end": 683893948,
+          "growthPeak": 672962704
+        },
+        "n": 48
+      },
+      "memServer": "same-process",
+      "wallMs": 5749.30355,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.1655240000000049,
+        "p95": 0.3213909999999487,
+        "p99": 0.45474799999999505,
+        "max": 1.0148100000000113,
+        "mean": 0.18777944000000138
+      },
+      "during": {
+        "n": 325,
+        "p50": 12.140057999999954,
+        "p95": 33.386695000000145,
+        "p99": 40.836779000000206,
+        "max": 45.603669999999966,
+        "mean": 15.402876166153863
+      },
+      "consumedMiB": 10,
+      "producedMiB": 652,
+      "timeline": [
+        {
+          "t": 501,
+          "producedMiB": 107,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1002,
+          "producedMiB": 189,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1504,
+          "producedMiB": 270,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2013,
+          "producedMiB": 316,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2516,
+          "producedMiB": 366,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3019,
+          "producedMiB": 463,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3522,
+          "producedMiB": 515,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4024,
+          "producedMiB": 566,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4525,
+          "producedMiB": 609,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 641,
+      "memClient": {
+        "rss": {
+          "start": 154533888,
+          "peak": 1016336384,
+          "end": 1016336384,
+          "growthPeak": 861802496
+        },
+        "heapUsed": {
+          "start": 18069840,
+          "peak": 18532832,
+          "end": 16795072,
+          "growthPeak": 462992
+        },
+        "external": {
+          "start": 15719494,
+          "peak": 701511627,
+          "end": 701511627,
+          "growthPeak": 685792133
+        },
+        "arrayBuffers": {
+          "start": 10877631,
+          "peak": 695373407,
+          "end": 680747295,
+          "growthPeak": 684495776
+        },
+        "n": 49
+      },
+      "memServer": "same-process",
+      "wallMs": 5726.860180000001,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.18240700000001198,
+        "p95": 0.376318000000083,
+        "p99": 0.8536869999999226,
+        "max": 2.9096139999999195,
+        "mean": 0.2199777920000006
+      },
+      "during": {
+        "n": 343,
+        "p50": 11.583781000000045,
+        "p95": 31.349920999999995,
+        "p99": 41.63524999999936,
+        "max": 64.62068699999963,
+        "mean": 14.602644740524775
+      },
+      "consumedMiB": 10,
+      "producedMiB": 688,
+      "timeline": [
+        {
+          "t": 501,
+          "producedMiB": 78,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1004,
+          "producedMiB": 185,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1508,
+          "producedMiB": 283,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2019,
+          "producedMiB": 331,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2519,
+          "producedMiB": 383,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3021,
+          "producedMiB": 470,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3523,
+          "producedMiB": 539,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4033,
+          "producedMiB": 587,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4537,
+          "producedMiB": 639,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 677,
+      "memClient": {
+        "rss": {
+          "start": 177057792,
+          "peak": 1073774592,
+          "end": 1073774592,
+          "growthPeak": 896716800
+        },
+        "heapUsed": {
+          "start": 18310232,
+          "peak": 18310232,
+          "end": 16585856,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 38797428,
+          "peak": 764168681,
+          "end": 764168681,
+          "growthPeak": 725371253
+        },
+        "arrayBuffers": {
+          "start": 33955565,
+          "peak": 747796562,
+          "end": 8524800,
+          "growthPeak": 713840997
+        },
+        "n": 49
+      },
+      "memServer": "same-process",
+      "wallMs": 5781.264419,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3151940000000195,
+        "p95": 1.0583630000000994,
+        "p99": 2.1096590000000788,
+        "max": 6.37527399999999,
+        "mean": 0.44092068400000267
+      },
+      "during": {
+        "n": 17,
+        "p50": 103.43503499999997,
+        "p95": 2170.417867,
+        "p99": 2170.417867,
+        "max": 2170.417867,
+        "mean": 305.486058882353
+      },
+      "consumedMiB": 10,
+      "producedMiB": 1378,
+      "timeline": [
+        {
+          "t": 521,
+          "producedMiB": 184,
+          "srvQueueMiB": 27.00099277496338
+        },
+        {
+          "t": 1055,
+          "producedMiB": 346,
+          "srvQueueMiB": 83.00286197662354
+        },
+        {
+          "t": 1551,
+          "producedMiB": 499,
+          "srvQueueMiB": 124.00423049926758
+        },
+        {
+          "t": 2074,
+          "producedMiB": 667,
+          "srvQueueMiB": 181.0061330795288
+        },
+        {
+          "t": 2593,
+          "producedMiB": 769,
+          "srvQueueMiB": 208.0070343017578
+        },
+        {
+          "t": 3105,
+          "producedMiB": 891,
+          "srvQueueMiB": 276.00930404663086
+        },
+        {
+          "t": 3605,
+          "producedMiB": 1001,
+          "srvQueueMiB": 308.01037216186523
+        },
+        {
+          "t": 4128,
+          "producedMiB": 1115,
+          "srvQueueMiB": 356.0119743347168
+        },
+        {
+          "t": 4613,
+          "producedMiB": 1226,
+          "srvQueueMiB": 407.0136766433716
+        },
+        {
+          "t": 5131,
+          "producedMiB": 1356,
+          "srvQueueMiB": 461.0153875350952
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 470.0156879425049,
+      "serverAdapterQueuedNowMiB": 468.01562118530273,
+      "rawInboxMaxMiB": 886,
+      "memClient": {
+        "rss": {
+          "start": 154861568,
+          "peak": 1091690496,
+          "end": 1091690496,
+          "growthPeak": 936828928
+        },
+        "heapUsed": {
+          "start": 17869640,
+          "peak": 18718736,
+          "end": 16237856,
+          "growthPeak": 849096
+        },
+        "external": {
+          "start": 33774749,
+          "peak": 963276840,
+          "end": 963276840,
+          "growthPeak": 929502091
+        },
+        "arrayBuffers": {
+          "start": 28905275,
+          "peak": 949705980,
+          "end": 949705980,
+          "growthPeak": 920800705
+        },
+        "n": 50
+      },
+      "memServer": {
+        "rss": {
+          "start": 138829824,
+          "peak": 782008320,
+          "end": 782008320,
+          "growthPeak": 643178496
+        },
+        "heapUsed": {
+          "start": 17409568,
+          "peak": 17948392,
+          "end": 16718952,
+          "growthPeak": 538824
+        },
+        "external": {
+          "start": 10262125,
+          "peak": 541706995,
+          "end": 536336143,
+          "growthPeak": 531444870
+        },
+        "arrayBuffers": {
+          "start": 5378335,
+          "peak": 536828696,
+          "end": 531457844,
+          "growthPeak": 531450361
+        },
+        "n": 52
+      },
+      "wallMs": 6422.770767999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3993470000000343,
+        "p95": 1.0592180000001008,
+        "p99": 3.3580070000000433,
+        "max": 4.525691999999935,
+        "mean": 0.5238165980000071
+      },
+      "during": {
+        "n": 18,
+        "p50": 8.308603000000176,
+        "p95": 3672.4736460000004,
+        "p99": 3672.4736460000004,
+        "max": 3672.4736460000004,
+        "mean": 378.49003811111106
+      },
+      "consumedMiB": 10,
+      "producedMiB": 1977,
+      "timeline": [
+        {
+          "t": 531,
+          "producedMiB": 214,
+          "srvQueueMiB": 110.00376319885254
+        },
+        {
+          "t": 1048,
+          "producedMiB": 407,
+          "srvQueueMiB": 179.00606632232666
+        },
+        {
+          "t": 1531,
+          "producedMiB": 535,
+          "srvQueueMiB": 225.00760173797607
+        },
+        {
+          "t": 2026,
+          "producedMiB": 742,
+          "srvQueueMiB": 295.00993824005127
+        },
+        {
+          "t": 2554,
+          "producedMiB": 987,
+          "srvQueueMiB": 395.0132761001587
+        },
+        {
+          "t": 3046,
+          "producedMiB": 1128,
+          "srvQueueMiB": 456.01522064208984
+        },
+        {
+          "t": 3552,
+          "producedMiB": 1243,
+          "srvQueueMiB": 506.01698112487793
+        },
+        {
+          "t": 4055,
+          "producedMiB": 1359,
+          "srvQueueMiB": 547.018349647522
+        },
+        {
+          "t": 4572,
+          "producedMiB": 1471,
+          "srvQueueMiB": 603.0202188491821
+        },
+        {
+          "t": 5079,
+          "producedMiB": 1574,
+          "srvQueueMiB": 643.0215539932251
+        },
+        {
+          "t": 5584,
+          "producedMiB": 1682,
+          "srvQueueMiB": 678.0227222442627
+        },
+        {
+          "t": 6093,
+          "producedMiB": 1802,
+          "srvQueueMiB": 732.0245246887207
+        },
+        {
+          "t": 6586,
+          "producedMiB": 1918,
+          "srvQueueMiB": 773.0258932113647
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 799.0266695022583,
+      "serverAdapterQueuedNowMiB": 798.0266361236572,
+      "rawInboxMaxMiB": 1146,
+      "memClient": {
+        "rss": {
+          "start": 159494144,
+          "peak": 1364643840,
+          "end": 1364643840,
+          "growthPeak": 1205149696
+        },
+        "heapUsed": {
+          "start": 18865248,
+          "peak": 18865248,
+          "end": 16750928,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 29585422,
+          "peak": 1230641334,
+          "end": 1230641334,
+          "growthPeak": 1201055912
+        },
+        "arrayBuffers": {
+          "start": 24715948,
+          "peak": 1225777351,
+          "end": 1225777351,
+          "growthPeak": 1201061403
+        },
+        "n": 64
+      },
+      "memServer": {
+        "rss": {
+          "start": 166150144,
+          "peak": 1248309248,
+          "end": 1248309248,
+          "growthPeak": 1082159104
+        },
+        "heapUsed": {
+          "start": 17503600,
+          "peak": 17611176,
+          "end": 16930608,
+          "growthPeak": 107576
+        },
+        "external": {
+          "start": 35494843,
+          "peak": 901318067,
+          "end": 898107981,
+          "growthPeak": 865823224
+        },
+        "arrayBuffers": {
+          "start": 30611053,
+          "peak": 896439768,
+          "end": 893229682,
+          "growthPeak": 865828715
+        },
+        "n": 66
+      },
+      "wallMs": 8109.222807000001,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3665040000000772,
+        "p95": 1.0708349999999882,
+        "p99": 2.3562329999999747,
+        "max": 7.26681799999983,
+        "mean": 0.5054394100000016
+      },
+      "during": {
+        "n": 24,
+        "p50": 12.049042999999983,
+        "p95": 2116.7611490000004,
+        "p99": 5444.780563,
+        "max": 5444.780563,
+        "mean": 426.397882625
+      },
+      "consumedMiB": 10,
+      "producedMiB": 2762,
+      "timeline": [
+        {
+          "t": 520,
+          "producedMiB": 225,
+          "srvQueueMiB": 84.00289535522461
+        },
+        {
+          "t": 1038,
+          "producedMiB": 451,
+          "srvQueueMiB": 168.00569915771484
+        },
+        {
+          "t": 1546,
+          "producedMiB": 678,
+          "srvQueueMiB": 240.0081024169922
+        },
+        {
+          "t": 2055,
+          "producedMiB": 795,
+          "srvQueueMiB": 286.0096378326416
+        },
+        {
+          "t": 2566,
+          "producedMiB": 901,
+          "srvQueueMiB": 329.0110731124878
+        },
+        {
+          "t": 3041,
+          "producedMiB": 1144,
+          "srvQueueMiB": 441.0148115158081
+        },
+        {
+          "t": 3581,
+          "producedMiB": 1350,
+          "srvQueueMiB": 535.0179491043091
+        },
+        {
+          "t": 4086,
+          "producedMiB": 1459,
+          "srvQueueMiB": 583.0195512771606
+        },
+        {
+          "t": 4596,
+          "producedMiB": 1571,
+          "srvQueueMiB": 629.0210866928101
+        },
+        {
+          "t": 5105,
+          "producedMiB": 1675,
+          "srvQueueMiB": 671.0224885940552
+        },
+        {
+          "t": 5617,
+          "producedMiB": 1792,
+          "srvQueueMiB": 723.024224281311
+        },
+        {
+          "t": 6143,
+          "producedMiB": 1906,
+          "srvQueueMiB": 775.0259599685669
+        },
+        {
+          "t": 6632,
+          "producedMiB": 2005,
+          "srvQueueMiB": 816.0273284912109
+        },
+        {
+          "t": 7145,
+          "producedMiB": 2118,
+          "srvQueueMiB": 865.0289640426636
+        },
+        {
+          "t": 7652,
+          "producedMiB": 2231,
+          "srvQueueMiB": 912.0305328369141
+        },
+        {
+          "t": 8190,
+          "producedMiB": 2343,
+          "srvQueueMiB": 963.0322351455688
+        },
+        {
+          "t": 8683,
+          "producedMiB": 2426,
+          "srvQueueMiB": 998.0334033966064
+        },
+        {
+          "t": 9194,
+          "producedMiB": 2538,
+          "srvQueueMiB": 1045.034972190857
+        },
+        {
+          "t": 9700,
+          "producedMiB": 2636,
+          "srvQueueMiB": 1088.0364074707031
+        },
+        {
+          "t": 10195,
+          "producedMiB": 2747,
+          "srvQueueMiB": 1133.0379095077515
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1139.0380182266235,
+      "serverAdapterQueuedNowMiB": 1139.0380182266235,
+      "rawInboxMaxMiB": 1612,
+      "memClient": {
+        "rss": {
+          "start": 143532032,
+          "peak": 1849643008,
+          "end": 1849643008,
+          "growthPeak": 1706110976
+        },
+        "heapUsed": {
+          "start": 19279848,
+          "peak": 19279848,
+          "end": 17034328,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 36861007,
+          "peak": 1717894759,
+          "end": 1717894759,
+          "growthPeak": 1681033752
+        },
+        "arrayBuffers": {
+          "start": 31991533,
+          "peak": 1713030776,
+          "end": 1713030776,
+          "growthPeak": 1681039243
+        },
+        "n": 96
+      },
+      "memServer": {
+        "rss": {
+          "start": 133435392,
+          "peak": 1711734784,
+          "end": 1711734784,
+          "growthPeak": 1578299392
+        },
+        "heapUsed": {
+          "start": 17439608,
+          "peak": 18119120,
+          "end": 18119120,
+          "growthPeak": 679512
+        },
+        "external": {
+          "start": 15046563,
+          "peak": 1253402407,
+          "end": 1253402407,
+          "growthPeak": 1238355844
+        },
+        "arrayBuffers": {
+          "start": 10162773,
+          "peak": 1248524108,
+          "end": 1248524108,
+          "growthPeak": 1238361335
+        },
+        "n": 100
+      },
+      "wallMs": 11575.669274000002,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.20638399999995727,
+        "p95": 0.47054500000001553,
+        "p99": 0.8687919999999849,
+        "max": 2.3316049999999677,
+        "mean": 0.2522681480000008
+      },
+      "during": {
+        "n": 32512,
+        "p50": 0.11047699999926408,
+        "p95": 0.3005880000000616,
+        "p99": 0.8857320000006439,
+        "max": 9.908763000000363,
+        "mean": 0.15320598769684976
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 149852160,
+          "peak": 154570752,
+          "end": 154570752,
+          "growthPeak": 4718592
+        },
+        "heapUsed": {
+          "start": 19055720,
+          "peak": 30890912,
+          "end": 18042744,
+          "growthPeak": 11835192
+        },
+        "external": {
+          "start": 21755572,
+          "peak": 21755572,
+          "end": 8174328,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 16913709,
+          "peak": 16913709,
+          "end": 3337956,
+          "growthPeak": 0
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 5896.900974,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.24860999999998512,
+        "p95": 0.7539870000000519,
+        "p99": 1.2200940000000173,
+        "max": 1.94576799999993,
+        "mean": 0.30850608000000035
+      },
+      "during": {
+        "n": 28814,
+        "p50": 0.12362399999983609,
+        "p95": 0.33746200000041426,
+        "p99": 0.9518019999995886,
+        "max": 13.244779999999992,
+        "mean": 0.17278314052197008
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 499,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 999,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1499,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1999,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2499,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2999,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3499,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3999,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4499,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4999,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 154148864,
+          "peak": 157335552,
+          "end": 157335552,
+          "growthPeak": 3186688
+        },
+        "heapUsed": {
+          "start": 23758072,
+          "peak": 33019472,
+          "end": 27825480,
+          "growthPeak": 9261400
+        },
+        "external": {
+          "start": 9905552,
+          "peak": 16577879,
+          "end": 8209212,
+          "growthPeak": 6672327
+        },
+        "arrayBuffers": {
+          "start": 5063689,
+          "peak": 11741507,
+          "end": 3372840,
+          "growthPeak": 6677818
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 6001.225633,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.2937889999998333,
+        "p95": 0.9909680000000662,
+        "p99": 1.4601109999999835,
+        "max": 2.753808000000049,
+        "mean": 0.4013788420000035
+      },
+      "during": {
+        "n": 32438,
+        "p50": 0.11323400000037509,
+        "p95": 0.29745500000035463,
+        "p99": 0.7303419999998368,
+        "max": 6.154514000000063,
+        "mean": 0.15354853653122721
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 136589312,
+          "peak": 139079680,
+          "end": 138539008,
+          "growthPeak": 2490368
+        },
+        "heapUsed": {
+          "start": 19576480,
+          "peak": 32658160,
+          "end": 18028824,
+          "growthPeak": 13081680
+        },
+        "external": {
+          "start": 22819800,
+          "peak": 22819800,
+          "end": 8175733,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 17977937,
+          "peak": 17977937,
+          "end": 3339361,
+          "growthPeak": 0
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 6108.929255,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.2952350000000479,
+        "p95": 1.3717280000000756,
+        "p99": 4.694413999999824,
+        "max": 7.20364799999993,
+        "mean": 0.5076888159999989
+      },
+      "during": {
+        "n": 25086,
+        "p50": 0.1535089999997581,
+        "p95": 0.37902500000018335,
+        "p99": 0.9293059999999969,
+        "max": 9.960073000000193,
+        "mean": 0.19843874240612375
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 129236992,
+          "peak": 138514432,
+          "end": 138158080,
+          "growthPeak": 9277440
+        },
+        "heapUsed": {
+          "start": 18482648,
+          "peak": 35992240,
+          "end": 19397672,
+          "growthPeak": 17509592
+        },
+        "external": {
+          "start": 11296227,
+          "peak": 18802438,
+          "end": 16726921,
+          "growthPeak": 7506211
+        },
+        "arrayBuffers": {
+          "start": 6426753,
+          "peak": 13932964,
+          "end": 11678473,
+          "growthPeak": 7506211
+        },
+        "n": 52
+      },
+      "memServer": {
+        "rss": {
+          "start": 121999360,
+          "peak": 129732608,
+          "end": 129732608,
+          "growthPeak": 7733248
+        },
+        "heapUsed": {
+          "start": 21365248,
+          "peak": 31604536,
+          "end": 21382104,
+          "growthPeak": 10239288
+        },
+        "external": {
+          "start": 14513084,
+          "peak": 14649209,
+          "end": 6133296,
+          "growthPeak": 136125
+        },
+        "arrayBuffers": {
+          "start": 9629294,
+          "peak": 9765419,
+          "end": 1249506,
+          "growthPeak": 136125
+        },
+        "n": 52
+      },
+      "wallMs": 6483.479043,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.30539299999986724,
+        "p95": 1.3448379999999815,
+        "p99": 4.170645000000036,
+        "max": 5.933807999999999,
+        "mean": 0.48290660800000135
+      },
+      "during": {
+        "n": 25789,
+        "p50": 0.15100800000027448,
+        "p95": 0.35876600000005965,
+        "p99": 0.9388210000001891,
+        "max": 8.657085999999936,
+        "mean": 0.19303220818953618
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2002,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5001,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 143482880,
+          "peak": 143618048,
+          "end": 142462976,
+          "growthPeak": 135168
+        },
+        "heapUsed": {
+          "start": 23667408,
+          "peak": 32941056,
+          "end": 32941056,
+          "growthPeak": 9273648
+        },
+        "external": {
+          "start": 11644234,
+          "peak": 17382148,
+          "end": 16671830,
+          "growthPeak": 5737914
+        },
+        "arrayBuffers": {
+          "start": 6774760,
+          "peak": 12512674,
+          "end": 11802356,
+          "growthPeak": 5737914
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 137523200,
+          "peak": 139227136,
+          "end": 139227136,
+          "growthPeak": 1703936
+        },
+        "heapUsed": {
+          "start": 21079256,
+          "peak": 31028392,
+          "end": 18545488,
+          "growthPeak": 9949136
+        },
+        "external": {
+          "start": 14504161,
+          "peak": 14637187,
+          "end": 6079944,
+          "growthPeak": 133026
+        },
+        "arrayBuffers": {
+          "start": 9620371,
+          "peak": 9753397,
+          "end": 1196154,
+          "growthPeak": 133026
+        },
+        "n": 52
+      },
+      "wallMs": 6316.057046,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "slow"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3175149999999576,
+        "p95": 1.2726359999999204,
+        "p99": 3.0809159999998883,
+        "max": 3.809788000000026,
+        "mean": 0.4588278640000003
+      },
+      "during": {
+        "n": 25458,
+        "p50": 0.15745400000014342,
+        "p95": 0.36010699999997087,
+        "p99": 0.8994519999996555,
+        "max": 10.244956999999886,
+        "mean": 0.1955510782072435
+      },
+      "consumedMiB": 10,
+      "producedMiB": 12,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 3,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 4,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 5,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 6,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 7,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3001,
+          "producedMiB": 8,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 9,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3999,
+          "producedMiB": 10,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4499,
+          "producedMiB": 11,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 12,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 150392832,
+          "peak": 157962240,
+          "end": 157962240,
+          "growthPeak": 7569408
+        },
+        "heapUsed": {
+          "start": 18244120,
+          "peak": 32200312,
+          "end": 23014616,
+          "growthPeak": 13956192
+        },
+        "external": {
+          "start": 11293233,
+          "peak": 17734932,
+          "end": 16548609,
+          "growthPeak": 6441699
+        },
+        "arrayBuffers": {
+          "start": 6423759,
+          "peak": 12865458,
+          "end": 11679135,
+          "growthPeak": 6441699
+        },
+        "n": 52
+      },
+      "memServer": {
+        "rss": {
+          "start": 148447232,
+          "peak": 150282240,
+          "end": 150282240,
+          "growthPeak": 1835008
+        },
+        "heapUsed": {
+          "start": 21794704,
+          "peak": 31295776,
+          "end": 18604480,
+          "growthPeak": 9501072
+        },
+        "external": {
+          "start": 14523968,
+          "peak": 14675149,
+          "end": 6081010,
+          "growthPeak": 151181
+        },
+        "arrayBuffers": {
+          "start": 9640178,
+          "peak": 9791359,
+          "end": 1197220,
+          "growthPeak": 151181
+        },
+        "n": 52
+      },
+      "wallMs": 6379.109989,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.24396299999989424,
+        "p95": 0.4362229999999272,
+        "p99": 0.8319900000000189,
+        "max": 3.2368699999999535,
+        "mean": 0.26303357200000255
+      },
+      "during": {
+        "n": 182,
+        "p50": 17.922664000000168,
+        "p95": 75.86053300000003,
+        "p99": 104.02459799999997,
+        "max": 123.88102899999922,
+        "mean": 27.604646719780213
+      },
+      "consumedMiB": 0,
+      "producedMiB": 728,
+      "timeline": [
+        {
+          "t": 507,
+          "producedMiB": 112,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1008,
+          "producedMiB": 228,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1555,
+          "producedMiB": 364,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2075,
+          "producedMiB": 420,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2616,
+          "producedMiB": 480,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3144,
+          "producedMiB": 532,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3691,
+          "producedMiB": 588,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4193,
+          "producedMiB": 632,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4726,
+          "producedMiB": 692,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 177545216,
+          "peak": 969015296,
+          "end": 969015296,
+          "growthPeak": 791470080
+        },
+        "heapUsed": {
+          "start": 16981736,
+          "peak": 20935624,
+          "end": 20599168,
+          "growthPeak": 3953888
+        },
+        "external": {
+          "start": 33118376,
+          "peak": 836956284,
+          "end": 836956284,
+          "growthPeak": 803837908
+        },
+        "arrayBuffers": {
+          "start": 29826228,
+          "peak": 827625965,
+          "end": 826983287,
+          "growthPeak": 797799737
+        },
+        "n": 45
+      },
+      "memServer": "same-process",
+      "wallMs": 5731.401742,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.17194999999992433,
+        "p95": 0.3680060000000367,
+        "p99": 1.0263009999999895,
+        "max": 1.2586709999999357,
+        "mean": 0.20434896999999774
+      },
+      "during": {
+        "n": 183,
+        "p50": 18.487155999999914,
+        "p95": 76.409224,
+        "p99": 100.75465199999962,
+        "max": 108.30383600000005,
+        "mean": 27.514092147540953
+      },
+      "consumedMiB": 0,
+      "producedMiB": 732,
+      "timeline": [
+        {
+          "t": 516,
+          "producedMiB": 116,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1020,
+          "producedMiB": 244,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1524,
+          "producedMiB": 364,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2039,
+          "producedMiB": 424,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2540,
+          "producedMiB": 476,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3052,
+          "producedMiB": 532,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3556,
+          "producedMiB": 584,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4097,
+          "producedMiB": 636,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4601,
+          "producedMiB": 692,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 173056000,
+          "peak": 984612864,
+          "end": 984612864,
+          "growthPeak": 811556864
+        },
+        "heapUsed": {
+          "start": 17546272,
+          "peak": 21296648,
+          "end": 20673152,
+          "growthPeak": 3750376
+        },
+        "external": {
+          "start": 24219372,
+          "peak": 843368745,
+          "end": 841219242,
+          "growthPeak": 819149373
+        },
+        "arrayBuffers": {
+          "start": 20927224,
+          "peak": 840081504,
+          "end": 837932001,
+          "growthPeak": 819154280
+        },
+        "n": 44
+      },
+      "memServer": "same-process",
+      "wallMs": 5753.226079,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.17392200000006142,
+        "p95": 0.34075400000006084,
+        "p99": 0.971131000000014,
+        "max": 2.067856000000006,
+        "mean": 0.2047904620000004
+      },
+      "during": {
+        "n": 197,
+        "p50": 18.39063699999997,
+        "p95": 78.49367999999959,
+        "p99": 98.50170600000001,
+        "max": 99.9018500000002,
+        "mean": 25.585364010152297
+      },
+      "consumedMiB": 0,
+      "producedMiB": 788,
+      "timeline": [
+        {
+          "t": 507,
+          "producedMiB": 112,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1008,
+          "producedMiB": 228,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1517,
+          "producedMiB": 332,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2021,
+          "producedMiB": 444,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2527,
+          "producedMiB": 516,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3032,
+          "producedMiB": 564,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3559,
+          "producedMiB": 620,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4066,
+          "producedMiB": 680,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4607,
+          "producedMiB": 740,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 173858816,
+          "peak": 1035821056,
+          "end": 1035821056,
+          "growthPeak": 861962240
+        },
+        "heapUsed": {
+          "start": 16735624,
+          "peak": 21159280,
+          "end": 20995672,
+          "growthPeak": 4423656
+        },
+        "external": {
+          "start": 6523830,
+          "peak": 904431013,
+          "end": 904431013,
+          "growthPeak": 897907183
+        },
+        "arrayBuffers": {
+          "start": 3231682,
+          "peak": 898058839,
+          "end": 894261345,
+          "growthPeak": 894827157
+        },
+        "n": 47
+      },
+      "memServer": "same-process",
+      "wallMs": 5785.528232,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 2
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4212159999999585,
+        "p95": 1.1863399999999729,
+        "p99": 2.826381000000083,
+        "max": 7.249645999999984,
+        "mean": 0.5728557379999979
+      },
+      "during": {
+        "n": 108,
+        "p50": 33.59259699999984,
+        "p95": 118.02408199999991,
+        "p99": 150.7194099999997,
+        "max": 163.28911199999993,
+        "mean": 47.07282155555554
+      },
+      "consumedMiB": 0,
+      "producedMiB": 892,
+      "timeline": [
+        {
+          "t": 533,
+          "producedMiB": 177,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1020,
+          "producedMiB": 360,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1592,
+          "producedMiB": 489,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2025,
+          "producedMiB": 543,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2550,
+          "producedMiB": 591,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3104,
+          "producedMiB": 650,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3629,
+          "producedMiB": 702,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4088,
+          "producedMiB": 762,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4581,
+          "producedMiB": 826,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5151,
+          "producedMiB": 892,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 147087360,
+          "peak": 1136287744,
+          "end": 1136287744,
+          "growthPeak": 989200384
+        },
+        "heapUsed": {
+          "start": 16484864,
+          "peak": 21860584,
+          "end": 21860584,
+          "growthPeak": 5375720
+        },
+        "external": {
+          "start": 27709623,
+          "peak": 1013155872,
+          "end": 1013155872,
+          "growthPeak": 985446249
+        },
+        "arrayBuffers": {
+          "start": 24389864,
+          "peak": 1009841020,
+          "end": 1009841020,
+          "growthPeak": 985451156
+        },
+        "n": 46
+      },
+      "memServer": {
+        "rss": {
+          "start": 146096128,
+          "peak": 170037248,
+          "end": 148594688,
+          "growthPeak": 23941120
+        },
+        "heapUsed": {
+          "start": 16067248,
+          "peak": 17139344,
+          "end": 14698176,
+          "growthPeak": 1072096
+        },
+        "external": {
+          "start": 10948408,
+          "peak": 56974465,
+          "end": 40439612,
+          "growthPeak": 46026057
+        },
+        "arrayBuffers": {
+          "start": 7499065,
+          "peak": 53525122,
+          "end": 2845701,
+          "growthPeak": 46026057
+        },
+        "n": 50
+      },
+      "wallMs": 6529.454831,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.49343500000009044,
+        "p95": 1.3285379999999805,
+        "p99": 3.7142899999998917,
+        "max": 7.04985099999999,
+        "mean": 0.6709953600000004
+      },
+      "during": {
+        "n": 125,
+        "p50": 31.926445000000058,
+        "p95": 92.77319899999975,
+        "p99": 118.85545899999943,
+        "max": 125.62138900000036,
+        "mean": 40.35754769600001
+      },
+      "consumedMiB": 0,
+      "producedMiB": 963,
+      "timeline": [
+        {
+          "t": 545,
+          "producedMiB": 174,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1029,
+          "producedMiB": 360,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1519,
+          "producedMiB": 541,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2017,
+          "producedMiB": 585,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2589,
+          "producedMiB": 650,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3165,
+          "producedMiB": 738,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3600,
+          "producedMiB": 787,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4112,
+          "producedMiB": 852,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4672,
+          "producedMiB": 916,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 166227968,
+          "peak": 1204428800,
+          "end": 1204428800,
+          "growthPeak": 1038200832
+        },
+        "heapUsed": {
+          "start": 16879520,
+          "peak": 22045984,
+          "end": 21485664,
+          "growthPeak": 5166464
+        },
+        "external": {
+          "start": 48413554,
+          "peak": 1078470516,
+          "end": 1074405253,
+          "growthPeak": 1030056962
+        },
+        "arrayBuffers": {
+          "start": 45093795,
+          "peak": 1075155664,
+          "end": 1071090401,
+          "growthPeak": 1030061869
+        },
+        "n": 48
+      },
+      "memServer": {
+        "rss": {
+          "start": 141557760,
+          "peak": 176447488,
+          "end": 159133696,
+          "growthPeak": 34889728
+        },
+        "heapUsed": {
+          "start": 16838424,
+          "peak": 17141088,
+          "end": 14559688,
+          "growthPeak": 302664
+        },
+        "external": {
+          "start": 29760977,
+          "peak": 70262417,
+          "end": 40300513,
+          "growthPeak": 40501440
+        },
+        "arrayBuffers": {
+          "start": 26311634,
+          "peak": 61378492,
+          "end": 84005,
+          "growthPeak": 35066858
+        },
+        "n": 51
+      },
+      "wallMs": 6526.208351,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "A",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.5021469999999226,
+        "p95": 1.5089050000001407,
+        "p99": 3.2812189999999646,
+        "max": 4.160008000000062,
+        "mean": 0.6580689580000049
+      },
+      "during": {
+        "n": 133,
+        "p50": 24.998346000000083,
+        "p95": 108.36729100000002,
+        "p99": 135.53068799999983,
+        "max": 197.66535300000032,
+        "mean": 37.87448213533834
+      },
+      "consumedMiB": 0,
+      "producedMiB": 1036,
+      "timeline": [
+        {
+          "t": 519,
+          "producedMiB": 145,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1022,
+          "producedMiB": 325,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1519,
+          "producedMiB": 489,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2036,
+          "producedMiB": 642,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2566,
+          "producedMiB": 696,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3125,
+          "producedMiB": 767,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3632,
+          "producedMiB": 831,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4142,
+          "producedMiB": 898,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4614,
+          "producedMiB": 960,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": null,
+      "serverAdapterMaxQueuedMiB": 0,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 152666112,
+          "peak": 1283788800,
+          "end": 1283788800,
+          "growthPeak": 1131122688
+        },
+        "heapUsed": {
+          "start": 17462344,
+          "peak": 22577640,
+          "end": 14767816,
+          "growthPeak": 5115296
+        },
+        "external": {
+          "start": 51748368,
+          "peak": 1163410525,
+          "end": 1163410525,
+          "growthPeak": 1111662157
+        },
+        "arrayBuffers": {
+          "start": 48428609,
+          "peak": 1155377841,
+          "end": 1155377841,
+          "growthPeak": 1106949232
+        },
+        "n": 48
+      },
+      "memServer": {
+        "rss": {
+          "start": 150048768,
+          "peak": 174862336,
+          "end": 162295808,
+          "growthPeak": 24813568
+        },
+        "heapUsed": {
+          "start": 16801072,
+          "peak": 17050328,
+          "end": 14981896,
+          "growthPeak": 249256
+        },
+        "external": {
+          "start": 29761587,
+          "peak": 59975875,
+          "end": 14942203,
+          "growthPeak": 30214288
+        },
+        "arrayBuffers": {
+          "start": 26312244,
+          "peak": 56526532,
+          "end": 11497767,
+          "growthPeak": 30214288
+        },
+        "n": 50
+      },
+      "wallMs": 6468.07265,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 2
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.36269500000003063,
+        "p95": 0.6710479999999279,
+        "p99": 1.4442470000000185,
+        "max": 2.3375069999999596,
+        "mean": 0.4090982799999997
+      },
+      "during": {
+        "n": 13596,
+        "p50": 0.29265099999975064,
+        "p95": 0.7128789999999299,
+        "p99": 1.9290460000001985,
+        "max": 21.021245999999792,
+        "mean": 0.36671527441894947
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4002,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 157253632,
+          "peak": 175472640,
+          "end": 175472640,
+          "growthPeak": 18219008
+        },
+        "heapUsed": {
+          "start": 20367608,
+          "peak": 48956264,
+          "end": 35654744,
+          "growthPeak": 28588656
+        },
+        "external": {
+          "start": 5000183,
+          "peak": 5432781,
+          "end": 5302259,
+          "growthPeak": 432598
+        },
+        "arrayBuffers": {
+          "start": 158320,
+          "peak": 573703,
+          "end": 193604,
+          "growthPeak": 415383
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 5940.177965,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4475439999999935,
+        "p95": 0.862822000000051,
+        "p99": 2.2486350000000357,
+        "max": 3.1241549999999734,
+        "mean": 0.5115653439999969
+      },
+      "during": {
+        "n": 13857,
+        "p50": 0.29928600000039296,
+        "p95": 0.6113669999995182,
+        "p99": 1.725104999999985,
+        "max": 20.655746000000363,
+        "mean": 0.3599541823627024
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 125640704,
+          "peak": 142417920,
+          "end": 142417920,
+          "growthPeak": 16777216
+        },
+        "heapUsed": {
+          "start": 23957496,
+          "peak": 47075192,
+          "end": 36683368,
+          "growthPeak": 23117696
+        },
+        "external": {
+          "start": 5091861,
+          "peak": 5407791,
+          "end": 5144894,
+          "growthPeak": 315930
+        },
+        "arrayBuffers": {
+          "start": 249998,
+          "peak": 547597,
+          "end": 305497,
+          "growthPeak": 297599
+        },
+        "n": 51
+      },
+      "memServer": "same-process",
+      "wallMs": 6084.373108000001,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.45865199999991546,
+        "p95": 1.138977000000068,
+        "p99": 2.8628889999999956,
+        "max": 3.715237000000002,
+        "mean": 0.5522281479999981
+      },
+      "during": {
+        "n": 14026,
+        "p50": 0.2894169999999576,
+        "p95": 0.6987669999998616,
+        "p99": 1.7598530000004757,
+        "max": 23.279265999999552,
+        "mean": 0.3555469978611165
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 156262400,
+          "peak": 173867008,
+          "end": 173867008,
+          "growthPeak": 17604608
+        },
+        "heapUsed": {
+          "start": 23313224,
+          "peak": 48087696,
+          "end": 37861648,
+          "growthPeak": 24774472
+        },
+        "external": {
+          "start": 5075228,
+          "peak": 5433094,
+          "end": 5157097,
+          "growthPeak": 357866
+        },
+        "arrayBuffers": {
+          "start": 233365,
+          "peak": 582785,
+          "end": 317700,
+          "growthPeak": 349420
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 6036.598987,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.9673969999998917,
+        "p95": 2.0935339999998632,
+        "p99": 3.4396630000001096,
+        "max": 15.124008000000003,
+        "mean": 1.1479828279999924
+      },
+      "during": {
+        "n": 6752,
+        "p50": 0.6257180000002336,
+        "p95": 1.4070310000001882,
+        "p99": 2.1516599999999926,
+        "max": 6.67247800000041,
+        "mean": 0.7387078634478643
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4002,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 150175744,
+          "peak": 159109120,
+          "end": 159109120,
+          "growthPeak": 8933376
+        },
+        "heapUsed": {
+          "start": 23371104,
+          "peak": 38796008,
+          "end": 34002432,
+          "growthPeak": 15424904
+        },
+        "external": {
+          "start": 5109760,
+          "peak": 9280209,
+          "end": 9280209,
+          "growthPeak": 4170449
+        },
+        "arrayBuffers": {
+          "start": 240286,
+          "peak": 4410735,
+          "end": 4410735,
+          "growthPeak": 4170449
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 139309056,
+          "peak": 148353024,
+          "end": 148353024,
+          "growthPeak": 9043968
+        },
+        "heapUsed": {
+          "start": 23630096,
+          "peak": 40641944,
+          "end": 34574040,
+          "growthPeak": 17011848
+        },
+        "external": {
+          "start": 5142431,
+          "peak": 10422527,
+          "end": 10422527,
+          "growthPeak": 5280096
+        },
+        "arrayBuffers": {
+          "start": 258641,
+          "peak": 5538737,
+          "end": 5538737,
+          "growthPeak": 5280096
+        },
+        "n": 51
+      },
+      "wallMs": 6953.239802,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 1.1942340000000513,
+        "p95": 2.437859000000117,
+        "p99": 3.616647999999941,
+        "max": 9.528311999999914,
+        "mean": 1.3263040040000034
+      },
+      "during": {
+        "n": 7205,
+        "p50": 0.5722229999992123,
+        "p95": 1.298931000000266,
+        "p99": 2.3269359999999324,
+        "max": 9.61692499999981,
+        "mean": 0.6921416717557313
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 501,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1002,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2501,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3001,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3501,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5001,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.00018310546875,
+      "serverAdapterMaxQueuedMiB": 1.0001249313354492,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 142987264,
+          "peak": 150560768,
+          "end": 150560768,
+          "growthPeak": 7573504
+        },
+        "heapUsed": {
+          "start": 18696464,
+          "peak": 40485616,
+          "end": 40485616,
+          "growthPeak": 21789152
+        },
+        "external": {
+          "start": 5010900,
+          "peak": 9433987,
+          "end": 9433987,
+          "growthPeak": 4423087
+        },
+        "arrayBuffers": {
+          "start": 141426,
+          "peak": 4564513,
+          "end": 4564513,
+          "growthPeak": 4423087
+        },
+        "n": 52
+      },
+      "memServer": {
+        "rss": {
+          "start": 127217664,
+          "peak": 134164480,
+          "end": 133976064,
+          "growthPeak": 6946816
+        },
+        "heapUsed": {
+          "start": 21779528,
+          "peak": 37568784,
+          "end": 21593856,
+          "growthPeak": 15789256
+        },
+        "external": {
+          "start": 5099003,
+          "peak": 10481260,
+          "end": 10481260,
+          "growthPeak": 5382257
+        },
+        "arrayBuffers": {
+          "start": 215213,
+          "peak": 485188,
+          "end": 135814,
+          "growthPeak": 269975
+        },
+        "n": 51
+      },
+      "wallMs": 7146.482027,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B2",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.9141450000001896,
+        "p95": 2.233855000000176,
+        "p99": 6.20688599999994,
+        "max": 9.366805999999997,
+        "mean": 1.151664122000002
+      },
+      "during": {
+        "n": 7790,
+        "p50": 0.5371000000000095,
+        "p95": 1.1618740000003527,
+        "p99": 1.9464819999998326,
+        "max": 10.512543000000278,
+        "mean": 0.6402427671373561
+      },
+      "consumedMiB": 0,
+      "producedMiB": 0,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2001,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 0,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.0001850128173828125,
+      "serverAdapterMaxQueuedMiB": 1.0001239776611328,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 136093696,
+          "peak": 146083840,
+          "end": 146083840,
+          "growthPeak": 9990144
+        },
+        "heapUsed": {
+          "start": 20712672,
+          "peak": 42955736,
+          "end": 38247784,
+          "growthPeak": 22243064
+        },
+        "external": {
+          "start": 5053701,
+          "peak": 8314190,
+          "end": 8314190,
+          "growthPeak": 3260489
+        },
+        "arrayBuffers": {
+          "start": 184227,
+          "peak": 3444716,
+          "end": 3444716,
+          "growthPeak": 3260489
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 119447552,
+          "peak": 132292608,
+          "end": 132292608,
+          "growthPeak": 12845056
+        },
+        "heapUsed": {
+          "start": 22079496,
+          "peak": 37591248,
+          "end": 25257264,
+          "growthPeak": 15511752
+        },
+        "external": {
+          "start": 5105615,
+          "peak": 10297649,
+          "end": 10297649,
+          "growthPeak": 5192034
+        },
+        "arrayBuffers": {
+          "start": 221825,
+          "peak": 5413859,
+          "end": 5413859,
+          "growthPeak": 5192034
+        },
+        "n": 51
+      },
+      "wallMs": 7005.563708,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.39987299999995685,
+        "p95": 0.8596600000000763,
+        "p99": 1.1518700000000308,
+        "max": 2.4508919999999534,
+        "mean": 0.4307309440000029
+      },
+      "during": {
+        "n": 348,
+        "p50": 11.032374000000345,
+        "p95": 30.602802000000338,
+        "p99": 35.27597300000025,
+        "max": 39.492011999999704,
+        "mean": 14.421440752873561
+      },
+      "consumedMiB": 0,
+      "producedMiB": 698,
+      "timeline": [
+        {
+          "t": 503,
+          "producedMiB": 95,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1006,
+          "producedMiB": 190,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1506,
+          "producedMiB": 300,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2014,
+          "producedMiB": 401,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2515,
+          "producedMiB": 453,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3026,
+          "producedMiB": 508,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3530,
+          "producedMiB": 554,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4034,
+          "producedMiB": 602,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4535,
+          "producedMiB": 656,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 697,
+      "memClient": {
+        "rss": {
+          "start": 160948224,
+          "peak": 1080418304,
+          "end": 1080418304,
+          "growthPeak": 919470080
+        },
+        "heapUsed": {
+          "start": 18611088,
+          "peak": 18611088,
+          "end": 17153904,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 46982561,
+          "peak": 762078226,
+          "end": 756890706,
+          "growthPeak": 715095665
+        },
+        "arrayBuffers": {
+          "start": 42140698,
+          "peak": 757241854,
+          "end": 752054334,
+          "growthPeak": 715101156
+        },
+        "n": 49
+      },
+      "memServer": "same-process",
+      "wallMs": 5919.972374,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.21111100000007355,
+        "p95": 0.6051510000000917,
+        "p99": 1.4658309999999801,
+        "max": 4.668983000000026,
+        "mean": 0.29199488399999973
+      },
+      "during": {
+        "n": 340,
+        "p50": 10.831800000000158,
+        "p95": 31.759554999999636,
+        "p99": 38.108854000000065,
+        "max": 41.70152400000006,
+        "mean": 14.713262700000008
+      },
+      "consumedMiB": 0,
+      "producedMiB": 682,
+      "timeline": [
+        {
+          "t": 503,
+          "producedMiB": 96,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1004,
+          "producedMiB": 204,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1505,
+          "producedMiB": 296,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2020,
+          "producedMiB": 394,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2522,
+          "producedMiB": 439,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3031,
+          "producedMiB": 491,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3534,
+          "producedMiB": 539,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4037,
+          "producedMiB": 589,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4538,
+          "producedMiB": 641,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 681,
+      "memClient": {
+        "rss": {
+          "start": 177537024,
+          "peak": 1068691456,
+          "end": 1068691456,
+          "growthPeak": 891154432
+        },
+        "heapUsed": {
+          "start": 18547760,
+          "peak": 18560712,
+          "end": 16543568,
+          "growthPeak": 12952
+        },
+        "external": {
+          "start": 25811394,
+          "peak": 755843796,
+          "end": 755843796,
+          "growthPeak": 730032402
+        },
+        "arrayBuffers": {
+          "start": 20969531,
+          "peak": 740455316,
+          "end": 8524800,
+          "growthPeak": 719485785
+        },
+        "n": 49
+      },
+      "memServer": "same-process",
+      "wallMs": 5830.851908000001,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.23055999999996857,
+        "p95": 0.5195640000000594,
+        "p99": 1.0857089999999516,
+        "max": 3.4611380000000054,
+        "mean": 0.28212117000000037
+      },
+      "during": {
+        "n": 323,
+        "p50": 12.541911000000027,
+        "p95": 31.428239000000758,
+        "p99": 34.84945999999945,
+        "max": 46.06960600000002,
+        "mean": 15.542330817337454
+      },
+      "consumedMiB": 0,
+      "producedMiB": 648,
+      "timeline": [
+        {
+          "t": 501,
+          "producedMiB": 84,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1001,
+          "producedMiB": 174,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1503,
+          "producedMiB": 257,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2002,
+          "producedMiB": 358,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2504,
+          "producedMiB": 408,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3014,
+          "producedMiB": 460,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3514,
+          "producedMiB": 510,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4021,
+          "producedMiB": 556,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4522,
+          "producedMiB": 605,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 647,
+      "memClient": {
+        "rss": {
+          "start": 139259904,
+          "peak": 1010855936,
+          "end": 1010855936,
+          "growthPeak": 871596032
+        },
+        "heapUsed": {
+          "start": 18527592,
+          "peak": 18527592,
+          "end": 16635208,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 25811550,
+          "peak": 702305996,
+          "end": 691875309,
+          "growthPeak": 676494446
+        },
+        "arrayBuffers": {
+          "start": 20969687,
+          "peak": 697469624,
+          "end": 687038937,
+          "growthPeak": 676499937
+        },
+        "n": 49
+      },
+      "memServer": "same-process",
+      "wallMs": 5867.706359000001,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.2939800000001469,
+        "p95": 0.8865390000000843,
+        "p99": 3.2660199999997985,
+        "max": 5.767219999999952,
+        "mean": 0.42180522600000087
+      },
+      "during": {
+        "n": 19,
+        "p50": 10.557570000000169,
+        "p95": 3752.494325999999,
+        "p99": 3752.494325999999,
+        "max": 3752.494325999999,
+        "mean": 411.1470312631578
+      },
+      "consumedMiB": 0,
+      "producedMiB": 1715,
+      "timeline": [
+        {
+          "t": 537,
+          "producedMiB": 218,
+          "srvQueueMiB": 94.00322914123535
+        },
+        {
+          "t": 1041,
+          "producedMiB": 381,
+          "srvQueueMiB": 179.00606632232666
+        },
+        {
+          "t": 1559,
+          "producedMiB": 478,
+          "srvQueueMiB": 216.0073013305664
+        },
+        {
+          "t": 2071,
+          "producedMiB": 591,
+          "srvQueueMiB": 261.00880336761475
+        },
+        {
+          "t": 2571,
+          "producedMiB": 694,
+          "srvQueueMiB": 305.010272026062
+        },
+        {
+          "t": 3081,
+          "producedMiB": 805,
+          "srvQueueMiB": 350.01177406311035
+        },
+        {
+          "t": 3592,
+          "producedMiB": 917,
+          "srvQueueMiB": 391.0131425857544
+        },
+        {
+          "t": 4108,
+          "producedMiB": 1012,
+          "srvQueueMiB": 432.01451110839844
+        },
+        {
+          "t": 4620,
+          "producedMiB": 1127,
+          "srvQueueMiB": 485.01628017425537
+        },
+        {
+          "t": 5147,
+          "producedMiB": 1210,
+          "srvQueueMiB": 511.0171480178833
+        },
+        {
+          "t": 5656,
+          "producedMiB": 1292,
+          "srvQueueMiB": 538.0180492401123
+        },
+        {
+          "t": 6144,
+          "producedMiB": 1382,
+          "srvQueueMiB": 575.019284248352
+        },
+        {
+          "t": 6668,
+          "producedMiB": 1488,
+          "srvQueueMiB": 618.0207195281982
+        },
+        {
+          "t": 7171,
+          "producedMiB": 1574,
+          "srvQueueMiB": 643.0215539932251
+        },
+        {
+          "t": 7676,
+          "producedMiB": 1671,
+          "srvQueueMiB": 680.0227890014648
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 700.023365020752,
+      "serverAdapterQueuedNowMiB": 698.0232982635498,
+      "rawInboxMaxMiB": 1014,
+      "memClient": {
+        "rss": {
+          "start": 143302656,
+          "peak": 1221128192,
+          "end": 1221128192,
+          "growthPeak": 1077825536
+        },
+        "heapUsed": {
+          "start": 17467688,
+          "peak": 18855448,
+          "end": 16388664,
+          "growthPeak": 1387760
+        },
+        "external": {
+          "start": 4996423,
+          "peak": 1082504161,
+          "end": 23281254,
+          "growthPeak": 1077507738
+        },
+        "arrayBuffers": {
+          "start": 126949,
+          "peak": 1077640178,
+          "end": 18417271,
+          "growthPeak": 1077513229
+        },
+        "n": 74
+      },
+      "memServer": {
+        "rss": {
+          "start": 152731648,
+          "peak": 1104101376,
+          "end": 1104101376,
+          "growthPeak": 951369728
+        },
+        "heapUsed": {
+          "start": 17422576,
+          "peak": 17675760,
+          "end": 16664096,
+          "growthPeak": 253184
+        },
+        "external": {
+          "start": 10262125,
+          "peak": 778956698,
+          "end": 741536512,
+          "growthPeak": 768694573
+        },
+        "arrayBuffers": {
+          "start": 5378335,
+          "peak": 774078399,
+          "end": 736658213,
+          "growthPeak": 768700064
+        },
+        "n": 77
+      },
+      "wallMs": 9082.38035,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.3023550000000341,
+        "p95": 1.1010260000000471,
+        "p99": 4.45026699999994,
+        "max": 5.75903500000004,
+        "mean": 0.4828138239999894
+      },
+      "during": {
+        "n": 10,
+        "p50": 425.98615199999995,
+        "p95": 3890.1048379999993,
+        "p99": 3890.1048379999993,
+        "max": 3890.1048379999993,
+        "mean": 882.1687523
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2390,
+      "timeline": [
+        {
+          "t": 523,
+          "producedMiB": 203,
+          "srvQueueMiB": 94.00322914123535
+        },
+        {
+          "t": 1023,
+          "producedMiB": 381,
+          "srvQueueMiB": 124.00423049926758
+        },
+        {
+          "t": 1517,
+          "producedMiB": 552,
+          "srvQueueMiB": 141.00479793548584
+        },
+        {
+          "t": 2041,
+          "producedMiB": 740,
+          "srvQueueMiB": 215.00726795196533
+        },
+        {
+          "t": 2531,
+          "producedMiB": 839,
+          "srvQueueMiB": 251.008469581604
+        },
+        {
+          "t": 3030,
+          "producedMiB": 1030,
+          "srvQueueMiB": 309.0104055404663
+        },
+        {
+          "t": 3566,
+          "producedMiB": 1189,
+          "srvQueueMiB": 373.01254177093506
+        },
+        {
+          "t": 4057,
+          "producedMiB": 1294,
+          "srvQueueMiB": 418.0140438079834
+        },
+        {
+          "t": 4575,
+          "producedMiB": 1411,
+          "srvQueueMiB": 466.01564598083496
+        },
+        {
+          "t": 5080,
+          "producedMiB": 1526,
+          "srvQueueMiB": 513.0172147750854
+        },
+        {
+          "t": 5587,
+          "producedMiB": 1646,
+          "srvQueueMiB": 567.0190172195435
+        },
+        {
+          "t": 6092,
+          "producedMiB": 1766,
+          "srvQueueMiB": 619.0207529067993
+        },
+        {
+          "t": 6592,
+          "producedMiB": 1892,
+          "srvQueueMiB": 679.0227556228638
+        },
+        {
+          "t": 7098,
+          "producedMiB": 2000,
+          "srvQueueMiB": 719.0240907669067
+        },
+        {
+          "t": 7607,
+          "producedMiB": 2107,
+          "srvQueueMiB": 756.0253257751465
+        },
+        {
+          "t": 8111,
+          "producedMiB": 2222,
+          "srvQueueMiB": 803.026894569397
+        },
+        {
+          "t": 8635,
+          "producedMiB": 2336,
+          "srvQueueMiB": 857.028697013855
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 883.0294733047485,
+      "serverAdapterQueuedNowMiB": 880.0293731689453,
+      "rawInboxMaxMiB": 1507,
+      "memClient": {
+        "rss": {
+          "start": 137728000,
+          "peak": 1739169792,
+          "end": 1264611328,
+          "growthPeak": 1601441792
+        },
+        "heapUsed": {
+          "start": 18691024,
+          "peak": 18905144,
+          "end": 16846752,
+          "growthPeak": 214120
+        },
+        "external": {
+          "start": 32060926,
+          "peak": 1611326254,
+          "end": 43988228,
+          "growthPeak": 1579265328
+        },
+        "arrayBuffers": {
+          "start": 27191452,
+          "peak": 1606462271,
+          "end": 39124245,
+          "growthPeak": 1579270819
+        },
+        "n": 85
+      },
+      "memServer": {
+        "rss": {
+          "start": 162000896,
+          "peak": 1326391296,
+          "end": 1326391296,
+          "growthPeak": 1164390400
+        },
+        "heapUsed": {
+          "start": 17448920,
+          "peak": 18032800,
+          "end": 17873616,
+          "growthPeak": 583880
+        },
+        "external": {
+          "start": 37854350,
+          "peak": 979898175,
+          "end": 962141380,
+          "growthPeak": 942043825
+        },
+        "arrayBuffers": {
+          "start": 32970560,
+          "peak": 958961639,
+          "end": 957263081,
+          "growthPeak": 925991079
+        },
+        "n": 87
+      },
+      "wallMs": 10145.920548999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B1",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.4670699999999215,
+        "p95": 1.3694940000000315,
+        "p99": 3.809103999999934,
+        "max": 4.365015999999969,
+        "mean": 0.6144321579999937
+      },
+      "during": {
+        "n": 18,
+        "p50": 25.456176999999798,
+        "p95": 3996.3145759999998,
+        "p99": 3996.3145759999998,
+        "max": 3996.3145759999998,
+        "mean": 450.99370311111113
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2539,
+      "timeline": [
+        {
+          "t": 514,
+          "producedMiB": 204,
+          "srvQueueMiB": 83.00286197662354
+        },
+        {
+          "t": 1043,
+          "producedMiB": 427,
+          "srvQueueMiB": 163.00553226470947
+        },
+        {
+          "t": 1526,
+          "producedMiB": 659,
+          "srvQueueMiB": 257.0085783004761
+        },
+        {
+          "t": 2034,
+          "producedMiB": 875,
+          "srvQueueMiB": 304.01023864746094
+        },
+        {
+          "t": 2556,
+          "producedMiB": 1051,
+          "srvQueueMiB": 374.01257514953613
+        },
+        {
+          "t": 3051,
+          "producedMiB": 1155,
+          "srvQueueMiB": 421.0141439437866
+        },
+        {
+          "t": 3535,
+          "producedMiB": 1336,
+          "srvQueueMiB": 451.01514530181885
+        },
+        {
+          "t": 4050,
+          "producedMiB": 1584,
+          "srvQueueMiB": 553.0185499191284
+        },
+        {
+          "t": 4579,
+          "producedMiB": 1788,
+          "srvQueueMiB": 628.021053314209
+        },
+        {
+          "t": 5086,
+          "producedMiB": 1897,
+          "srvQueueMiB": 672.0225219726562
+        },
+        {
+          "t": 5614,
+          "producedMiB": 2002,
+          "srvQueueMiB": 710.0237903594971
+        },
+        {
+          "t": 6093,
+          "producedMiB": 2113,
+          "srvQueueMiB": 755.0252923965454
+        },
+        {
+          "t": 6588,
+          "producedMiB": 2220,
+          "srvQueueMiB": 793.0265607833862
+        },
+        {
+          "t": 7120,
+          "producedMiB": 2324,
+          "srvQueueMiB": 836.0279960632324
+        },
+        {
+          "t": 7612,
+          "producedMiB": 2429,
+          "srvQueueMiB": 867.0290307998657
+        },
+        {
+          "t": 8120,
+          "producedMiB": 2528,
+          "srvQueueMiB": 905.0302076339722
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 912.0304412841797,
+      "serverAdapterQueuedNowMiB": 912.0304412841797,
+      "rawInboxMaxMiB": 1626,
+      "memClient": {
+        "rss": {
+          "start": 156229632,
+          "peak": 1867632640,
+          "end": 1867632640,
+          "growthPeak": 1711403008
+        },
+        "heapUsed": {
+          "start": 17992296,
+          "peak": 18504304,
+          "end": 17435320,
+          "growthPeak": 512008
+        },
+        "external": {
+          "start": 35609680,
+          "peak": 1725040242,
+          "end": 55652385,
+          "growthPeak": 1689430562
+        },
+        "arrayBuffers": {
+          "start": 30740206,
+          "peak": 1720176259,
+          "end": 50788402,
+          "growthPeak": 1689436053
+        },
+        "n": 78
+      },
+      "memServer": {
+        "rss": {
+          "start": 147898368,
+          "peak": 1395888128,
+          "end": 1395888128,
+          "growthPeak": 1247989760
+        },
+        "heapUsed": {
+          "start": 17702880,
+          "peak": 18005432,
+          "end": 17708400,
+          "growthPeak": 302552
+        },
+        "external": {
+          "start": 14457645,
+          "peak": 1009066771,
+          "end": 1009066771,
+          "growthPeak": 994609126
+        },
+        "arrayBuffers": {
+          "start": 9573855,
+          "peak": 1004188472,
+          "end": 1004188472,
+          "growthPeak": 994614617
+        },
+        "n": 80
+      },
+      "wallMs": 9574.632112,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.19257299999992483,
+        "p95": 1.1256859999999733,
+        "p99": 2.2851309999999785,
+        "max": 3.335721000000035,
+        "mean": 0.3166588139999976
+      },
+      "during": {
+        "n": 32343,
+        "p50": 0.11434100000042235,
+        "p95": 0.31432999999992717,
+        "p99": 0.7243050000006406,
+        "max": 4.17575799999986,
+        "mean": 0.15401048208267368
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 999,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1499,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2499,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2999,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3499,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4499,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4999,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 145506304,
+          "peak": 149561344,
+          "end": 149561344,
+          "growthPeak": 4055040
+        },
+        "heapUsed": {
+          "start": 30495400,
+          "peak": 33336064,
+          "end": 20555496,
+          "growthPeak": 2840664
+        },
+        "external": {
+          "start": 7320884,
+          "peak": 7389885,
+          "end": 7271648,
+          "growthPeak": 69001
+        },
+        "arrayBuffers": {
+          "start": 2479021,
+          "peak": 2547171,
+          "end": 2275339,
+          "growthPeak": 68150
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 5942.575817,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.24003699999991568,
+        "p95": 0.6858170000000428,
+        "p99": 1.5332730000000083,
+        "max": 1.829364000000055,
+        "mean": 0.30560657800000424
+      },
+      "during": {
+        "n": 34514,
+        "p50": 0.1135469999999259,
+        "p95": 0.24700700000016695,
+        "p99": 0.762365999999929,
+        "max": 8.18071000000009,
+        "mean": 0.14423127113634826
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 158076928,
+          "peak": 158732288,
+          "end": 135168000,
+          "growthPeak": 655360
+        },
+        "heapUsed": {
+          "start": 28085200,
+          "peak": 36547784,
+          "end": 20730248,
+          "growthPeak": 8462584
+        },
+        "external": {
+          "start": 13577223,
+          "peak": 13577223,
+          "end": 7247448,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 2434103,
+          "peak": 2563027,
+          "end": 2280367,
+          "growthPeak": 128924
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 5955.572158,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 1,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.18739100000004782,
+        "p95": 0.42905900000005204,
+        "p99": 1.137591000000043,
+        "max": 2.3271009999999706,
+        "mean": 0.23336013199999933
+      },
+      "during": {
+        "n": 31631,
+        "p50": 0.11997400000018388,
+        "p95": 0.2878259999997681,
+        "p99": 0.8219889999999168,
+        "max": 6.332940000000008,
+        "mean": 0.15747286484777553
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 138674176,
+          "peak": 141746176,
+          "end": 141746176,
+          "growthPeak": 3072000
+        },
+        "heapUsed": {
+          "start": 19830584,
+          "peak": 33262472,
+          "end": 29106800,
+          "growthPeak": 13431888
+        },
+        "external": {
+          "start": 7109136,
+          "peak": 7398135,
+          "end": 7112835,
+          "growthPeak": 288999
+        },
+        "arrayBuffers": {
+          "start": 2267273,
+          "peak": 2554227,
+          "end": 2270972,
+          "growthPeak": 286954
+        },
+        "n": 52
+      },
+      "memServer": "same-process",
+      "wallMs": 5874.893662,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.30476400000020476,
+        "p95": 1.4220100000000002,
+        "p99": 3.023023000000194,
+        "max": 4.8466199999998025,
+        "mean": 0.508927506
+      },
+      "during": {
+        "n": 27462,
+        "p50": 0.1435410000003685,
+        "p95": 0.36293600000044535,
+        "p99": 0.8739199999999983,
+        "max": 6.049101999999948,
+        "mean": 0.18128445874299218
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1002,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1501,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2002,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2501,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3001,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3501,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4001,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4501,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 152150016,
+          "peak": 156049408,
+          "end": 156049408,
+          "growthPeak": 3899392
+        },
+        "heapUsed": {
+          "start": 24293848,
+          "peak": 32185720,
+          "end": 19269928,
+          "growthPeak": 7891872
+        },
+        "external": {
+          "start": 8256071,
+          "peak": 8256071,
+          "end": 6213076,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 3386597,
+          "peak": 3386597,
+          "end": 1192435,
+          "growthPeak": 0
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 148082688,
+          "peak": 151097344,
+          "end": 151097344,
+          "growthPeak": 3014656
+        },
+        "heapUsed": {
+          "start": 17393296,
+          "peak": 30903784,
+          "end": 27557856,
+          "growthPeak": 13510488
+        },
+        "external": {
+          "start": 5010736,
+          "peak": 10374693,
+          "end": 6264385,
+          "growthPeak": 5363957
+        },
+        "arrayBuffers": {
+          "start": 126946,
+          "peak": 5490903,
+          "end": 1380595,
+          "growthPeak": 5363957
+        },
+        "n": 52
+      },
+      "wallMs": 6498.744956,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.38093099999991864,
+        "p95": 1.895477000000028,
+        "p99": 3.1314940000002025,
+        "max": 5.472873000000163,
+        "mean": 0.6134524139999994
+      },
+      "during": {
+        "n": 26327,
+        "p50": 0.1500110000006316,
+        "p95": 0.34997500000008586,
+        "p99": 0.9272039999996196,
+        "max": 6.148331000000098,
+        "mean": 0.1891170401868795
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 143597568,
+          "peak": 144105472,
+          "end": 143572992,
+          "growthPeak": 507904
+        },
+        "heapUsed": {
+          "start": 22082408,
+          "peak": 32083904,
+          "end": 28465552,
+          "growthPeak": 10001496
+        },
+        "external": {
+          "start": 8998305,
+          "peak": 9116773,
+          "end": 6096426,
+          "growthPeak": 118468
+        },
+        "arrayBuffers": {
+          "start": 4128831,
+          "peak": 4247299,
+          "end": 1226952,
+          "growthPeak": 118468
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 118796288,
+          "peak": 122466304,
+          "end": 122466304,
+          "growthPeak": 3670016
+        },
+        "heapUsed": {
+          "start": 19299216,
+          "peak": 31643304,
+          "end": 18230240,
+          "growthPeak": 12344088
+        },
+        "external": {
+          "start": 10285816,
+          "peak": 10383795,
+          "end": 6331485,
+          "growthPeak": 97979
+        },
+        "arrayBuffers": {
+          "start": 5402026,
+          "peak": 5500005,
+          "end": 1192023,
+          "growthPeak": 97979
+        },
+        "n": 52
+      },
+      "wallMs": 6430.184268999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 2,
+      "mode": "B3",
+      "procs": 2,
+      "variant": "stall"
+    },
+    "result": {
+      "baseline": {
+        "n": 500,
+        "p50": 0.31152700000006917,
+        "p95": 1.5935990000000402,
+        "p99": 2.9976460000000316,
+        "max": 5.916690000000017,
+        "mean": 0.49729172799999377
+      },
+      "during": {
+        "n": 25963,
+        "p50": 0.1507080000001224,
+        "p95": 0.3683690000002571,
+        "p99": 0.8863189999992755,
+        "max": 6.10334499999999,
+        "mean": 0.1918148163540423
+      },
+      "consumedMiB": 0,
+      "producedMiB": 2,
+      "timeline": [
+        {
+          "t": 500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 1500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 2500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 3500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 4500,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        },
+        {
+          "t": 5000,
+          "producedMiB": 2,
+          "srvQueueMiB": 0
+        }
+      ],
+      "clientAdapterMaxQueuedMiB": 0.000091552734375,
+      "serverAdapterMaxQueuedMiB": 1.0000333786010742,
+      "serverAdapterQueuedNowMiB": 0,
+      "rawInboxMaxMiB": 1,
+      "memClient": {
+        "rss": {
+          "start": 151965696,
+          "peak": 153686016,
+          "end": 153686016,
+          "growthPeak": 1720320
+        },
+        "heapUsed": {
+          "start": 21792368,
+          "peak": 31943864,
+          "end": 21681760,
+          "growthPeak": 10151496
+        },
+        "external": {
+          "start": 8212769,
+          "peak": 8353190,
+          "end": 6062842,
+          "growthPeak": 140421
+        },
+        "arrayBuffers": {
+          "start": 3343295,
+          "peak": 3483716,
+          "end": 1193368,
+          "growthPeak": 140421
+        },
+        "n": 52
+      },
+      "memServer": {
+        "rss": {
+          "start": 123801600,
+          "peak": 128913408,
+          "end": 128913408,
+          "growthPeak": 5111808
+        },
+        "heapUsed": {
+          "start": 21685168,
+          "peak": 31114568,
+          "end": 20671376,
+          "growthPeak": 9429400
+        },
+        "external": {
+          "start": 10324167,
+          "peak": 10465012,
+          "end": 6122704,
+          "growthPeak": 140845
+        },
+        "arrayBuffers": {
+          "start": 5440377,
+          "peak": 5581222,
+          "end": 1238914,
+          "growthPeak": 140845
+        },
+        "n": 52
+      },
+      "wallMs": 6408.238486,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  }
+]

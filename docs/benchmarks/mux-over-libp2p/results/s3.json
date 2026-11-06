@@ -1,0 +1,4538 @@
+[
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 27027.12874212107,
+      "MBps": 6.918944957982993,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 144838656,
+          "peak": 147197952,
+          "end": 146771968,
+          "growthPeak": 2359296
+        },
+        "heapUsed": {
+          "start": 16625424,
+          "peak": 33909112,
+          "end": 33516008,
+          "growthPeak": 17283688
+        },
+        "external": {
+          "start": 5025512,
+          "peak": 9804671,
+          "end": 6737622,
+          "growthPeak": 4779159
+        },
+        "arrayBuffers": {
+          "start": 1260229,
+          "peak": 6452457,
+          "end": 3445474,
+          "growthPeak": 5192228
+        },
+        "n": 25
+      },
+      "memServer": "same-process",
+      "wallMs": 6964.765442,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 26992.40642411311,
+      "MBps": 6.910056044572957,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 142106624,
+          "peak": 151953408,
+          "end": 151953408,
+          "growthPeak": 9846784
+        },
+        "heapUsed": {
+          "start": 25531840,
+          "peak": 31629096,
+          "end": 29635456,
+          "growthPeak": 6097256
+        },
+        "external": {
+          "start": 4218563,
+          "peak": 10775219,
+          "end": 10142294,
+          "growthPeak": 6556656
+        },
+        "arrayBuffers": {
+          "start": 926415,
+          "peak": 7483071,
+          "end": 6850146,
+          "growthPeak": 6556656
+        },
+        "n": 26
+      },
+      "memServer": "same-process",
+      "wallMs": 7122.767071,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 26754.255153732523,
+      "MBps": 6.849089319355526,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 169472000,
+          "peak": 171831296,
+          "end": 153391104,
+          "growthPeak": 2359296
+        },
+        "heapUsed": {
+          "start": 18378152,
+          "peak": 33107368,
+          "end": 21909576,
+          "growthPeak": 14729216
+        },
+        "external": {
+          "start": 3684532,
+          "peak": 9887464,
+          "end": 5369830,
+          "growthPeak": 6202932
+        },
+        "arrayBuffers": {
+          "start": 392384,
+          "peak": 6595316,
+          "end": 2077682,
+          "growthPeak": 6202932
+        },
+        "n": 26
+      },
+      "memServer": "same-process",
+      "wallMs": 7266.973741999999,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 49711.881938851184,
+      "MBps": 12.726241776345901,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 130473984,
+          "peak": 143998976,
+          "end": 143998976,
+          "growthPeak": 13524992
+        },
+        "heapUsed": {
+          "start": 24907384,
+          "peak": 33545792,
+          "end": 24312848,
+          "growthPeak": 8638408
+        },
+        "external": {
+          "start": 4275168,
+          "peak": 10224212,
+          "end": 8860804,
+          "growthPeak": 5949044
+        },
+        "arrayBuffers": {
+          "start": 955409,
+          "peak": 5541045,
+          "end": 5541045,
+          "growthPeak": 4585636
+        },
+        "n": 38
+      },
+      "memServer": {
+        "rss": {
+          "start": 117071872,
+          "peak": 126246912,
+          "end": 126246912,
+          "growthPeak": 9175040
+        },
+        "heapUsed": {
+          "start": 21054640,
+          "peak": 31757456,
+          "end": 17120328,
+          "growthPeak": 10702816
+        },
+        "external": {
+          "start": 4106622,
+          "peak": 5549497,
+          "end": 5549497,
+          "growthPeak": 1442875
+        },
+        "arrayBuffers": {
+          "start": 657279,
+          "peak": 1851594,
+          "end": 1449327,
+          "growthPeak": 1194315
+        },
+        "n": 51
+      },
+      "wallMs": 8164.819728999999,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 50871.672239799336,
+      "MBps": 13.023148093388631,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 165687296,
+          "peak": 168046592,
+          "end": 168046592,
+          "growthPeak": 2359296
+        },
+        "heapUsed": {
+          "start": 28117152,
+          "peak": 34226648,
+          "end": 27835104,
+          "growthPeak": 6109496
+        },
+        "external": {
+          "start": 4686828,
+          "peak": 10073645,
+          "end": 9029734,
+          "growthPeak": 5386817
+        },
+        "arrayBuffers": {
+          "start": 1367069,
+          "peak": 6384418,
+          "end": 5709975,
+          "growthPeak": 5017349
+        },
+        "n": 34
+      },
+      "memServer": {
+        "rss": {
+          "start": 114434048,
+          "peak": 121032704,
+          "end": 121032704,
+          "growthPeak": 6598656
+        },
+        "heapUsed": {
+          "start": 30722448,
+          "peak": 31650024,
+          "end": 20954968,
+          "growthPeak": 927576
+        },
+        "external": {
+          "start": 4646118,
+          "peak": 5443253,
+          "end": 4509079,
+          "growthPeak": 797135
+        },
+        "arrayBuffers": {
+          "start": 1196775,
+          "peak": 1859594,
+          "end": 1059736,
+          "growthPeak": 662819
+        },
+        "n": 51
+      },
+      "wallMs": 8425.906153,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 48971.152011869715,
+      "MBps": 12.536614915038646,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 146313216,
+          "peak": 160272384,
+          "end": 160272384,
+          "growthPeak": 13959168
+        },
+        "heapUsed": {
+          "start": 24944488,
+          "peak": 35275648,
+          "end": 25069344,
+          "growthPeak": 10331160
+        },
+        "external": {
+          "start": 4239766,
+          "peak": 9862325,
+          "end": 8797055,
+          "growthPeak": 5622559
+        },
+        "arrayBuffers": {
+          "start": 920007,
+          "peak": 6542566,
+          "end": 5477296,
+          "growthPeak": 5622559
+        },
+        "n": 32
+      },
+      "memServer": {
+        "rss": {
+          "start": 123056128,
+          "peak": 126988288,
+          "end": 126988288,
+          "growthPeak": 3932160
+        },
+        "heapUsed": {
+          "start": 22821528,
+          "peak": 31610048,
+          "end": 31602024,
+          "growthPeak": 8788520
+        },
+        "external": {
+          "start": 4160727,
+          "peak": 5335027,
+          "end": 5335027,
+          "growthPeak": 1174300
+        },
+        "arrayBuffers": {
+          "start": 711384,
+          "peak": 1885684,
+          "end": 1885684,
+          "growthPeak": 1174300
+        },
+        "n": 49
+      },
+      "wallMs": 7648.0826990000005,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 5735.723759711563,
+      "MBps": 1.46834528248616,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121122816,
+          "peak": 145088512,
+          "end": 145088512,
+          "growthPeak": 23965696
+        },
+        "heapUsed": {
+          "start": 18148328,
+          "peak": 47326448,
+          "end": 40576104,
+          "growthPeak": 29178120
+        },
+        "external": {
+          "start": 6020779,
+          "peak": 6558095,
+          "end": 5417679,
+          "growthPeak": 537316
+        },
+        "arrayBuffers": {
+          "start": 1178916,
+          "peak": 1716232,
+          "end": 581307,
+          "growthPeak": 537316
+        },
+        "n": 62
+      },
+      "memServer": "same-process",
+      "wallMs": 6836.578396999999,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 6071.360151869937,
+      "MBps": 1.554268198878704,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121217024,
+          "peak": 141492224,
+          "end": 141492224,
+          "growthPeak": 20275200
+        },
+        "heapUsed": {
+          "start": 18591360,
+          "peak": 46520088,
+          "end": 37484216,
+          "growthPeak": 27928728
+        },
+        "external": {
+          "start": 6507181,
+          "peak": 6566483,
+          "end": 5173589,
+          "growthPeak": 59302
+        },
+        "arrayBuffers": {
+          "start": 1560321,
+          "peak": 1569374,
+          "end": 337217,
+          "growthPeak": 9053
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6806.391578,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 5198.507689166184,
+      "MBps": 1.330817968426543,
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121671680,
+          "peak": 140738560,
+          "end": 140738560,
+          "growthPeak": 19066880
+        },
+        "heapUsed": {
+          "start": 23359296,
+          "peak": 45650816,
+          "end": 38840872,
+          "growthPeak": 22291520
+        },
+        "external": {
+          "start": 6216407,
+          "peak": 6593617,
+          "end": 5159233,
+          "growthPeak": 377210
+        },
+        "arrayBuffers": {
+          "start": 1374544,
+          "peak": 1605511,
+          "end": 319836,
+          "growthPeak": 230967
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6765.769034,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 3254.600017953304,
+      "MBps": 0.8331776045960457,
+      "clientAdapterMaxQueuedMiB": 0.000370025634765625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 130646016,
+          "peak": 156024832,
+          "end": 156024832,
+          "growthPeak": 25378816
+        },
+        "heapUsed": {
+          "start": 21741840,
+          "peak": 53243400,
+          "end": 44328888,
+          "growthPeak": 31501560
+        },
+        "external": {
+          "start": 5159149,
+          "peak": 5629676,
+          "end": 5328076,
+          "growthPeak": 470527
+        },
+        "arrayBuffers": {
+          "start": 289675,
+          "peak": 753700,
+          "end": 144563,
+          "growthPeak": 464025
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 116719616,
+          "peak": 120782848,
+          "end": 120782848,
+          "growthPeak": 4063232
+        },
+        "heapUsed": {
+          "start": 19687992,
+          "peak": 31483200,
+          "end": 19169784,
+          "growthPeak": 11795208
+        },
+        "external": {
+          "start": 5058769,
+          "peak": 5376954,
+          "end": 5043187,
+          "growthPeak": 318185
+        },
+        "arrayBuffers": {
+          "start": 174979,
+          "peak": 477067,
+          "end": 159397,
+          "growthPeak": 302088
+        },
+        "n": 61
+      },
+      "wallMs": 7349.214276,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 3537.3502634707984,
+      "MBps": 0.9055616674485243,
+      "clientAdapterMaxQueuedMiB": 0.0003681182861328125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 146022400,
+          "peak": 175046656,
+          "end": 175046656,
+          "growthPeak": 29024256
+        },
+        "heapUsed": {
+          "start": 20680888,
+          "peak": 56494456,
+          "end": 56494456,
+          "growthPeak": 35813568
+        },
+        "external": {
+          "start": 5114931,
+          "peak": 5657434,
+          "end": 5069955,
+          "growthPeak": 542503
+        },
+        "arrayBuffers": {
+          "start": 245457,
+          "peak": 779879,
+          "end": 200481,
+          "growthPeak": 534422
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 116850688,
+          "peak": 121962496,
+          "end": 121962496,
+          "growthPeak": 5111808
+        },
+        "heapUsed": {
+          "start": 18579872,
+          "peak": 31554864,
+          "end": 30311008,
+          "growthPeak": 12974992
+        },
+        "external": {
+          "start": 5029341,
+          "peak": 5366753,
+          "end": 5317543,
+          "growthPeak": 337412
+        },
+        "arrayBuffers": {
+          "start": 145551,
+          "peak": 482963,
+          "end": 433753,
+          "growthPeak": 337412
+        },
+        "n": 62
+      },
+      "wallMs": 7365.381806,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 3425.048853526827,
+      "MBps": 0.8768125065028678,
+      "clientAdapterMaxQueuedMiB": 0.0003681182861328125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 117362688,
+          "peak": 149479424,
+          "end": 149479424,
+          "growthPeak": 32116736
+        },
+        "heapUsed": {
+          "start": 18190176,
+          "peak": 54236784,
+          "end": 46939360,
+          "growthPeak": 36046608
+        },
+        "external": {
+          "start": 5023589,
+          "peak": 5660800,
+          "end": 5014659,
+          "growthPeak": 637211
+        },
+        "arrayBuffers": {
+          "start": 154115,
+          "peak": 763533,
+          "end": 145185,
+          "growthPeak": 609418
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 117338112,
+          "peak": 121401344,
+          "end": 121401344,
+          "growthPeak": 4063232
+        },
+        "heapUsed": {
+          "start": 21533704,
+          "peak": 30846872,
+          "end": 28016864,
+          "growthPeak": 9313168
+        },
+        "external": {
+          "start": 5090231,
+          "peak": 5378707,
+          "end": 5281957,
+          "growthPeak": 288476
+        },
+        "arrayBuffers": {
+          "start": 206441,
+          "peak": 455839,
+          "end": 398167,
+          "growthPeak": 249398
+        },
+        "n": 61
+      },
+      "wallMs": 7347.303293,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 20455.738329828975,
+      "MBps": 5.236669012436218,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 136749056,
+          "peak": 140288000,
+          "end": 140288000,
+          "growthPeak": 3538944
+        },
+        "heapUsed": {
+          "start": 26340672,
+          "peak": 32269600,
+          "end": 27807288,
+          "growthPeak": 5928928
+        },
+        "external": {
+          "start": 6641504,
+          "peak": 7155296,
+          "end": 6729120,
+          "growthPeak": 513792
+        },
+        "arrayBuffers": {
+          "start": 1799641,
+          "peak": 2252345,
+          "end": 1887257,
+          "growthPeak": 452704
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6697.3039420000005,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 18558.516383948125,
+      "MBps": 4.75098019429072,
+      "clientAdapterMaxQueuedMiB": 15.000500679016113,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 175779840,
+          "peak": 178532352,
+          "end": 178532352,
+          "growthPeak": 2752512
+        },
+        "heapUsed": {
+          "start": 30685048,
+          "peak": 32345136,
+          "end": 29641744,
+          "growthPeak": 1660088
+        },
+        "external": {
+          "start": 5956684,
+          "peak": 6162604,
+          "end": 5865836,
+          "growthPeak": 205920
+        },
+        "arrayBuffers": {
+          "start": 1114821,
+          "peak": 1320741,
+          "end": 1023973,
+          "growthPeak": 205920
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6664.109233,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 20631.567357352385,
+      "MBps": 5.281681243482211,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 136032256,
+          "peak": 140488704,
+          "end": 140488704,
+          "growthPeak": 4456448
+        },
+        "heapUsed": {
+          "start": 27733296,
+          "peak": 32124024,
+          "end": 22824816,
+          "growthPeak": 4390728
+        },
+        "external": {
+          "start": 6759840,
+          "peak": 7155296,
+          "end": 6352928,
+          "growthPeak": 395456
+        },
+        "arrayBuffers": {
+          "start": 1917977,
+          "peak": 2252345,
+          "end": 1511065,
+          "growthPeak": 334368
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6665.228352,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 40469.86924672501,
+      "MBps": 10.360286527161604,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 136826880,
+          "peak": 146579456,
+          "end": 146579456,
+          "growthPeak": 9752576
+        },
+        "heapUsed": {
+          "start": 28943080,
+          "peak": 31828896,
+          "end": 26300592,
+          "growthPeak": 2885816
+        },
+        "external": {
+          "start": 6473517,
+          "peak": 6999789,
+          "end": 5989221,
+          "growthPeak": 526272
+        },
+        "arrayBuffers": {
+          "start": 1604043,
+          "peak": 1940517,
+          "end": 1119747,
+          "growthPeak": 336474
+        },
+        "n": 65
+      },
+      "memServer": {
+        "rss": {
+          "start": 110682112,
+          "peak": 128172032,
+          "end": 128172032,
+          "growthPeak": 17489920
+        },
+        "heapUsed": {
+          "start": 19380184,
+          "peak": 32748808,
+          "end": 30166560,
+          "growthPeak": 13368624
+        },
+        "external": {
+          "start": 5061367,
+          "peak": 5738093,
+          "end": 5687128,
+          "growthPeak": 676726
+        },
+        "arrayBuffers": {
+          "start": 177577,
+          "peak": 803338,
+          "end": 803338,
+          "growthPeak": 625761
+        },
+        "n": 46
+      },
+      "wallMs": 7377.543363,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 36101.84310246671,
+      "MBps": 9.242071834231476,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 137461760,
+          "peak": 139464704,
+          "end": 138235904,
+          "growthPeak": 2002944
+        },
+        "heapUsed": {
+          "start": 21837072,
+          "peak": 31843544,
+          "end": 18303992,
+          "growthPeak": 10006472
+        },
+        "external": {
+          "start": 5565958,
+          "peak": 6904730,
+          "end": 5725817,
+          "growthPeak": 1338772
+        },
+        "arrayBuffers": {
+          "start": 696484,
+          "peak": 2026646,
+          "end": 156220,
+          "growthPeak": 1330162
+        },
+        "n": 64
+      },
+      "memServer": {
+        "rss": {
+          "start": 125509632,
+          "peak": 125902848,
+          "end": 125902848,
+          "growthPeak": 393216
+        },
+        "heapUsed": {
+          "start": 21565560,
+          "peak": 34073144,
+          "end": 19288984,
+          "growthPeak": 12507584
+        },
+        "external": {
+          "start": 5157999,
+          "peak": 5873314,
+          "end": 5535304,
+          "growthPeak": 715315
+        },
+        "arrayBuffers": {
+          "start": 274209,
+          "peak": 982444,
+          "end": 651514,
+          "growthPeak": 708235
+        },
+        "n": 48
+      },
+      "wallMs": 7299.137908,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 36594.00605137366,
+      "MBps": 9.368065549151657,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 125804544,
+          "peak": 133799936,
+          "end": 133799936,
+          "growthPeak": 7995392
+        },
+        "heapUsed": {
+          "start": 22927128,
+          "peak": 31803048,
+          "end": 23438080,
+          "growthPeak": 8875920
+        },
+        "external": {
+          "start": 7672504,
+          "peak": 7672504,
+          "end": 5587232,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 902534,
+          "peak": 1932526,
+          "end": 717758,
+          "growthPeak": 1029992
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 110358528,
+          "peak": 125956096,
+          "end": 125956096,
+          "growthPeak": 15597568
+        },
+        "heapUsed": {
+          "start": 22080208,
+          "peak": 34156048,
+          "end": 22675736,
+          "growthPeak": 12075840
+        },
+        "external": {
+          "start": 5120357,
+          "peak": 5683350,
+          "end": 5423298,
+          "growthPeak": 562993
+        },
+        "arrayBuffers": {
+          "start": 236567,
+          "peak": 799560,
+          "end": 539508,
+          "growthPeak": 562993
+        },
+        "n": 54
+      },
+      "wallMs": 7013.635102,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 19270.63066944911,
+      "MBps": 4.9332814513789724,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 154869760,
+          "peak": 154869760,
+          "end": 151330816,
+          "growthPeak": 0
+        },
+        "heapUsed": {
+          "start": 30875120,
+          "peak": 32161896,
+          "end": 25006696,
+          "growthPeak": 1286776
+        },
+        "external": {
+          "start": 5850171,
+          "peak": 6064443,
+          "end": 5448939,
+          "growthPeak": 214272
+        },
+        "arrayBuffers": {
+          "start": 1008308,
+          "peak": 1154142,
+          "end": 607076,
+          "growthPeak": 145834
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6699.9057219999995,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 17733.700844877774,
+      "MBps": 4.539827416288711,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 171552768,
+          "peak": 174960640,
+          "end": 174960640,
+          "growthPeak": 3407872
+        },
+        "heapUsed": {
+          "start": 19268224,
+          "peak": 32443680,
+          "end": 30541192,
+          "growthPeak": 13175456
+        },
+        "external": {
+          "start": 5110919,
+          "peak": 6064443,
+          "end": 5819903,
+          "growthPeak": 953524
+        },
+        "arrayBuffers": {
+          "start": 269056,
+          "peak": 1162334,
+          "end": 978040,
+          "growthPeak": 893278
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6677.092833,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 19104.627961479244,
+      "MBps": 4.890784758138686,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121106432,
+          "peak": 124776448,
+          "end": 124776448,
+          "growthPeak": 3670016
+        },
+        "heapUsed": {
+          "start": 21118888,
+          "peak": 32356744,
+          "end": 21563240,
+          "growthPeak": 11237856
+        },
+        "external": {
+          "start": 5215872,
+          "peak": 6051030,
+          "end": 5177294,
+          "growthPeak": 835158
+        },
+        "arrayBuffers": {
+          "start": 374009,
+          "peak": 1140729,
+          "end": 335431,
+          "growthPeak": 766720
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6672.366652999999,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 33739.17068370455,
+      "MBps": 8.637227695028363,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 133554176,
+          "peak": 142667776,
+          "end": 142667776,
+          "growthPeak": 9113600
+        },
+        "heapUsed": {
+          "start": 24942464,
+          "peak": 31269816,
+          "end": 26482944,
+          "growthPeak": 6327352
+        },
+        "external": {
+          "start": 5805004,
+          "peak": 6893434,
+          "end": 5989819,
+          "growthPeak": 1088430
+        },
+        "arrayBuffers": {
+          "start": 935530,
+          "peak": 1771640,
+          "end": 1120345,
+          "growthPeak": 836110
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 110686208,
+          "peak": 127725568,
+          "end": 127725568,
+          "growthPeak": 17039360
+        },
+        "heapUsed": {
+          "start": 19618168,
+          "peak": 33814288,
+          "end": 27829032,
+          "growthPeak": 14196120
+        },
+        "external": {
+          "start": 5061392,
+          "peak": 5827738,
+          "end": 5753527,
+          "growthPeak": 766346
+        },
+        "arrayBuffers": {
+          "start": 177602,
+          "peak": 943948,
+          "end": 869737,
+          "growthPeak": 766346
+        },
+        "n": 47
+      },
+      "wallMs": 7069.687549,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 32196.748436770777,
+      "MBps": 8.242367599813319,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 114683904,
+          "peak": 121126912,
+          "end": 121126912,
+          "growthPeak": 6443008
+        },
+        "heapUsed": {
+          "start": 18729936,
+          "peak": 31706016,
+          "end": 25817720,
+          "growthPeak": 12976080
+        },
+        "external": {
+          "start": 6814828,
+          "peak": 6884588,
+          "end": 5931043,
+          "growthPeak": 69760
+        },
+        "arrayBuffers": {
+          "start": 1945354,
+          "peak": 1945354,
+          "end": 1061569,
+          "growthPeak": 0
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 109535232,
+          "peak": 127754240,
+          "end": 127754240,
+          "growthPeak": 18219008
+        },
+        "heapUsed": {
+          "start": 18323208,
+          "peak": 32826496,
+          "end": 21441704,
+          "growthPeak": 14503288
+        },
+        "external": {
+          "start": 5034558,
+          "peak": 5946786,
+          "end": 5759640,
+          "growthPeak": 912228
+        },
+        "arrayBuffers": {
+          "start": 150768,
+          "peak": 1025521,
+          "end": 875850,
+          "growthPeak": 874753
+        },
+        "n": 50
+      },
+      "wallMs": 7153.396051,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 1,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 31676.530624188737,
+      "MBps": 8.109191839792317,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 108834816,
+          "peak": 120967168,
+          "end": 120967168,
+          "growthPeak": 12132352
+        },
+        "heapUsed": {
+          "start": 23555744,
+          "peak": 30871952,
+          "end": 25040120,
+          "growthPeak": 7316208
+        },
+        "external": {
+          "start": 5658001,
+          "peak": 6789983,
+          "end": 5685074,
+          "growthPeak": 1131982
+        },
+        "arrayBuffers": {
+          "start": 788527,
+          "peak": 1746409,
+          "end": 815600,
+          "growthPeak": 957882
+        },
+        "n": 62
+      },
+      "memServer": {
+        "rss": {
+          "start": 111005696,
+          "peak": 127520768,
+          "end": 127520768,
+          "growthPeak": 16515072
+        },
+        "heapUsed": {
+          "start": 24336216,
+          "peak": 33989664,
+          "end": 27922904,
+          "growthPeak": 9653448
+        },
+        "external": {
+          "start": 5157977,
+          "peak": 5580711,
+          "end": 5502776,
+          "growthPeak": 422734
+        },
+        "arrayBuffers": {
+          "start": 274187,
+          "peak": 696921,
+          "end": 618986,
+          "growthPeak": 422734
+        },
+        "n": 55
+      },
+      "wallMs": 7182.910462999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 28507.922995991525,
+      "MBps": 7.298028286973831,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 158490624,
+          "peak": 161931264,
+          "end": 161931264,
+          "growthPeak": 3440640
+        },
+        "heapUsed": {
+          "start": 23772976,
+          "peak": 32520776,
+          "end": 23224960,
+          "growthPeak": 8747800
+        },
+        "external": {
+          "start": 4079060,
+          "peak": 10372804,
+          "end": 5330082,
+          "growthPeak": 6293744
+        },
+        "arrayBuffers": {
+          "start": 786912,
+          "peak": 7080656,
+          "end": 1906862,
+          "growthPeak": 6293744
+        },
+        "n": 27
+      },
+      "memServer": "same-process",
+      "wallMs": 7252.127158,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 27789.47904648129,
+      "MBps": 7.114106635899211,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 153280512,
+          "peak": 153829376,
+          "end": 132153344,
+          "growthPeak": 548864
+        },
+        "heapUsed": {
+          "start": 25099000,
+          "peak": 32946080,
+          "end": 24507048,
+          "growthPeak": 7847080
+        },
+        "external": {
+          "start": 4196009,
+          "peak": 8209072,
+          "end": 6936549,
+          "growthPeak": 4013063
+        },
+        "arrayBuffers": {
+          "start": 903861,
+          "peak": 4916924,
+          "end": 3513329,
+          "growthPeak": 4013063
+        },
+        "n": 27
+      },
+      "memServer": "same-process",
+      "wallMs": 7487.905557,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 25864.832157073284,
+      "MBps": 6.621397032210761,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 180645888,
+          "peak": 181882880,
+          "end": 167825408,
+          "growthPeak": 1236992
+        },
+        "heapUsed": {
+          "start": 23772112,
+          "peak": 33489048,
+          "end": 32195552,
+          "growthPeak": 9716936
+        },
+        "external": {
+          "start": 4079319,
+          "peak": 8916274,
+          "end": 6054137,
+          "growthPeak": 4836955
+        },
+        "arrayBuffers": {
+          "start": 787171,
+          "peak": 5624126,
+          "end": 2761989,
+          "growthPeak": 4836955
+        },
+        "n": 25
+      },
+      "memServer": "same-process",
+      "wallMs": 7329.011806,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 52409.90225146411,
+      "MBps": 13.416934976374812,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 139935744,
+          "peak": 151552000,
+          "end": 147185664,
+          "growthPeak": 11616256
+        },
+        "heapUsed": {
+          "start": 27512544,
+          "peak": 37822776,
+          "end": 34915632,
+          "growthPeak": 10310232
+        },
+        "external": {
+          "start": 4565471,
+          "peak": 15710295,
+          "end": 8212330,
+          "growthPeak": 11144824
+        },
+        "arrayBuffers": {
+          "start": 1245712,
+          "peak": 12390536,
+          "end": 4892571,
+          "growthPeak": 11144824
+        },
+        "n": 34
+      },
+      "memServer": {
+        "rss": {
+          "start": 125702144,
+          "peak": 127143936,
+          "end": 127143936,
+          "growthPeak": 1441792
+        },
+        "heapUsed": {
+          "start": 20124640,
+          "peak": 33341288,
+          "end": 26042984,
+          "growthPeak": 13216648
+        },
+        "external": {
+          "start": 4088846,
+          "peak": 7666201,
+          "end": 4813886,
+          "growthPeak": 3577355
+        },
+        "arrayBuffers": {
+          "start": 639503,
+          "peak": 4216858,
+          "end": 1364543,
+          "growthPeak": 3577355
+        },
+        "n": 57
+      },
+      "wallMs": 9960.77504,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 53375.30501821048,
+      "MBps": 13.664078084661881,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 145219584,
+          "peak": 178511872,
+          "end": 178511872,
+          "growthPeak": 33292288
+        },
+        "heapUsed": {
+          "start": 19532232,
+          "peak": 49347488,
+          "end": 34885504,
+          "growthPeak": 29815256
+        },
+        "external": {
+          "start": 3750292,
+          "peak": 27775867,
+          "end": 6887405,
+          "growthPeak": 24025575
+        },
+        "arrayBuffers": {
+          "start": 430533,
+          "peak": 24456108,
+          "end": 3567646,
+          "growthPeak": 24025575
+        },
+        "n": 34
+      },
+      "memServer": {
+        "rss": {
+          "start": 124604416,
+          "peak": 132206592,
+          "end": 132206592,
+          "growthPeak": 7602176
+        },
+        "heapUsed": {
+          "start": 26114296,
+          "peak": 31119960,
+          "end": 23031312,
+          "growthPeak": 5005664
+        },
+        "external": {
+          "start": 4516827,
+          "peak": 8105023,
+          "end": 4596872,
+          "growthPeak": 3588196
+        },
+        "arrayBuffers": {
+          "start": 1067484,
+          "peak": 4655680,
+          "end": 1147529,
+          "growthPeak": 3588196
+        },
+        "n": 55
+      },
+      "wallMs": 8016.862108,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 50789.536050412724,
+      "MBps": 13.002121228905658,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 129085440,
+          "peak": 178446336,
+          "end": 178446336,
+          "growthPeak": 49360896
+        },
+        "heapUsed": {
+          "start": 27860552,
+          "peak": 53150184,
+          "end": 30127568,
+          "growthPeak": 25289632
+        },
+        "external": {
+          "start": 4587662,
+          "peak": 27910571,
+          "end": 5652065,
+          "growthPeak": 23322909
+        },
+        "arrayBuffers": {
+          "start": 1267903,
+          "peak": 24590812,
+          "end": 2332306,
+          "growthPeak": 23322909
+        },
+        "n": 41
+      },
+      "memServer": {
+        "rss": {
+          "start": 114429952,
+          "peak": 125964288,
+          "end": 125964288,
+          "growthPeak": 11534336
+        },
+        "heapUsed": {
+          "start": 27682000,
+          "peak": 33225200,
+          "end": 22216432,
+          "growthPeak": 5543200
+        },
+        "external": {
+          "start": 4562167,
+          "peak": 8039277,
+          "end": 4838589,
+          "growthPeak": 3477110
+        },
+        "arrayBuffers": {
+          "start": 1112824,
+          "peak": 4286824,
+          "end": 1389246,
+          "growthPeak": 3174000
+        },
+        "n": 56
+      },
+      "wallMs": 8703.554086,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 6266.25582741366,
+      "MBps": 1.6041614918178968,
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 122085376,
+          "peak": 151322624,
+          "end": 151322624,
+          "growthPeak": 29237248
+        },
+        "heapUsed": {
+          "start": 31575120,
+          "peak": 53342672,
+          "end": 41120392,
+          "growthPeak": 21767552
+        },
+        "external": {
+          "start": 6502086,
+          "peak": 6647121,
+          "end": 5920245,
+          "growthPeak": 145035
+        },
+        "arrayBuffers": {
+          "start": 1660223,
+          "peak": 1771514,
+          "end": 540768,
+          "growthPeak": 111291
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6912.86282,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 6479.056413548535,
+      "MBps": 1.6586384418684248,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121901056,
+          "peak": 148221952,
+          "end": 148221952,
+          "growthPeak": 26320896
+        },
+        "heapUsed": {
+          "start": 30972696,
+          "peak": 51851344,
+          "end": 40181456,
+          "growthPeak": 20878648
+        },
+        "external": {
+          "start": 6547717,
+          "peak": 6630466,
+          "end": 5568350,
+          "growthPeak": 82749
+        },
+        "arrayBuffers": {
+          "start": 1705854,
+          "peak": 1788603,
+          "end": 731978,
+          "growthPeak": 82749
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6757.829658,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 7143.301176560539,
+      "MBps": 1.828685101199498,
+      "clientAdapterMaxQueuedMiB": 1.0001239776611328,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 118685696,
+          "peak": 147992576,
+          "end": 147992576,
+          "growthPeak": 29306880
+        },
+        "heapUsed": {
+          "start": 18839056,
+          "peak": 50441648,
+          "end": 39101704,
+          "growthPeak": 31602592
+        },
+        "external": {
+          "start": 6029926,
+          "peak": 6639082,
+          "end": 5078505,
+          "growthPeak": 609156
+        },
+        "arrayBuffers": {
+          "start": 1188063,
+          "peak": 1763856,
+          "end": 242133,
+          "growthPeak": 575793
+        },
+        "n": 61
+      },
+      "memServer": "same-process",
+      "wallMs": 6845.377382000001,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 9435.121876974734,
+      "MBps": 2.4153912005055314,
+      "clientAdapterMaxQueuedMiB": 0.0003681182861328125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 137682944,
+          "peak": 190099456,
+          "end": 190099456,
+          "growthPeak": 52416512
+        },
+        "heapUsed": {
+          "start": 23163864,
+          "peak": 81998896,
+          "end": 44697112,
+          "growthPeak": 58835032
+        },
+        "external": {
+          "start": 5231892,
+          "peak": 5820369,
+          "end": 5310138,
+          "growthPeak": 588477
+        },
+        "arrayBuffers": {
+          "start": 362418,
+          "peak": 899780,
+          "end": 440664,
+          "growthPeak": 537362
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 120848384,
+          "peak": 125304832,
+          "end": 125304832,
+          "growthPeak": 4456448
+        },
+        "heapUsed": {
+          "start": 18316632,
+          "peak": 31880496,
+          "end": 19148368,
+          "growthPeak": 13563864
+        },
+        "external": {
+          "start": 5020551,
+          "peak": 5424521,
+          "end": 5037768,
+          "growthPeak": 403970
+        },
+        "arrayBuffers": {
+          "start": 136761,
+          "peak": 523999,
+          "end": 153978,
+          "growthPeak": 387238
+        },
+        "n": 62
+      },
+      "wallMs": 7323.058073,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 9581.819397222525,
+      "MBps": 2.4529457656889666,
+      "clientAdapterMaxQueuedMiB": 0.00036907196044921875,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 115879936,
+          "peak": 157614080,
+          "end": 157614080,
+          "growthPeak": 41734144
+        },
+        "heapUsed": {
+          "start": 26769728,
+          "peak": 62605376,
+          "end": 52520832,
+          "growthPeak": 35835648
+        },
+        "external": {
+          "start": 5393820,
+          "peak": 5839232,
+          "end": 5512252,
+          "growthPeak": 445412
+        },
+        "arrayBuffers": {
+          "start": 524346,
+          "peak": 952439,
+          "end": 645244,
+          "growthPeak": 428093
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 117637120,
+          "peak": 122355712,
+          "end": 122355712,
+          "growthPeak": 4718592
+        },
+        "heapUsed": {
+          "start": 18183752,
+          "peak": 32038272,
+          "end": 20162008,
+          "growthPeak": 13854520
+        },
+        "external": {
+          "start": 5018318,
+          "peak": 5442131,
+          "end": 5068561,
+          "growthPeak": 423813
+        },
+        "arrayBuffers": {
+          "start": 134528,
+          "peak": 558341,
+          "end": 184771,
+          "growthPeak": 423813
+        },
+        "n": 62
+      },
+      "wallMs": 7452.175268,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 9356.677001040514,
+      "MBps": 2.3953093122663716,
+      "clientAdapterMaxQueuedMiB": 0.00036907196044921875,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 130772992,
+          "peak": 179892224,
+          "end": 169811968,
+          "growthPeak": 49119232
+        },
+        "heapUsed": {
+          "start": 24631672,
+          "peak": 81027600,
+          "end": 52947904,
+          "growthPeak": 56395928
+        },
+        "external": {
+          "start": 5289069,
+          "peak": 5781537,
+          "end": 5147290,
+          "growthPeak": 492468
+        },
+        "arrayBuffers": {
+          "start": 419595,
+          "peak": 910185,
+          "end": 277816,
+          "growthPeak": 490590
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 117436416,
+          "peak": 121892864,
+          "end": 121892864,
+          "growthPeak": 4456448
+        },
+        "heapUsed": {
+          "start": 25921064,
+          "peak": 31616576,
+          "end": 22679064,
+          "growthPeak": 5695512
+        },
+        "external": {
+          "start": 5203831,
+          "peak": 5422447,
+          "end": 5134743,
+          "growthPeak": 218616
+        },
+        "arrayBuffers": {
+          "start": 320041,
+          "peak": 538636,
+          "end": 250953,
+          "growthPeak": 218595
+        },
+        "n": 61
+      },
+      "wallMs": 7394.334830999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 21361.4273496138,
+      "MBps": 5.468525401501133,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 137994240,
+          "peak": 143368192,
+          "end": 143368192,
+          "growthPeak": 5373952
+        },
+        "heapUsed": {
+          "start": 22105568,
+          "peak": 35041112,
+          "end": 20046728,
+          "growthPeak": 12935544
+        },
+        "external": {
+          "start": 6572565,
+          "peak": 7555595,
+          "end": 6363091,
+          "growthPeak": 983030
+        },
+        "arrayBuffers": {
+          "start": 1730702,
+          "peak": 2713732,
+          "end": 1521228,
+          "growthPeak": 983030
+        },
+        "n": 57
+      },
+      "memServer": "same-process",
+      "wallMs": 6622.762159,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 19965.47538342171,
+      "MBps": 5.111161698155958,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 142909440,
+          "peak": 144220160,
+          "end": 144220160,
+          "growthPeak": 1310720
+        },
+        "heapUsed": {
+          "start": 26239976,
+          "peak": 34922904,
+          "end": 29608232,
+          "growthPeak": 8682928
+        },
+        "external": {
+          "start": 6679527,
+          "peak": 7329475,
+          "end": 6792399,
+          "growthPeak": 649948
+        },
+        "arrayBuffers": {
+          "start": 1837664,
+          "peak": 2487612,
+          "end": 1950536,
+          "growthPeak": 649948
+        },
+        "n": 56
+      },
+      "memServer": "same-process",
+      "wallMs": 6676.0475799999995,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 23514.04186066975,
+      "MBps": 6.019594716331456,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 132415488,
+          "peak": 142376960,
+          "end": 142376960,
+          "growthPeak": 9961472
+        },
+        "heapUsed": {
+          "start": 21935480,
+          "peak": 35033928,
+          "end": 20685840,
+          "growthPeak": 13098448
+        },
+        "external": {
+          "start": 6533037,
+          "peak": 7488598,
+          "end": 6332926,
+          "growthPeak": 955561
+        },
+        "arrayBuffers": {
+          "start": 1691174,
+          "peak": 2646735,
+          "end": 1491063,
+          "growthPeak": 955561
+        },
+        "n": 58
+      },
+      "memServer": "same-process",
+      "wallMs": 6667.664341000001,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 39757.192206816166,
+      "MBps": 10.177841204944938,
+      "clientAdapterMaxQueuedMiB": 4.114609718322754,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 142024704,
+          "peak": 149835776,
+          "end": 149835776,
+          "growthPeak": 7811072
+        },
+        "heapUsed": {
+          "start": 33353672,
+          "peak": 38900208,
+          "end": 35672936,
+          "growthPeak": 5546536
+        },
+        "external": {
+          "start": 7156417,
+          "peak": 13885717,
+          "end": 13368996,
+          "growthPeak": 6729300
+        },
+        "arrayBuffers": {
+          "start": 2286943,
+          "peak": 8999949,
+          "end": 8499522,
+          "growthPeak": 6713006
+        },
+        "n": 59
+      },
+      "memServer": {
+        "rss": {
+          "start": 107479040,
+          "peak": 125173760,
+          "end": 125173760,
+          "growthPeak": 17694720
+        },
+        "heapUsed": {
+          "start": 17018056,
+          "peak": 31484264,
+          "end": 23205016,
+          "growthPeak": 14466208
+        },
+        "external": {
+          "start": 5010620,
+          "peak": 5624916,
+          "end": 5364098,
+          "growthPeak": 614296
+        },
+        "arrayBuffers": {
+          "start": 126830,
+          "peak": 667173,
+          "end": 480308,
+          "growthPeak": 540343
+        },
+        "n": 52
+      },
+      "wallMs": 7324.837153,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 38246.38427046845,
+      "MBps": 9.791074373239924,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 131264512,
+          "peak": 144838656,
+          "end": 144838656,
+          "growthPeak": 13574144
+        },
+        "heapUsed": {
+          "start": 24970744,
+          "peak": 33523592,
+          "end": 19328128,
+          "growthPeak": 8552848
+        },
+        "external": {
+          "start": 6064728,
+          "peak": 7538568,
+          "end": 5042522,
+          "growthPeak": 1473840
+        },
+        "arrayBuffers": {
+          "start": 1195254,
+          "peak": 2198230,
+          "end": 173048,
+          "growthPeak": 1002976
+        },
+        "n": 63
+      },
+      "memServer": {
+        "rss": {
+          "start": 107753472,
+          "peak": 125734912,
+          "end": 125734912,
+          "growthPeak": 17981440
+        },
+        "heapUsed": {
+          "start": 19237864,
+          "peak": 31958464,
+          "end": 25110600,
+          "growthPeak": 12720600
+        },
+        "external": {
+          "start": 5052416,
+          "peak": 5730022,
+          "end": 5510126,
+          "growthPeak": 677606
+        },
+        "arrayBuffers": {
+          "start": 168626,
+          "peak": 767488,
+          "end": 626336,
+          "growthPeak": 598862
+        },
+        "n": 47
+      },
+      "wallMs": 7533.51301,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 35724.59662715348,
+      "MBps": 9.14549673655129,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 158208000,
+          "peak": 167227392,
+          "end": 167227392,
+          "growthPeak": 9019392
+        },
+        "heapUsed": {
+          "start": 20616656,
+          "peak": 34026448,
+          "end": 18649408,
+          "growthPeak": 13409792
+        },
+        "external": {
+          "start": 5518874,
+          "peak": 7080065,
+          "end": 7080065,
+          "growthPeak": 1561191
+        },
+        "arrayBuffers": {
+          "start": 649400,
+          "peak": 2209318,
+          "end": 183478,
+          "growthPeak": 1559918
+        },
+        "n": 59
+      },
+      "memServer": {
+        "rss": {
+          "start": 107835392,
+          "peak": 126619648,
+          "end": 126619648,
+          "growthPeak": 18784256
+        },
+        "heapUsed": {
+          "start": 19937720,
+          "peak": 34230768,
+          "end": 30634296,
+          "growthPeak": 14293048
+        },
+        "external": {
+          "start": 5067821,
+          "peak": 5894772,
+          "end": 5808376,
+          "growthPeak": 826951
+        },
+        "arrayBuffers": {
+          "start": 184031,
+          "peak": 1010982,
+          "end": 924586,
+          "growthPeak": 826951
+        },
+        "n": 55
+      },
+      "wallMs": 7007.518513,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 19557.375098033288,
+      "MBps": 5.006688025096522,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 125874176,
+          "peak": 130723840,
+          "end": 130723840,
+          "growthPeak": 4849664
+        },
+        "heapUsed": {
+          "start": 31924456,
+          "peak": 34792896,
+          "end": 23459680,
+          "growthPeak": 2868440
+        },
+        "external": {
+          "start": 7240688,
+          "peak": 7240688,
+          "end": 5175181,
+          "growthPeak": 0
+        },
+        "arrayBuffers": {
+          "start": 2398825,
+          "peak": 2398825,
+          "end": 333318,
+          "growthPeak": 0
+        },
+        "n": 57
+      },
+      "memServer": "same-process",
+      "wallMs": 6736.1536049999995,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 20871.106711378277,
+      "MBps": 5.343003318112839,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 122937344,
+          "peak": 129228800,
+          "end": 129228800,
+          "growthPeak": 6291456
+        },
+        "heapUsed": {
+          "start": 21624424,
+          "peak": 35030768,
+          "end": 18866848,
+          "growthPeak": 13406344
+        },
+        "external": {
+          "start": 5555988,
+          "peak": 6315267,
+          "end": 5905493,
+          "growthPeak": 759279
+        },
+        "arrayBuffers": {
+          "start": 714125,
+          "peak": 1471024,
+          "end": 216628,
+          "growthPeak": 756899
+        },
+        "n": 57
+      },
+      "memServer": "same-process",
+      "wallMs": 6789.528179999999,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 18638.464634549997,
+      "MBps": 4.771446946444799,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 127938560,
+          "peak": 129904640,
+          "end": 129904640,
+          "growthPeak": 1966080
+        },
+        "heapUsed": {
+          "start": 31276472,
+          "peak": 35170192,
+          "end": 18917624,
+          "growthPeak": 3893720
+        },
+        "external": {
+          "start": 6116025,
+          "peak": 6304723,
+          "end": 5810159,
+          "growthPeak": 188698
+        },
+        "arrayBuffers": {
+          "start": 1274162,
+          "peak": 1462860,
+          "end": 215424,
+          "growthPeak": 188698
+        },
+        "n": 56
+      },
+      "memServer": "same-process",
+      "wallMs": 6807.392994,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 35100.83111655405,
+      "MBps": 8.985812765837839,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 112852992,
+          "peak": 125288448,
+          "end": 125288448,
+          "growthPeak": 12435456
+        },
+        "heapUsed": {
+          "start": 30563496,
+          "peak": 34468528,
+          "end": 27795480,
+          "growthPeak": 3905032
+        },
+        "external": {
+          "start": 6564851,
+          "peak": 7408577,
+          "end": 6443757,
+          "growthPeak": 843726
+        },
+        "arrayBuffers": {
+          "start": 1695377,
+          "peak": 2539103,
+          "end": 1574283,
+          "growthPeak": 843726
+        },
+        "n": 62
+      },
+      "memServer": {
+        "rss": {
+          "start": 125444096,
+          "peak": 126754816,
+          "end": 126754816,
+          "growthPeak": 1310720
+        },
+        "heapUsed": {
+          "start": 31609280,
+          "peak": 31609280,
+          "end": 31202992,
+          "growthPeak": 0
+        },
+        "external": {
+          "start": 5385083,
+          "peak": 5670710,
+          "end": 5670710,
+          "growthPeak": 285627
+        },
+        "arrayBuffers": {
+          "start": 501293,
+          "peak": 786920,
+          "end": 786920,
+          "growthPeak": 285627
+        },
+        "n": 46
+      },
+      "wallMs": 7536.915409,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 40295.043278284145,
+      "MBps": 10.31553107924074,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 135819264,
+          "peak": 149712896,
+          "end": 149291008,
+          "growthPeak": 13893632
+        },
+        "heapUsed": {
+          "start": 25598640,
+          "peak": 34335184,
+          "end": 27869224,
+          "growthPeak": 8736544
+        },
+        "external": {
+          "start": 6056630,
+          "peak": 7332866,
+          "end": 5371748,
+          "growthPeak": 1276236
+        },
+        "arrayBuffers": {
+          "start": 1187156,
+          "peak": 2463392,
+          "end": 502274,
+          "growthPeak": 1276236
+        },
+        "n": 63
+      },
+      "memServer": {
+        "rss": {
+          "start": 116637696,
+          "peak": 126074880,
+          "end": 126074880,
+          "growthPeak": 9437184
+        },
+        "heapUsed": {
+          "start": 22051496,
+          "peak": 34329568,
+          "end": 21233408,
+          "growthPeak": 12278072
+        },
+        "external": {
+          "start": 5190201,
+          "peak": 5717663,
+          "end": 5494923,
+          "growthPeak": 527462
+        },
+        "arrayBuffers": {
+          "start": 306411,
+          "peak": 833873,
+          "end": 611133,
+          "growthPeak": 527462
+        },
+        "n": 43
+      },
+      "wallMs": 7512.376076,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 10,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 36536.87810022451,
+      "MBps": 9.353440793657475,
+      "clientAdapterMaxQueuedMiB": 0.00027561187744140625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121425920,
+          "peak": 134189056,
+          "end": 134189056,
+          "growthPeak": 12763136
+        },
+        "heapUsed": {
+          "start": 25721080,
+          "peak": 34341400,
+          "end": 26809576,
+          "growthPeak": 8620320
+        },
+        "external": {
+          "start": 6057358,
+          "peak": 7401100,
+          "end": 5476268,
+          "growthPeak": 1343742
+        },
+        "arrayBuffers": {
+          "start": 1187884,
+          "peak": 2531626,
+          "end": 606794,
+          "growthPeak": 1343742
+        },
+        "n": 62
+      },
+      "memServer": {
+        "rss": {
+          "start": 115376128,
+          "peak": 126386176,
+          "end": 126386176,
+          "growthPeak": 11010048
+        },
+        "heapUsed": {
+          "start": 29133016,
+          "peak": 33613272,
+          "end": 26593336,
+          "growthPeak": 4480256
+        },
+        "external": {
+          "start": 5267938,
+          "peak": 5795225,
+          "end": 5680881,
+          "growthPeak": 527287
+        },
+        "arrayBuffers": {
+          "start": 384148,
+          "peak": 911435,
+          "end": 797091,
+          "growthPeak": 527287
+        },
+        "n": 46
+      },
+      "wallMs": 7451.0264720000005,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 23491.194224864998,
+      "MBps": 6.0137457215654395,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 171769856,
+          "peak": 190349312,
+          "end": 162394112,
+          "growthPeak": 18579456
+        },
+        "heapUsed": {
+          "start": 24460416,
+          "peak": 41206704,
+          "end": 37385584,
+          "growthPeak": 16746288
+        },
+        "external": {
+          "start": 3414347,
+          "peak": 8430550,
+          "end": 6030396,
+          "growthPeak": 5016203
+        },
+        "arrayBuffers": {
+          "start": 122199,
+          "peak": 5138402,
+          "end": 2738248,
+          "growthPeak": 5016203
+        },
+        "n": 28
+      },
+      "memServer": "same-process",
+      "wallMs": 8395.079698,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 23333.756765940576,
+      "MBps": 5.973441732080788,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 144551936,
+          "peak": 154566656,
+          "end": 154566656,
+          "growthPeak": 10014720
+        },
+        "heapUsed": {
+          "start": 22118032,
+          "peak": 43474056,
+          "end": 37030264,
+          "growthPeak": 21356024
+        },
+        "external": {
+          "start": 3556166,
+          "peak": 8111631,
+          "end": 7446972,
+          "growthPeak": 4555465
+        },
+        "arrayBuffers": {
+          "start": 264018,
+          "peak": 4819483,
+          "end": 4154824,
+          "growthPeak": 4555465
+        },
+        "n": 27
+      },
+      "memServer": "same-process",
+      "wallMs": 8473.50333,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 21986.07992949796,
+      "MBps": 5.628436461951478,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 175173632,
+          "peak": 183701504,
+          "end": 183701504,
+          "growthPeak": 8527872
+        },
+        "heapUsed": {
+          "start": 22370056,
+          "peak": 39977376,
+          "end": 26859272,
+          "growthPeak": 17607320
+        },
+        "external": {
+          "start": 3584345,
+          "peak": 8199182,
+          "end": 6721023,
+          "growthPeak": 4614837
+        },
+        "arrayBuffers": {
+          "start": 292197,
+          "peak": 4732200,
+          "end": 3297803,
+          "growthPeak": 4440003
+        },
+        "n": 25
+      },
+      "memServer": "same-process",
+      "wallMs": 8184.666552,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 44815.80544664802,
+      "MBps": 11.472846194341892,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 110129152,
+          "peak": 168951808,
+          "end": 168951808,
+          "growthPeak": 58822656
+        },
+        "heapUsed": {
+          "start": 22971536,
+          "peak": 60765992,
+          "end": 27295264,
+          "growthPeak": 37794456
+        },
+        "external": {
+          "start": 3433760,
+          "peak": 14142335,
+          "end": 4536405,
+          "growthPeak": 10708575
+        },
+        "arrayBuffers": {
+          "start": 114001,
+          "peak": 10822576,
+          "end": 1221553,
+          "growthPeak": 10708575
+        },
+        "n": 51
+      },
+      "memServer": {
+        "rss": {
+          "start": 103538688,
+          "peak": 136482816,
+          "end": 136482816,
+          "growthPeak": 32944128
+        },
+        "heapUsed": {
+          "start": 23027280,
+          "peak": 35371096,
+          "end": 28496912,
+          "growthPeak": 12343816
+        },
+        "external": {
+          "start": 3568104,
+          "peak": 16699647,
+          "end": 9580451,
+          "growthPeak": 13131543
+        },
+        "arrayBuffers": {
+          "start": 118761,
+          "peak": 13250304,
+          "end": 6131108,
+          "growthPeak": 13131543
+        },
+        "n": 53
+      },
+      "wallMs": 9623.547965999998,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 46742.55639799808,
+      "MBps": 11.966094437887508,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 169115648,
+          "peak": 204853248,
+          "end": 191885312,
+          "growthPeak": 35737600
+        },
+        "heapUsed": {
+          "start": 20598368,
+          "peak": 67482816,
+          "end": 52625392,
+          "growthPeak": 46884448
+        },
+        "external": {
+          "start": 3717638,
+          "peak": 15323564,
+          "end": 11570591,
+          "growthPeak": 11605926
+        },
+        "arrayBuffers": {
+          "start": 397879,
+          "peak": 12003805,
+          "end": 8253298,
+          "growthPeak": 11605926
+        },
+        "n": 40
+      },
+      "memServer": {
+        "rss": {
+          "start": 116559872,
+          "peak": 137924608,
+          "end": 137924608,
+          "growthPeak": 21364736
+        },
+        "heapUsed": {
+          "start": 29138952,
+          "peak": 33364096,
+          "end": 30755456,
+          "growthPeak": 4225144
+        },
+        "external": {
+          "start": 4584060,
+          "peak": 16452932,
+          "end": 13056216,
+          "growthPeak": 11868872
+        },
+        "arrayBuffers": {
+          "start": 1134717,
+          "peak": 13003589,
+          "end": 9606873,
+          "growthPeak": 11868872
+        },
+        "n": 57
+      },
+      "wallMs": 9343.033781,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "A",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 48824.87948219921,
+      "MBps": 12.499169147442998,
+      "clientAdapterMaxQueuedMiB": null,
+      "clientAdapterQueuedAtEndMiB": null,
+      "memClient": {
+        "rss": {
+          "start": 128139264,
+          "peak": 163225600,
+          "end": 163225600,
+          "growthPeak": 35086336
+        },
+        "heapUsed": {
+          "start": 22091816,
+          "peak": 59948384,
+          "end": 24962320,
+          "growthPeak": 37856568
+        },
+        "external": {
+          "start": 3823329,
+          "peak": 13996467,
+          "end": 5899697,
+          "growthPeak": 10173138
+        },
+        "arrayBuffers": {
+          "start": 503570,
+          "peak": 10676708,
+          "end": 2584845,
+          "growthPeak": 10173138
+        },
+        "n": 46
+      },
+      "memServer": {
+        "rss": {
+          "start": 106258432,
+          "peak": 136626176,
+          "end": 136626176,
+          "growthPeak": 30367744
+        },
+        "heapUsed": {
+          "start": 25210008,
+          "peak": 35214792,
+          "end": 28205000,
+          "growthPeak": 10004784
+        },
+        "external": {
+          "start": 3581766,
+          "peak": 17906599,
+          "end": 9317440,
+          "growthPeak": 14324833
+        },
+        "arrayBuffers": {
+          "start": 132423,
+          "peak": 14457256,
+          "end": 5868097,
+          "growthPeak": 14324833
+        },
+        "n": 49
+      },
+      "wallMs": 8913.172239,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 7194.375118102413,
+      "MBps": 1.8417600302342174,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 176828416,
+          "peak": 197758976,
+          "end": 190881792,
+          "growthPeak": 20930560
+        },
+        "heapUsed": {
+          "start": 21479632,
+          "peak": 55088632,
+          "end": 53017080,
+          "growthPeak": 33609000
+        },
+        "external": {
+          "start": 6474201,
+          "peak": 6810668,
+          "end": 5487202,
+          "growthPeak": 336467
+        },
+        "arrayBuffers": {
+          "start": 1449198,
+          "peak": 1968805,
+          "end": 650830,
+          "growthPeak": 519607
+        },
+        "n": 60
+      },
+      "memServer": "same-process",
+      "wallMs": 6803.023993,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 7155.148495924259,
+      "MBps": 1.8317180149566104,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 135856128,
+          "peak": 163237888,
+          "end": 163237888,
+          "growthPeak": 27381760
+        },
+        "heapUsed": {
+          "start": 21562616,
+          "peak": 57816832,
+          "end": 45719312,
+          "growthPeak": 36254216
+        },
+        "external": {
+          "start": 6321273,
+          "peak": 6726382,
+          "end": 5956618,
+          "growthPeak": 405109
+        },
+        "arrayBuffers": {
+          "start": 1432348,
+          "peak": 1884519,
+          "end": 828420,
+          "growthPeak": 452171
+        },
+        "n": 60
+      },
+      "memServer": "same-process",
+      "wallMs": 6842.789313,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 6998.223673076893,
+      "MBps": 1.7915452603076847,
+      "clientAdapterMaxQueuedMiB": 1.0001249313354492,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 121151488,
+          "peak": 161206272,
+          "end": 161206272,
+          "growthPeak": 40054784
+        },
+        "heapUsed": {
+          "start": 30058368,
+          "peak": 62370592,
+          "end": 38942800,
+          "growthPeak": 32312224
+        },
+        "external": {
+          "start": 6228978,
+          "peak": 6724746,
+          "end": 5396762,
+          "growthPeak": 495768
+        },
+        "arrayBuffers": {
+          "start": 1387115,
+          "peak": 1882883,
+          "end": 400062,
+          "growthPeak": 495768
+        },
+        "n": 60
+      },
+      "memServer": "same-process",
+      "wallMs": 6745.567254,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 11970.309508401166,
+      "MBps": 3.0643992341506983,
+      "clientAdapterMaxQueuedMiB": 0.00036907196044921875,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 122863616,
+          "peak": 179998720,
+          "end": 179998720,
+          "growthPeak": 57135104
+        },
+        "heapUsed": {
+          "start": 28892096,
+          "peak": 80457976,
+          "end": 76372360,
+          "growthPeak": 51565880
+        },
+        "external": {
+          "start": 5263874,
+          "peak": 6363646,
+          "end": 5492162,
+          "growthPeak": 1099772
+        },
+        "arrayBuffers": {
+          "start": 394400,
+          "peak": 1494172,
+          "end": 622688,
+          "growthPeak": 1099772
+        },
+        "n": 60
+      },
+      "memServer": {
+        "rss": {
+          "start": 118394880,
+          "peak": 126783488,
+          "end": 126783488,
+          "growthPeak": 8388608
+        },
+        "heapUsed": {
+          "start": 30721808,
+          "peak": 33770584,
+          "end": 29916072,
+          "growthPeak": 3048776
+        },
+        "external": {
+          "start": 5235741,
+          "peak": 5559827,
+          "end": 5246808,
+          "growthPeak": 324086
+        },
+        "arrayBuffers": {
+          "start": 351951,
+          "peak": 603801,
+          "end": 363018,
+          "growthPeak": 251850
+        },
+        "n": 61
+      },
+      "wallMs": 7427.322824000001,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 12117.959684234362,
+      "MBps": 3.1021976791639965,
+      "clientAdapterMaxQueuedMiB": 0.000370025634765625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 116752384,
+          "peak": 181473280,
+          "end": 181473280,
+          "growthPeak": 64720896
+        },
+        "heapUsed": {
+          "start": 22308872,
+          "peak": 84041096,
+          "end": 69599776,
+          "growthPeak": 61732224
+        },
+        "external": {
+          "start": 5115409,
+          "peak": 6336167,
+          "end": 5430988,
+          "growthPeak": 1220758
+        },
+        "arrayBuffers": {
+          "start": 245935,
+          "peak": 1466693,
+          "end": 561514,
+          "growthPeak": 1220758
+        },
+        "n": 61
+      },
+      "memServer": {
+        "rss": {
+          "start": 120201216,
+          "peak": 127471616,
+          "end": 127471616,
+          "growthPeak": 7270400
+        },
+        "heapUsed": {
+          "start": 30976480,
+          "peak": 34356296,
+          "end": 24714640,
+          "growthPeak": 3379816
+        },
+        "external": {
+          "start": 5239282,
+          "peak": 5542209,
+          "end": 5144135,
+          "growthPeak": 302927
+        },
+        "arrayBuffers": {
+          "start": 355492,
+          "peak": 658419,
+          "end": 260345,
+          "growthPeak": 302927
+        },
+        "n": 61
+      },
+      "wallMs": 7419.9414480000005,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B2",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 11773.62166496642,
+      "MBps": 3.0140471462314036,
+      "clientAdapterMaxQueuedMiB": 0.000370025634765625,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 154603520,
+          "peak": 196071424,
+          "end": 184692736,
+          "growthPeak": 41467904
+        },
+        "heapUsed": {
+          "start": 21472352,
+          "peak": 76393816,
+          "end": 60615040,
+          "growthPeak": 54921464
+        },
+        "external": {
+          "start": 5151063,
+          "peak": 6210340,
+          "end": 5482444,
+          "growthPeak": 1059277
+        },
+        "arrayBuffers": {
+          "start": 281589,
+          "peak": 1305481,
+          "end": 384784,
+          "growthPeak": 1023892
+        },
+        "n": 60
+      },
+      "memServer": {
+        "rss": {
+          "start": 121147392,
+          "peak": 129462272,
+          "end": 129462272,
+          "growthPeak": 8314880
+        },
+        "heapUsed": {
+          "start": 28202960,
+          "peak": 33829432,
+          "end": 32173792,
+          "growthPeak": 5626472
+        },
+        "external": {
+          "start": 5172197,
+          "peak": 5525541,
+          "end": 5296591,
+          "growthPeak": 353344
+        },
+        "arrayBuffers": {
+          "start": 288407,
+          "peak": 623499,
+          "end": 412801,
+          "growthPeak": 335092
+        },
+        "n": 62
+      },
+      "wallMs": 7513.790321,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 6075.691420840048,
+      "MBps": 1.5553770037350523,
+      "clientAdapterMaxQueuedMiB": 38.18176078796387,
+      "clientAdapterQueuedAtEndMiB": 37.57828140258789,
+      "memClient": {
+        "rss": {
+          "start": 155054080,
+          "peak": 229322752,
+          "end": 229322752,
+          "growthPeak": 74268672
+        },
+        "heapUsed": {
+          "start": 20208128,
+          "peak": 57344600,
+          "end": 47679160,
+          "growthPeak": 37136472
+        },
+        "external": {
+          "start": 8048738,
+          "peak": 48784935,
+          "end": 46801111,
+          "growthPeak": 40736197
+        },
+        "arrayBuffers": {
+          "start": 810578,
+          "peak": 43550617,
+          "end": 41825679,
+          "growthPeak": 42740039
+        },
+        "n": 29
+      },
+      "memServer": "same-process",
+      "wallMs": 7427.631826,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 19385.42006841176,
+      "MBps": 4.96266753751341,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 131088384,
+          "peak": 141631488,
+          "end": 141631488,
+          "growthPeak": 10543104
+        },
+        "heapUsed": {
+          "start": 32447952,
+          "peak": 36296792,
+          "end": 28206552,
+          "growthPeak": 3848840
+        },
+        "external": {
+          "start": 7327694,
+          "peak": 16749511,
+          "end": 15672259,
+          "growthPeak": 9421817
+        },
+        "arrayBuffers": {
+          "start": 2485831,
+          "peak": 11907648,
+          "end": 10830396,
+          "growthPeak": 9421817
+        },
+        "n": 41
+      },
+      "memServer": "same-process",
+      "wallMs": 7055.805541000001,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 20842.31891475244,
+      "MBps": 5.335633642176624,
+      "clientAdapterMaxQueuedMiB": 15.000500679016113,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 179245056,
+          "peak": 180555776,
+          "end": 180555776,
+          "growthPeak": 1310720
+        },
+        "heapUsed": {
+          "start": 31778160,
+          "peak": 35244160,
+          "end": 24052048,
+          "growthPeak": 3466000
+        },
+        "external": {
+          "start": 7238696,
+          "peak": 15521188,
+          "end": 14222448,
+          "growthPeak": 8282492
+        },
+        "arrayBuffers": {
+          "start": 2396833,
+          "peak": 10679325,
+          "end": 9268765,
+          "growthPeak": 8282492
+        },
+        "n": 41
+      },
+      "memServer": "same-process",
+      "wallMs": 6947.5858419999995,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 41886.041614173,
+      "MBps": 10.722826653228289,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 126959616,
+          "peak": 146595840,
+          "end": 146595840,
+          "growthPeak": 19636224
+        },
+        "heapUsed": {
+          "start": 19927392,
+          "peak": 37322896,
+          "end": 27597968,
+          "growthPeak": 17395504
+        },
+        "external": {
+          "start": 5069110,
+          "peak": 15141829,
+          "end": 12971016,
+          "growthPeak": 10072719
+        },
+        "arrayBuffers": {
+          "start": 199636,
+          "peak": 10272355,
+          "end": 8101542,
+          "growthPeak": 10072719
+        },
+        "n": 48
+      },
+      "memServer": {
+        "rss": {
+          "start": 122597376,
+          "peak": 126136320,
+          "end": 126136320,
+          "growthPeak": 3538944
+        },
+        "heapUsed": {
+          "start": 24431440,
+          "peak": 34000856,
+          "end": 18018944,
+          "growthPeak": 9569416
+        },
+        "external": {
+          "start": 5248442,
+          "peak": 5956624,
+          "end": 5922426,
+          "growthPeak": 708182
+        },
+        "arrayBuffers": {
+          "start": 364652,
+          "peak": 1072834,
+          "end": 671488,
+          "growthPeak": 708182
+        },
+        "n": 50
+      },
+      "wallMs": 7590.197867,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 38218.144830776444,
+      "MBps": 9.78384507667877,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 129654784,
+          "peak": 147927040,
+          "end": 147927040,
+          "growthPeak": 18272256
+        },
+        "heapUsed": {
+          "start": 19927840,
+          "peak": 37169520,
+          "end": 29626776,
+          "growthPeak": 17241680
+        },
+        "external": {
+          "start": 5069110,
+          "peak": 14646225,
+          "end": 12511603,
+          "growthPeak": 9577115
+        },
+        "arrayBuffers": {
+          "start": 199636,
+          "peak": 8938661,
+          "end": 7642129,
+          "growthPeak": 8739025
+        },
+        "n": 44
+      },
+      "memServer": {
+        "rss": {
+          "start": 108867584,
+          "peak": 126431232,
+          "end": 126431232,
+          "growthPeak": 17563648
+        },
+        "heapUsed": {
+          "start": 18436000,
+          "peak": 33594576,
+          "end": 22995832,
+          "growthPeak": 15158576
+        },
+        "external": {
+          "start": 5017110,
+          "peak": 5725483,
+          "end": 5424387,
+          "growthPeak": 708373
+        },
+        "arrayBuffers": {
+          "start": 133320,
+          "peak": 832045,
+          "end": 540597,
+          "growthPeak": 698725
+        },
+        "n": 44
+      },
+      "wallMs": 7829.877358000001,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B1",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 35591.53445843717,
+      "MBps": 9.111432821359916,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 152834048,
+          "peak": 156860416,
+          "end": 156860416,
+          "growthPeak": 4026368
+        },
+        "heapUsed": {
+          "start": 22613744,
+          "peak": 37565680,
+          "end": 34401528,
+          "growthPeak": 14951936
+        },
+        "external": {
+          "start": 5748321,
+          "peak": 14231282,
+          "end": 11900616,
+          "growthPeak": 8482961
+        },
+        "arrayBuffers": {
+          "start": 878847,
+          "peak": 9361808,
+          "end": 7031142,
+          "growthPeak": 8482961
+        },
+        "n": 48
+      },
+      "memServer": {
+        "rss": {
+          "start": 109985792,
+          "peak": 126238720,
+          "end": 126238720,
+          "growthPeak": 16252928
+        },
+        "heapUsed": {
+          "start": 21361384,
+          "peak": 33110120,
+          "end": 19933344,
+          "growthPeak": 11748736
+        },
+        "external": {
+          "start": 5059164,
+          "peak": 5763332,
+          "end": 5456034,
+          "growthPeak": 704168
+        },
+        "arrayBuffers": {
+          "start": 175374,
+          "peak": 879542,
+          "end": 572244,
+          "growthPeak": 704168
+        },
+        "n": 49
+      },
+      "wallMs": 7823.144781,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 21424.18777279468,
+      "MBps": 5.484592069835438,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 124076032,
+          "peak": 138231808,
+          "end": 138231808,
+          "growthPeak": 14155776
+        },
+        "heapUsed": {
+          "start": 22757496,
+          "peak": 37196312,
+          "end": 23755800,
+          "growthPeak": 14438816
+        },
+        "external": {
+          "start": 5456352,
+          "peak": 13226290,
+          "end": 8321965,
+          "growthPeak": 7769938
+        },
+        "arrayBuffers": {
+          "start": 614489,
+          "peak": 8384427,
+          "end": 3480102,
+          "growthPeak": 7769938
+        },
+        "n": 44
+      },
+      "memServer": "same-process",
+      "wallMs": 7037.642712000001,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 22969.187772599194,
+      "MBps": 5.880112069785394,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 176959488,
+          "peak": 179187712,
+          "end": 156950528,
+          "growthPeak": 2228224
+        },
+        "heapUsed": {
+          "start": 33711368,
+          "peak": 37967984,
+          "end": 33051296,
+          "growthPeak": 4256616
+        },
+        "external": {
+          "start": 7296499,
+          "peak": 13654931,
+          "end": 8431388,
+          "growthPeak": 6358432
+        },
+        "arrayBuffers": {
+          "start": 2454636,
+          "peak": 7434840,
+          "end": 3589525,
+          "growthPeak": 4980204
+        },
+        "n": 43
+      },
+      "memServer": "same-process",
+      "wallMs": 7029.24815,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 1,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 21833.93444611181,
+      "MBps": 5.589487218204623,
+      "clientAdapterMaxQueuedMiB": 1.0000333786010742,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 117428224,
+          "peak": 139448320,
+          "end": 139448320,
+          "growthPeak": 22020096
+        },
+        "heapUsed": {
+          "start": 20623128,
+          "peak": 37349560,
+          "end": 25448752,
+          "growthPeak": 16726432
+        },
+        "external": {
+          "start": 5034768,
+          "peak": 13355896,
+          "end": 8307707,
+          "growthPeak": 8321128
+        },
+        "arrayBuffers": {
+          "start": 192905,
+          "peak": 8514033,
+          "end": 3465844,
+          "growthPeak": 8321128
+        },
+        "n": 44
+      },
+      "memServer": "same-process",
+      "wallMs": 6951.530887,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 37333.407568691146,
+      "MBps": 9.557352337584934,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 145649664,
+          "peak": 148172800,
+          "end": 148172800,
+          "growthPeak": 2523136
+        },
+        "heapUsed": {
+          "start": 24570552,
+          "peak": 37876376,
+          "end": 32708952,
+          "growthPeak": 13305824
+        },
+        "external": {
+          "start": 6070236,
+          "peak": 14313068,
+          "end": 12568244,
+          "growthPeak": 8242832
+        },
+        "arrayBuffers": {
+          "start": 1200762,
+          "peak": 8730270,
+          "end": 7698770,
+          "growthPeak": 7529508
+        },
+        "n": 41
+      },
+      "memServer": {
+        "rss": {
+          "start": 114282496,
+          "peak": 126603264,
+          "end": 126603264,
+          "growthPeak": 12320768
+        },
+        "heapUsed": {
+          "start": 17607992,
+          "peak": 34755624,
+          "end": 32445920,
+          "growthPeak": 17147632
+        },
+        "external": {
+          "start": 5298092,
+          "peak": 6127497,
+          "end": 6127497,
+          "growthPeak": 829405
+        },
+        "arrayBuffers": {
+          "start": 412959,
+          "peak": 1243707,
+          "end": 1243707,
+          "growthPeak": 830748
+        },
+        "n": 44
+      },
+      "wallMs": 7905.026809,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 38493.2664047039,
+      "MBps": 9.854276199604199,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 129630208,
+          "peak": 136314880,
+          "end": 136314880,
+          "growthPeak": 6684672
+        },
+        "heapUsed": {
+          "start": 25692480,
+          "peak": 38029080,
+          "end": 25109304,
+          "growthPeak": 12336600
+        },
+        "external": {
+          "start": 6235681,
+          "peak": 14480912,
+          "end": 12608532,
+          "growthPeak": 8245231
+        },
+        "arrayBuffers": {
+          "start": 1366207,
+          "peak": 9611438,
+          "end": 7739058,
+          "growthPeak": 8245231
+        },
+        "n": 49
+      },
+      "memServer": {
+        "rss": {
+          "start": 110247936,
+          "peak": 126763008,
+          "end": 126763008,
+          "growthPeak": 16515072
+        },
+        "heapUsed": {
+          "start": 20511584,
+          "peak": 33942288,
+          "end": 33942288,
+          "growthPeak": 13430704
+        },
+        "external": {
+          "start": 5041589,
+          "peak": 5684683,
+          "end": 5684683,
+          "growthPeak": 643094
+        },
+        "arrayBuffers": {
+          "start": 157799,
+          "peak": 800893,
+          "end": 800893,
+          "growthPeak": 643094
+        },
+        "n": 43
+      },
+      "wallMs": 8394.303323,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 3,
+      "mode": "B3",
+      "procs": 2,
+      "k": 100,
+      "durationMs": 5000
+    },
+    "result": {
+      "msgsPerSec": 38246.16530113946,
+      "MBps": 9.791018317091702,
+      "clientAdapterMaxQueuedMiB": 0.0002765655517578125,
+      "clientAdapterQueuedAtEndMiB": 0,
+      "memClient": {
+        "rss": {
+          "start": 145981440,
+          "peak": 149389312,
+          "end": 149389312,
+          "growthPeak": 3407872
+        },
+        "heapUsed": {
+          "start": 19988944,
+          "peak": 36246696,
+          "end": 29659720,
+          "growthPeak": 16257752
+        },
+        "external": {
+          "start": 5231856,
+          "peak": 14106578,
+          "end": 12390244,
+          "growthPeak": 8874722
+        },
+        "arrayBuffers": {
+          "start": 362382,
+          "peak": 8881232,
+          "end": 7520770,
+          "growthPeak": 8518850
+        },
+        "n": 43
+      },
+      "memServer": {
+        "rss": {
+          "start": 113696768,
+          "peak": 127385600,
+          "end": 127385600,
+          "growthPeak": 13688832
+        },
+        "heapUsed": {
+          "start": 31881872,
+          "peak": 33448344,
+          "end": 28317632,
+          "growthPeak": 1566472
+        },
+        "external": {
+          "start": 5287902,
+          "peak": 6588811,
+          "end": 6588571,
+          "growthPeak": 1300909
+        },
+        "arrayBuffers": {
+          "start": 404112,
+          "peak": 1705021,
+          "end": 1704781,
+          "growthPeak": 1300909
+        },
+        "n": 45
+      },
+      "wallMs": 7906.119426,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  }
+]

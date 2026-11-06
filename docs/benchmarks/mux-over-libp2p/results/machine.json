@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-06T10:36:54.179Z",
+  "node": "v22.22.0",
+  "platform": "Linux 6.18.44-fc-v242 x64",
+  "cpus": 4,
+  "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "totalMemGB": 15.7,
+  "versions": {
+    "@statewalker/webrun-rpc": "0.5.0",
+    "@statewalker/webrun-msgpack": "0.4.0",
+    "@statewalker/webrun-streams-libp2p": "0.1.7",
+    "@statewalker/webrun-streams": "0.2.2",
+    "libp2p": "3.5.1",
+    "@chainsafe/libp2p-yamux": "8.0.1",
+    "@chainsafe/libp2p-noise": "17.0.0",
+    "@libp2p/tcp": "11.0.32",
+    "@libp2p/utils": "7.4.5",
+    "@libp2p/interface": "3.4.0"
+  },
+  "yamuxDefaults": "initialStreamWindowSize 256 KiB, maxStreamWindowSize 16 MiB, maxMessageSize 64 KiB, maxInboundStreams 1000, maxOutboundStreams 1000 per connection, maxReadBufferLength 4 MiB, maxWriteBufferLength Infinity",
+  "libp2pDefaults": "registrar maxInboundStreams 32, maxOutboundStreams 64 per protocol per connection"
+}

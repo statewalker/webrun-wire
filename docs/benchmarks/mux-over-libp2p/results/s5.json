@@ -1,0 +1,1736 @@
+[
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 19,
+      "unsettledAfter30s": 81,
+      "settleMs": {
+        "n": 19,
+        "p50": 10.567323999999985,
+        "p95": 10.585470999999984,
+        "p99": 10.585470999999984,
+        "max": 10.585470999999984,
+        "mean": 10.567206263157884
+      },
+      "how": {
+        "error: The stream has been reset": 19
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 30658.275981,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 101
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 18,
+      "unsettledAfter30s": 82,
+      "settleMs": {
+        "n": 18,
+        "p50": 13.694201000000021,
+        "p95": 13.721588999999994,
+        "p99": 13.721588999999994,
+        "max": 13.721588999999994,
+        "mean": 13.696487833333322
+      },
+      "how": {
+        "error: The stream has been reset": 18
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 30648.46078,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 101
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 23,
+      "unsettledAfter30s": 77,
+      "settleMs": {
+        "n": 23,
+        "p50": 10.210381999999981,
+        "p95": 10.21959400000003,
+        "p99": 10.22021499999994,
+        "max": 10.22021499999994,
+        "mean": 10.203652782608678
+      },
+      "how": {
+        "error: The stream has been reset": 23
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 30650.011145,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 101
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 30874.904253,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 31046.267341,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input open",
+      "mode": "A"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 30968.53616,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 8.83447000000001,
+        "p95": 8.840959999999995,
+        "p99": 8.841530000000034,
+        "max": 8.841530000000034,
+        "mean": 8.413881989999998
+      },
+      "how": {
+        "error: The stream has been reset": 16,
+        "done": 84
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 675.79207,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 10.783024000000069,
+        "p95": 10.794400999999993,
+        "p99": 10.795119,
+        "max": 10.795119,
+        "mean": 10.152957010000017
+      },
+      "how": {
+        "error: The stream has been reset": 27,
+        "done": 73
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 747.4873319999999,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 9.026907000000051,
+        "p95": 9.035678000000075,
+        "p99": 9.036230000000046,
+        "max": 9.036230000000046,
+        "mean": 8.421053350000033
+      },
+      "how": {
+        "error: The stream has been reset": 23,
+        "done": 77
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 658.8855530000001,
+      "warnings": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset": 1,
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: killed by benchmark": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 13.875804000000016,
+        "p95": 13.887075000000095,
+        "p99": 13.887850999999955,
+        "max": 13.887850999999955,
+        "mean": 13.87339060000004
+      },
+      "how": {
+        "done": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 946.46967,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 14.118708999999853,
+        "p95": 14.126603999999816,
+        "p99": 14.127187999999933,
+        "max": 14.127187999999933,
+        "mean": 14.117055199999932
+      },
+      "how": {
+        "done": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 1066.1338879999998,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "A, input ended",
+      "mode": "A",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 9.63755100000003,
+        "p95": 9.649249000000054,
+        "p99": 9.65024799999992,
+        "max": 9.65024799999992,
+        "mean": 9.635339839999967
+      },
+      "how": {
+        "done": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": null,
+      "wallMs": 1034.284209,
+      "warnings": {},
+      "serverStderr": {
+        "[webrun-streams-libp2p] serve: inbound stream on protocol /bench-a/1 failed: The stream has been reset StreamResetError: The stream has been reset": 1
+      }
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 14.998323000000028,
+        "p95": 15.017452999999932,
+        "p99": 15.018771000000015,
+        "max": 15.018771000000015,
+        "mean": 14.996498569999956
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 812.2301750000001,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 17.427117999999837,
+        "p95": 17.446343999999954,
+        "p99": 17.44787099999985,
+        "max": 17.44787099999985,
+        "mean": 17.4248084399999
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 750.5884210000002,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 17.441666999999825,
+        "p95": 17.45719999999983,
+        "p99": 17.458503999999948,
+        "max": 17.458503999999948,
+        "mean": 17.439048149999927
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 825.805935,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 17.462019000000055,
+        "p95": 17.4811729999999,
+        "p99": 17.482600000000048,
+        "max": 17.482600000000048,
+        "mean": 17.459938030000004
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1484.242996,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 18.237251000000015,
+        "p95": 18.250349000000142,
+        "p99": 18.251733999999942,
+        "max": 18.251733999999942,
+        "mean": 18.22511158000006
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1306.895776,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 16.388453000000027,
+        "p95": 16.40345000000002,
+        "p99": 16.404608000000053,
+        "max": 16.404608000000053,
+        "mean": 16.379207240000024
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1229.6768769999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 11.075069000000099,
+        "p95": 11.094065999999998,
+        "p99": 11.095937000000049,
+        "max": 11.095937000000049,
+        "mean": 11.072668970000041
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 750.43687,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 14.722313999999983,
+        "p95": 14.744099000000006,
+        "p99": 14.745931000000041,
+        "max": 14.745931000000041,
+        "mean": 14.718150820000014
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 677.946804,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 13.898940000000039,
+        "p95": 13.920168999999987,
+        "p99": 13.921928999999977,
+        "max": 13.921928999999977,
+        "mean": 13.890388920000005
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 100,
+      "wallMs": 649.639919,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 18.526391000000103,
+        "p95": 18.549858000000086,
+        "p99": 18.55228800000009,
+        "max": 18.55228800000009,
+        "mean": 18.523182360000106
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1339.938834,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 15.869149000000107,
+        "p95": 15.888169999999946,
+        "p99": 15.889656000000059,
+        "max": 15.889656000000059,
+        "mean": 15.865907010000027
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1444.172821,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 wired, input ended",
+      "mode": "B2",
+      "endInput": true
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 19.090508,
+        "p95": 19.109668000000056,
+        "p99": 19.11146100000019,
+        "max": 19.11146100000019,
+        "mean": 19.088518030000074
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 1425.6511950000001,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30797.299297999998,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30730.261674,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30696.710667,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 31431.594192,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 31236.521434,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B2 naive (no close wiring)",
+      "mode": "B2"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "wallMs": 31349.821088,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 8.602036999999996,
+        "p95": 8.621554999999944,
+        "p99": 8.623075999999969,
+        "max": 8.623075999999969,
+        "mean": 8.599682459999967
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 7.387960000000021,
+          "p95": 8.09369700000002,
+          "p99": 8.152844999999957,
+          "max": 8.152844999999957,
+          "mean": 7.393095149999977
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 569.051045,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 9.083710999999994,
+        "p95": 9.101967000000059,
+        "p99": 9.103546000000051,
+        "max": 9.103546000000051,
+        "mean": 9.080856010000009
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 7.844430999999986,
+          "p95": 8.563581999999997,
+          "p99": 8.624717000000032,
+          "max": 8.624717000000032,
+          "mean": 7.81709140000001
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 567.8568829999999,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 9.164770999999973,
+        "p95": 9.18264899999997,
+        "p99": 9.184166000000005,
+        "max": 9.184166000000005,
+        "mean": 9.162194019999975
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 7.867681999999945,
+          "p95": 8.68643899999995,
+          "p99": 8.776714999999967,
+          "max": 8.776714999999967,
+          "mean": 7.848574109999966
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 664.176489,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 11.890396999999894,
+        "p95": 11.906868000000031,
+        "p99": 11.908378999999968,
+        "max": 11.908378999999968,
+        "mean": 11.885627649999913
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 8.92819899999995,
+          "p95": 10.07561399999986,
+          "p99": 10.164526999999907,
+          "max": 10.164526999999907,
+          "mean": 8.854327019999921
+        }
+      },
+      "wallMs": 1112.60239,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 20.267475000000104,
+        "p95": 20.28076299999998,
+        "p99": 20.28185899999994,
+        "max": 20.28185899999994,
+        "mean": 20.265909169999997
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 17.944373999999925,
+          "p95": 18.53702700000008,
+          "p99": 18.594063000000006,
+          "max": 18.594063000000006,
+          "mean": 17.871397670000007
+        }
+      },
+      "wallMs": 958.2557139999999,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 wired",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 11.651448000000073,
+        "p95": 11.672150999999985,
+        "p99": 11.673980999999912,
+        "max": 11.673980999999912,
+        "mean": 11.648807829999974
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 8.991426000000047,
+          "p95": 9.806528000000071,
+          "p99": 9.873652999999877,
+          "max": 9.873652999999877,
+          "mean": 8.87048221999997
+        }
+      },
+      "wallMs": 1056.82182,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30515.279562,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30593.400136,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 101,
+      "wallMs": 30576.820903,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "wallMs": 30888.046207000003,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "wallMs": 30913.770376999997,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": false,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B1 naive (no close wiring)",
+      "mode": "B1"
+    },
+    "result": {
+      "settled": 0,
+      "unsettledAfter30s": 100,
+      "settleMs": {
+        "n": 0
+      },
+      "how": {},
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 0,
+        "notAborted": 100,
+        "ms": {
+          "n": 0
+        }
+      },
+      "wallMs": 30980.110156000002,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 8.37105900000006,
+        "p95": 8.391182000000072,
+        "p99": 8.39260200000001,
+        "max": 8.39260200000001,
+        "mean": 8.368775430000028
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 7.078186000000073,
+          "p95": 7.833379000000036,
+          "p99": 7.892973999999981,
+          "max": 7.892973999999981,
+          "mean": 7.093383840000027
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 622.61932,
+      "warnings": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 7.235842000000048,
+        "p95": 7.253728000000024,
+        "p99": 7.255353000000014,
+        "max": 7.255353000000014,
+        "mean": 7.234134150000028
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 6.105593999999996,
+          "p95": 6.778374999999983,
+          "p99": 6.830481000000077,
+          "max": 6.830481000000077,
+          "mean": 6.0962430900000335
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 595.384288,
+      "warnings": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 1,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 8.22263799999996,
+        "p95": 8.239954000000012,
+        "p99": 8.241211000000021,
+        "max": 8.241211000000021,
+        "mean": 8.220032089999972
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 7.029404999999997,
+          "p95": 7.7535159999999905,
+          "p99": 7.848174999999969,
+          "max": 7.848174999999969,
+          "mean": 7.0202911399999754
+        }
+      },
+      "serverOpenChannelsBefore": 101,
+      "serverOpenChannelsAfter": 0,
+      "wallMs": 675.613208,
+      "warnings": {}
+    },
+    "rep": 2
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 15.330053000000134,
+        "p95": 15.354508000000124,
+        "p99": 15.356361000000106,
+        "max": 15.356361000000106,
+        "mean": 15.329581810000027
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 12.491146999999955,
+          "p95": 13.491281000000072,
+          "p99": 13.571936999999934,
+          "max": 13.571936999999934,
+          "mean": 12.512005970000041
+        }
+      },
+      "wallMs": 1075.196027,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 0
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 16.03145900000004,
+        "p95": 16.05271800000014,
+        "p99": 16.054188000000067,
+        "max": 16.054188000000067,
+        "mean": 16.02980094000008
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 12.324518000000126,
+          "p95": 13.367257999999993,
+          "p99": 13.478481000000102,
+          "max": 13.478481000000102,
+          "mean": 12.390662430000077
+        }
+      },
+      "wallMs": 1049.926104,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 1
+  },
+  {
+    "cfg": {
+      "aMaxIn": 512,
+      "aMaxOut": 512,
+      "wire": true,
+      "scenario": 5,
+      "procs": 2,
+      "label": "B3 wired",
+      "mode": "B3"
+    },
+    "result": {
+      "settled": 100,
+      "unsettledAfter30s": 0,
+      "settleMs": {
+        "n": 100,
+        "p50": 13.63395700000001,
+        "p95": 13.648760000000038,
+        "p99": 13.649887000000035,
+        "max": 13.649887000000035,
+        "mean": 13.631383650000089
+      },
+      "how": {
+        "error: webrun-rpc: the multiplexer was closed": 100
+      },
+      "clientConnectionsAfter": 0,
+      "clientStreamsAfter": 0,
+      "clientAdapterPorts": 0,
+      "rawPortCloseSignals": {
+        "aborted": 100,
+        "notAborted": 0,
+        "ms": {
+          "n": 100,
+          "p50": 11.113295000000107,
+          "p95": 11.809220000000096,
+          "p99": 11.864238999999998,
+          "max": 11.864238999999998,
+          "mean": 11.045689880000085
+        }
+      },
+      "wallMs": 1093.341152,
+      "warnings": {},
+      "serverStderr": {}
+    },
+    "rep": 2
+  }
+]

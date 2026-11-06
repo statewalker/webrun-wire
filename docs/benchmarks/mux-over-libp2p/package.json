@@ -1,0 +1,15 @@
+{
+  "name": "mux-bench",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/tcp": "^11.0.32",
+    "@statewalker/webrun-msgpack": "^0.4.0",
+    "@statewalker/webrun-rpc": "^0.5.0",
+    "@statewalker/webrun-streams": "^0.2.2",
+    "@statewalker/webrun-streams-libp2p": "^0.1.7",
+    "libp2p": "^3.5.1"
+  }
+}
