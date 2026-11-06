@@ -9,7 +9,32 @@ Packages are published to npm from CI with changesets. Nobody runs `changeset ve
    when one of its dependencies crosses a breaking line.
 3. The job opens (or updates) a "chore: version packages" pull request with the version bumps and
    `CHANGELOG.md` entries.
-4. Merging that pull request publishes the bumped packages to npm with provenance.
+4. Merging that pull request packs every package whose version is not on npm yet. Nothing is
+   published until a maintainer approves the `publish` job on the `npm` GitHub environment; it then
+   publishes the tarballs with provenance and creates a GitHub release per package.
+
+The checks do not run on the version pull request itself (GitHub Actions opened it); they run
+again on `main` after the merge, before anything is packed. The release waits for both the shared
+CI and the browser suites.
+
+## No npm token: trusted publishing
+
+GitHub holds no npm token. The `publish` job authenticates with npm trusted publishing (OIDC). Each
+package's trusted publisher names `statewalker/webrun-wire`, `ci.yml` and the `npm` environment, so
+a run that skips the approval cannot publish. Only `publish` may request an identity token, and it
+never installs or builds, so no dependency code runs where a publish token can be obtained.
+
+A trusted publisher can only be added to a package that already exists, so a **new package's first
+version is published by hand** with the maintainer's 2FA (`pnpm pack` in the package, then
+`npm publish <tarball> --access public`), followed by:
+
+```bash
+npm trust github @statewalker/<name> --repo statewalker/webrun-wire --file ci.yml --env npm --allow-publish
+```
+
+Without it, `publish` fails with `E404 Not Found - PUT https://registry.npmjs.org/@statewalker%2f<name>`:
+npm reports a missing trusted publisher as "not found", not as a permission error. Re-run the failed
+job once the publisher is added; it reuses the packed tarballs and skips versions already on npm.
 
 ## Choosing the bump or the changelog text yourself
 
