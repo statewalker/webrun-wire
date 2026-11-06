@@ -1,5 +1,13 @@
 # @statewalker/webrun-rpc-http
 
+## 0.1.7
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams ^0.2.2 -> ^0.2.3
+
 ## 0.1.6
 
 ### Patch Changes

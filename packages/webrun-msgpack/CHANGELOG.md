@@ -1,5 +1,13 @@
 # @statewalker/webrun-msgpack
 
+## 0.4.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-rpc ^0.5.0 -> ^0.5.1
+
 ## 0.4.0
 
 ### Minor Changes
