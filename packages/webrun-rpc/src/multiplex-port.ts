@@ -75,6 +75,7 @@ export function multiplexPort(
     frameSize,
     keepalive,
     onLeak,
+    caps: ownCaps = [],
   } = options;
   const maxReassembledBytes = options.maxReassembledBytes ?? DEFAULT_MAX_REASSEMBLED_BYTES;
   const misses = keepalive?.misses ?? 3;
@@ -132,6 +133,8 @@ export function multiplexPort(
     waiters: { below: number; resolve: () => void }[];
     toGrant: number;
     grantScheduled: boolean;
+    /** PROTOTYPE: capabilities agreed for this port. */
+    caps: string[];
   }
   /**
    * What the mux keeps of a port: never the consumer's `port` object itself,
@@ -327,6 +330,7 @@ export function multiplexPort(
     portWindow: unknown,
     opener: boolean,
     exact: boolean,
+    agreedCaps: string[] = [],
   ): VirtualPortHandle => {
     // A peer's window must be a positive integer; anything else means none.
     const c: Credit | undefined =
@@ -346,6 +350,7 @@ export function multiplexPort(
             waiters: [],
             toGrant: 0,
             grantScheduled: false,
+            caps: agreedCaps,
           }
         : undefined;
     const self = newVirtualPort(
@@ -446,6 +451,9 @@ export function multiplexPort(
             if (c.queued <= below || isClosed()) nextTask(resolve);
             else c.waiters.push({ below, resolve: () => nextTask(resolve) });
           }),
+        enforced: () => c.enforced,
+        window: () => c.window,
+        caps: () => c.caps,
       });
     }
     const record: PortRecord = {
@@ -490,17 +498,19 @@ export function multiplexPort(
         envelope.window,
         false,
         envelope.exact === true && exactCodec,
+        Array.isArray(envelope.caps) ? envelope.caps.filter((x) => ownCaps.includes(x)) : [],
       );
       // Acknowledge the window before `onPort` runs: what `onPort` posts then
       // reaches the opener after the ack, so both ends count it the same way
       // (exact bytes or the estimate). A rejection's close follows the ack.
       const credit = open.get(envelope.id)?.credit;
       if (credit) {
-        post(
-          credit.exact
-            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
-            : { type: "credit", id: envelope.id, bytes: 0 },
-        );
+        const ack: PortEnvelope = credit.exact
+          ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
+          : { type: "credit", id: envelope.id, bytes: 0 };
+        // Only an opener that listed capabilities gets them answered.
+        if (Array.isArray(envelope.caps) && ack.type === "credit") ack.caps = credit.caps;
+        post(ack);
       }
       let accepted = false;
       if (onPort) {
@@ -533,6 +543,7 @@ export function multiplexPort(
           c.exact = false;
           c.outstanding = 0;
         }
+        if (Array.isArray(envelope.caps)) c.caps = envelope.caps.filter((x) => ownCaps.includes(x));
         // Show the responder its codec reads credit, so it may hold back too.
         post({ type: "credit", id: envelope.id, bytes: 0 });
       }
@@ -721,13 +732,13 @@ export function multiplexPort(
       const id = nextId;
       nextId += 2;
       const handle = attach(id, meta, window, true, exactCodec);
-      post(
-        window
-          ? exactCodec
-            ? { type: "open", id, meta, window, exact: true }
-            : { type: "open", id, meta, window }
-          : { type: "open", id, meta },
-      );
+      const openEnv: PortEnvelope = window
+        ? exactCodec
+          ? { type: "open", id, meta, window, exact: true }
+          : { type: "open", id, meta, window }
+        : { type: "open", id, meta };
+      if (window && ownCaps.length && openEnv.type === "open") openEnv.caps = ownCaps;
+      post(openEnv);
       if (portSignal) {
         // Through the mux's record, not the port: a long-lived signal must not
         // keep a dropped port reachable, and must still free it once dropped.

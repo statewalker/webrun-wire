@@ -9,11 +9,11 @@ import type { MessageTarget } from "./message-target.js";
  * inspects, because stream semantics belong above this layer.
  */
 export type PortEnvelope =
-  | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }
+  | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean; caps?: string[] }
   | { type: "message"; id: number; payload: unknown }
   | { type: "close"; id: number; reason?: unknown }
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
-  | { type: "credit"; id: number; bytes: number; exact?: boolean }
+  | { type: "credit"; id: number; bytes: number; exact?: boolean; caps?: string[] }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
   /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */
@@ -113,6 +113,8 @@ export interface PortMuxOptions {
    * answer to it), so a peer that never sends credit runs unwindowed.
    */
   window?: number;
+  /** PROTOTYPE: capabilities this end speaks on windowed ports (listed in `open`, answered in the ack). */
+  caps?: string[];
   /**
    * Fair framing, in bytes (off when unset). Every port's messages leave in
    * turn, one item per port, whenever the pipe has room (its `whenDrained`),

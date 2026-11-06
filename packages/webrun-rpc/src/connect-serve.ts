@@ -208,6 +208,8 @@ export interface OverPipeOptions {
   signal?: AbortSignal;
   /** Experimental per-port flow control in bytes — see `PortMuxOptions.window`. */
   window?: number;
+  /** PROTOTYPE: capabilities on windowed ports — see `PortMuxOptions.caps`. */
+  caps?: string[];
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
   frameSize?: number;
   /** Ceiling on a message reassembled from frames — see `PortMuxOptions.maxReassembledBytes`. */

@@ -9,6 +9,12 @@ export interface PortSendState {
   bufferedAmount(): number;
   /** Resolves once at most `below` bytes are queued (default 0). */
   ready(below?: number): Promise<void>;
+  /** PROTOTYPE: the window is in force (both ends read credit). */
+  enforced?(): boolean;
+  /** PROTOTYPE: the window size. */
+  window?(): number;
+  /** PROTOTYPE: capabilities agreed with the peer for this port. */
+  caps?(): readonly string[];
 }
 
 /**
@@ -58,4 +64,13 @@ export function portBufferedAmount(port: MessageTarget): number {
  */
 export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
   return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
+}
+
+/** PROTOTYPE: what layer 2 may rely on for `port` — `undefined` without a window. */
+export function portAgreement(
+  port: MessageTarget,
+): { enforced: boolean; window: number; caps: readonly string[] } | undefined {
+  const s = states.get(port);
+  if (!s?.enforced) return undefined;
+  return { enforced: s.enforced(), window: s.window?.() ?? 0, caps: s.caps?.() ?? [] };
 }

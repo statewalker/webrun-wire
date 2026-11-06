@@ -27,7 +27,12 @@ export {
   MUX_CLOSED_MESSAGE,
   multiplexPort,
 } from "./multiplex-port.js";
-export { type PortSendState, portBufferedAmount, whenPortReady } from "./port-credit.js";
+export {
+  type PortSendState,
+  portAgreement,
+  portBufferedAmount,
+  whenPortReady,
+} from "./port-credit.js";
 export type {
   OpenPortOptions,
   PortCodec,

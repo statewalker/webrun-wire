@@ -12,6 +12,7 @@ import { callPort, NO_TIMEOUT } from "./call-port.js";
 import { getPortCloseSignal } from "./close-signal.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
+import { portAgreement, portBufferedAmount, whenPortReady } from "./port-credit.js";
 import { returningAtOnce } from "./return-at-once.js";
 import { throughAbort } from "./through-abort.js";
 
@@ -24,6 +25,18 @@ import { throughAbort } from "./through-abort.js";
  * tests and adapters assert on it.
  */
 export const STREAM_ABORT = "webrun-rpc:stream-abort";
+
+/** PROTOTYPE H-1: a chunk posted as a plain port message, confirmed by the window's credit. */
+const CHUNK = "webrun-rpc:chunk";
+/** PROTOTYPE capability names. */
+export const CAP_PIPELINE_MSG = "pipeline-msg";
+export const CAP_PIPELINE_CALL = "pipeline-call";
+const agreed = (port: MessageTarget, cap: string): boolean => {
+  const a = portAgreement(port);
+  return !!a?.enforced && a.caps.includes(cap);
+};
+const hasCap = (port: MessageTarget, cap: string): boolean =>
+  !!portAgreement(port)?.caps.includes(cap);
 
 /** Caller's input travels on this channel; the handler listens on it. */
 const CHANNEL_IN = "in";
@@ -361,7 +374,7 @@ function receiveChunks(
     async ({ done, value, error }) => {
       touch();
       if (poison) throw poison;
-      if (outstanding) {
+      if (outstanding && !hasCap(port, CAP_PIPELINE_CALL)) {
         // Spec D15: a second chunk before the first was confirmed is a
         // protocol violation, not a resource question. A count of one needs
         // no threshold and no byte accounting, and it bounds memory by
@@ -397,6 +410,8 @@ function receiveChunks(
       }
       outstanding = true;
       try {
+        // PROTOTYPE H-2: with pipelined calls several handlers wait here at
+        // once; `ready()` and `deliver` keep them in arrival order.
         await ready();
         if (finished) throw poison ?? new Error("webrun-rpc: the stream is closed");
         await deliver?.({
@@ -411,6 +426,24 @@ function receiveChunks(
     },
     { channelName },
   );
+
+  // PROTOTYPE H-1: chunks as plain messages. The listener's promise settles
+  // when the consumer pulls past the chunk, so the mux grants the window's
+  // credit only then: the credit is the confirmation.
+  const onChunk = (event: MessageEvent): Promise<void> | undefined => {
+    const data = event.data as { type?: unknown; channelName?: unknown; chunk?: WireChunk };
+    if (!data || data.type !== CHUNK || data.channelName !== channelName || !data.chunk) return;
+    const { done, value, error } = data.chunk;
+    touch();
+    return (async () => {
+      await ready();
+      if (finished) return;
+      await deliver?.({ done, value, error: error ? deserializeError(error) : undefined });
+      if (done) resolveEnded();
+    })();
+  };
+  port.addEventListener("message", onChunk as (e: MessageEvent) => void);
+  const offRaw = () => port.removeEventListener("message", onChunk as (e: MessageEvent) => void);
 
   // Every path that stops listening to this channel — the consumer walking
   // away early (`break`/`return`/`throw` on the `for await`), an external
@@ -429,6 +462,7 @@ function receiveChunks(
     finished = true;
     wake();
     off();
+    offRaw();
     controller.signal.removeEventListener("abort", onAbort);
     resolveEnded();
   };
@@ -487,15 +521,88 @@ async function sendChunks(
   const producer = output as Partial<AsyncIterator<Uint8Array>>;
   const returnProducer = () => void Promise.resolve(producer.return?.()).catch(() => {});
   if (framed !== output) signal.addEventListener("abort", returnProducer, { once: true });
+  // PROTOTYPE H-2 (attempt 2): one reply listener for all calls in flight,
+  // not one per `callPort` — with N calls in flight every reply would
+  // otherwise be dispatched to N listeners.
+  const pending = new Map<string, { resolve: () => void; reject: (e: unknown) => void }>();
+  let seq = 0;
+  const onReply = (event: MessageEvent) => {
+    const d = event.data as {
+      type?: string;
+      channelName?: string;
+      callId?: string;
+      error?: SerializedError;
+    };
+    if (!d || d.channelName !== channelName || typeof d.callId !== "string") return;
+    const p = pending.get(d.callId);
+    if (!p) return;
+    pending.delete(d.callId);
+    if (d.type === "response:error") p.reject(deserializeError(d.error as SerializedError));
+    else if (d.type === "response:result") p.resolve();
+  };
+  const onAbortAll = () => {
+    for (const p of pending.values()) p.reject(signal.reason);
+    pending.clear();
+  };
+  const callPipelined = (chunk: WireChunk): Promise<void> => {
+    if (pending.size === 0 && seq === 0) {
+      port.addEventListener("message", onReply);
+      signal.addEventListener("abort", onAbortAll, { once: true });
+    }
+    const callId = `p-${channelName}-${seq++}`;
+    const promise = new Promise<void>((resolve, reject) =>
+      pending.set(callId, { resolve, reject }),
+    );
+    port.postMessage({ type: "request", channelName, callId, params: chunk });
+    return promise;
+  };
+  // PROTOTYPE H-2: calls in flight, and the bytes they carry.
+  const inFlight: Array<{ size: number; reply: Promise<void> }> = [];
+  let inFlightBytes = 0;
+  let failure: unknown;
   try {
     await sendIterator<Uint8Array>(async ({ done, value, error }) => {
       if (signal.aborted) return;
+      if (failure) throw failure;
       const chunk: WireChunk = {
         done,
         value,
         error: error === undefined ? undefined : serializeError(error),
       };
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });
+      if (agreed(port, CAP_PIPELINE_MSG)) {
+        // H-1: post and go on; only the window holds us back.
+        port.postMessage({ type: CHUNK, channelName, chunk });
+        touch();
+        if (portBufferedAmount(port) > 0) await whenPortReady(port);
+        return;
+      }
+      if (agreed(port, CAP_PIPELINE_CALL) && !done) {
+        // H-2: keep up to a window of calls unreplied. `listenPort` counts a
+        // request consumed at its handler's entry, so the window's credit
+        // alone would not bound them: the sender counts its own.
+        // biome-ignore lint/style/noNonNullAssertion: agreed() checked it.
+        const window = portAgreement(port)!.window;
+        const size = (value?.byteLength ?? 0) + 64;
+        const reply = callPipelined(chunk).then(
+          () => {
+            inFlightBytes -= size;
+            touch();
+          },
+          (err) => {
+            failure ??= err;
+          },
+        );
+        inFlight.push({ size, reply });
+        inFlightBytes += size;
+        while (inFlightBytes > window && inFlight.length) await inFlight.shift()?.reply;
+        if (portBufferedAmount(port) > 0) await whenPortReady(port);
+        return;
+      }
+      // Drain what is in flight before a confirmed chunk (the last one, or a
+      // port with nothing agreed).
+      for (const f of inFlight.splice(0)) await f.reply;
+      if (failure) throw failure;
       await callPort<void, WireChunk>(port, chunk, {
         channelName,
         timeout: NO_TIMEOUT,
@@ -510,5 +617,7 @@ async function sendChunks(
     throw err;
   } finally {
     signal.removeEventListener("abort", returnProducer);
+    port.removeEventListener("message", onReply);
+    signal.removeEventListener("abort", onAbortAll);
   }
 }

@@ -34,6 +34,9 @@ export interface HttpLinkOptions {
    * reads the upload afterwards keeps it as long as it keeps reading.
    */
   requestIdleMs?: number;
+  /** PROTOTYPE: per-port window and capabilities (webrun-rpc `window` / `caps`). */
+  window?: number;
+  caps?: string[];
 }
 
 /** The calling end of a link: sends requests, gets responses. */
@@ -77,10 +80,10 @@ const LINK_CLOSE = "webrun-http:link-close";
 /** Opens the calling end of a link on `port` (one port per link). */
 export async function connectHttpLink(
   port: MessagePort,
-  { streamTimeout, maxPorts }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts, window, caps }: HttpLinkOptions = {},
 ): Promise<HttpLink> {
   const { call, close } = await connect({
-    mux: overPipe(port, { codec: structuredCodec, side: "initiator", maxPorts }),
+    mux: overPipe(port, { codec: structuredCodec, side: "initiator", maxPorts, window, caps }),
     timeout: streamTimeout,
   });
   return trackedLink(
@@ -102,11 +105,11 @@ export async function connectHttpLink(
 export async function serveHttpLink(
   port: MessagePort,
   handler: (request: Request) => Response | Promise<Response>,
-  { streamTimeout, maxPorts, requestIdleMs }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts, requestIdleMs, window, caps }: HttpLinkOptions = {},
 ): Promise<() => Promise<void>> {
   const teardown = await serve(
     {
-      mux: overPipe(port, { codec: structuredCodec, side: "responder", maxPorts }),
+      mux: overPipe(port, { codec: structuredCodec, side: "responder", maxPorts, window, caps }),
       timeout: streamTimeout,
     },
     serveFetchOverDuplex(async (request) => await handler(request), { requestIdleMs }),
