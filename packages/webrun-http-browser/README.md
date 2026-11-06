@@ -179,6 +179,7 @@ const stop = startRelayServiceWorker(self, {
 | `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key; a second page gets `"<key>" is already served by another client`. A holder that reloaded is no longer live, so it can always re-register. |
 | `decorateResponse` | none | `(response, request) => Response`. Stamps headers on responses the relay makes, including its error responses. Not applied to requests the worker leaves to the network. |
 | `streamTimeout` | none | Per-stream inactivity timeout, in ms, of the links to services. |
+| `window` | `262144` | Window, in bytes, of the links to services, under which bodies are pipelined. `0` turns it off. |
 
 `UNREGISTER` is accepted only from the client that holds the key, or, once
 that client is gone, from any client `canRegister` allows: any page of the
@@ -367,6 +368,7 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | `handoverMs` | `5_000` | How long a replaced handler may finish its requests. |
 | `wsConnectTimeoutMs` | `15_000` | How long a socket waits for its handler's answer. |
 | `streamTimeout` | none | Per-stream inactivity timeout of the links. |
+| `window` | `262144` | Window, in bytes, of the links to the handlers, under which bodies are pipelined. `0` turns it off. |
 | `livenessCheckMs` | `5_000` | Period of the backup liveness check (`navigator.locks.query()`); `0` turns it off. |
 
 A host whose worker has its own `fetch` handling (routes of its own, cookies
@@ -566,8 +568,8 @@ new WebSocket(...)         ──WS_CONNECT──► same-origin worker ──ct
 Every link is one `MessagePort` (`down`: requests a handler serves; `up`:
 requests a worker sends; `ctl`: socket hand-over). Calls on a link are
 multiplexed by `@statewalker/webrun-rpc` (`connect` / `serve` over `overPipe`),
-each a stream with a one-chunk window in both directions, and HTTP runs over
-them with `fetchOverDuplex` / `serveFetchOverDuplex` from
+each a stream with backpressure in both directions (see below for the window
+its bodies are pipelined under), and HTTP runs over them with `fetchOverDuplex` / `serveFetchOverDuplex` from
 `@statewalker/webrun-http-streams`. The relay uses the same links, one per
 `CONNECT`. Every hand-shake carries `HTTP_LINK_PROTOCOL`: a peer of version 1
 (this package's own stream transport) is still served over that transport, and
@@ -715,18 +717,47 @@ answered by the worker and can load uncontrolled in Firefox; call
 - `incompatible`: answered the handshake but runs an older version of this
   package (reload the page once the updated worker is active).
 
+### A link pipelines its bodies under a 256 KiB window
+
+The calling end of every link asks each request's port for a flow-control
+window of 256 KiB (`HttpLinkOptions.window`, webrun-rpc's `window`). Under it,
+request and response bodies are pipelined: chunks leave without waiting for a
+confirmation each, and only the window holds the sender back. Bodies of many
+small chunks move at least twice as fast as one confirmed chunk at a time
+(`pnpm bench`). The answering end needs no option: it applies whatever window
+each port asks for.
+
+The size is a trade. A reader that stops holds about one window per link of
+the body in flight, so a larger window costs memory per stalled reader. 64 KiB
+gave the same throughput on a `MessageChannel`, and 1 MiB gained at most 5%
+for four times the memory.
+
+`window: 0` turns it off: the link then puts exactly the envelopes of a link
+with no window on the wire, one confirmed chunk at a time. Every link that
+calls takes the option, so it can be set on each of them: the ServiceWorkers'
+links to their handlers (`startHttpDispatcher` / `SwHttpDispatcher`,
+`startRelayServiceWorker`), and the links a page or worker opens itself
+(`callHttpService`, `sendOverConnection`, and the `up` link of
+`serveHttpInWorker` and `HandlerEndpoint`). Each link's calling end decides
+its window, so turning it off everywhere means `window: 0` on the ServiceWorker
+and on the pages and workers that call through it.
+
+An end of an older version is safe on either side. One that does not answer
+the pipelining handshake gets confirmed chunks, and one with no window at all
+is never waited on. Nothing changes in `HTTP_LINK_PROTOCOL`.
+
 ### Backpressure, and where the browser buffers
 
 Both modes move requests over webrun-rpc links: a handler producing a body is
-never more than a few chunks ahead of whoever reads it through this package's
-links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
+never more than about one window (256 KiB) per link ahead of whoever reads it
+through this package's links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
 the producer. Between a ServiceWorker's `respondWith` and the page, though,
 Chromium buffers by itself, tens of megabytes of a fast stream: a page reading
 slowly sees the handler run that far ahead before backpressure reaches it
 (about 55 MiB, the same for a plain ServiceWorker with no library). Firefox
 sets no such bound: it keeps reading a ServiceWorker's response while the page
 does not, so there a handler streaming to a page that stopped reading keeps
-producing (this package still holds only a few chunks of it). A worker
+producing (this package still holds only about one window of it). A worker
 reading through `service.fetch` has no such buffer. `links.browser.ts` pins
 the split: once a page stops reading, the handler is never more than a few
 chunks ahead of what the ServiceWorker handed to Chromium, and stops.
@@ -840,6 +871,12 @@ All four runtime dependencies are bundled into `dist/`:
 ### Tests
 
 - `pnpm test`: unit tests under Node, against the source.
+- `pnpm bench`: the throughput benchmark, kept out of `pnpm test` so that a
+  loaded machine cannot fail the suite. It compares the default window with
+  `window: 0` in one run (median of 3 each) and fails below 2x, at 256 B and
+  4 KiB chunks. The 4 KiB margin is the thin one (about 2.1-2.6x): what is left
+  there is the link's own cost per chunk (`ReadableStream` and request
+  framing), which no window removes.
 - `pnpm run test:browser`: builds, then runs `tests/browser/` in Chromium and
   Firefox through Playwright against the built bundles, plus
   `tests/packaging/`, which checks the published exports map. Needs the

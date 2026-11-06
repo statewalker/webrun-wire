@@ -123,6 +123,11 @@ export interface SwHttpDispatcherOptions {
   /** Per-stream inactivity timeout of the links (webrun-rpc's). Default none. */
   streamTimeout?: number;
   /**
+   * The window, in bytes, of the links to the handlers: `HttpLinkOptions.window`.
+   * Default 256 KiB; 0 turns it off.
+   */
+  window?: number;
+  /**
    * Period of the backup liveness check, in ms: handlers whose owner lock is
    * no longer held are dropped. Default 5 s; 0 turns it off.
    */
@@ -489,8 +494,8 @@ export class SwHttpDispatcher {
 
     const ctl = params.ctl ? rest.shift() : undefined;
     const up = params.up ? rest.shift() : undefined;
-    const streamTimeout = this.options.streamTimeout;
-    const link = await connectHttpLink(down, { streamTimeout });
+    const { streamTimeout, window } = this.options;
+    const link = await connectHttpLink(down, { streamTimeout, window });
     const entry = new HandlerEntry(
       params.key,
       params.id ?? clientId ?? crypto.randomUUID(),

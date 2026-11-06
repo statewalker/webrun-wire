@@ -140,6 +140,11 @@ export interface RelayServiceWorkerOptions {
   canRegister?: (client: Client, key: string, path?: string) => boolean | Promise<boolean>;
   /** Per-stream inactivity timeout of the links to services, in ms. Default none. */
   streamTimeout?: number;
+  /**
+   * The window, in bytes, of the links to services: `HttpLinkOptions.window`.
+   * Default 256 KiB; 0 turns it off.
+   */
+  window?: number;
   /** Default `"last-wins"`, the behaviour before this option existed. */
   takeover?: "first-wins" | "last-wins";
   /** Stamp headers on responses the relay makes. Not applied to network fetches. */
@@ -339,6 +344,7 @@ export function startRelayServiceWorker(
       if (!reply) throw HttpError.errorForbidden(params);
       const response = await sendOverConnection(channel.port1, reply, request, {
         streamTimeout: options.streamTimeout,
+        window: options.window,
       });
       return options.decorateResponse?.(response, request) ?? response;
     } catch (error) {

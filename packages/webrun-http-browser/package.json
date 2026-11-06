@@ -60,6 +60,7 @@
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "prepack": "pnpm run build",
     "test": "vitest run",
+    "bench": "vitest run --config vitest.bench.config.ts && echo \"all benchmarks passed\"",
     "test:browser": "pnpm run build && vitest run --config vitest.browser.config.ts",
     "lint": "biome check src tests",
     "serve": "http-server -p 5173 -c-1 -s .",

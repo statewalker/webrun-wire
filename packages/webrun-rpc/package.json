@@ -33,6 +33,7 @@
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "prepack": "pnpm run build",
     "test": "vitest run",
+    "bench": "vitest run --config vitest.bench.config.ts && echo \"all benchmarks passed\"",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.tests.json",
     "lint": "biome check src tests",

@@ -135,12 +135,12 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(result.cancelled).toBe(1);
       });
 
-      it("backpressure: a page that stops reading: this package holds a few chunks, the browser the rest", async () => {
+      it("backpressure: a page that stops reading: this package holds about one window, the browser the rest", async () => {
         // Between a ServiceWorker's `respondWith` and the page, the browser
         // buffers by itself. The fixture worker counts what it hands to the
         // browser (?count), which splits the producer's lead into two parts:
-        // - produced - delivered: held by this package; must stay a few chunks,
-        //   in every browser;
+        // - produced - delivered: held by this package; must stay about one
+        //   window, in every browser;
         // - delivered - read: the browser's own buffer. Chromium bounds it
         //   (~55 MiB, the same for a plain worker with no library), so there
         //   the producer must stop too.
@@ -172,8 +172,9 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         );
         const CHUNK = 65536;
         for (const { produced, delivered } of samples) {
-          // What this package holds: the one-chunk windows of the hops, no more.
-          expect(produced - delivered).toBeLessThanOrEqual(4 * CHUNK);
+          // What this package holds: the link's window (256 KiB by default)
+          // and the few chunks in hand at its ends, no more.
+          expect(produced - delivered).toBeLessThanOrEqual(256 * 1024 + 3 * CHUNK);
         }
         if (browserName !== "chromium") return;
         const last = samples[samples.length - 1];
@@ -223,8 +224,9 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
           // The consumer set the pace: 200 MiB at 20 MiB/s takes about 10 s.
           expect(result.ms).toBeGreaterThan(9_000);
           for (const { produced, delivered } of samples) {
-            // This package holds a few chunks at most; the rest is Chromium's.
-            expect(produced - delivered).toBeLessThanOrEqual(4 * 65536);
+            // This package holds about one window (256 KiB by default) at
+            // most; the rest is Chromium's.
+            expect(produced - delivered).toBeLessThanOrEqual(256 * 1024 + 3 * 65536);
           }
           // Steady state: Chromium's buffer is full and the producer not done yet.
           const steady = samples.filter((x) => x.read > 80 * MiB && x.produced < 200 * MiB);
@@ -241,9 +243,9 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         },
       );
 
-      it("pace: a 128 MiB stream read by a worker through the router follows its pace, a few chunks ahead", async () => {
+      it("pace: a 128 MiB stream read by a worker through the router follows its pace, about two windows ahead", async () => {
         // page handler → ServiceWorker → worker: no browser buffer on the way,
-        // so the producer is never more than the links' one-chunk windows ahead.
+        // so the producer is never more than the links' windows ahead.
         const MiB = 1048576;
         const RATE = 20 * MiB;
         const page = await open();
