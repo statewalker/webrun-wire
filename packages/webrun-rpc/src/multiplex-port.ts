@@ -29,6 +29,9 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
 export const DEFAULT_MAX_PORTS = 1024;
 
+/** Default ceiling on one message reassembled from frames (`maxReassembledBytes`). */
+export const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
+
 /**
  * What a message costs a port's window when the codec cannot say
  * (`PortCodec.encode`): its bytes and string lengths, found in its values up
@@ -73,6 +76,7 @@ export function multiplexPort(
     keepalive,
     onLeak,
   } = options;
+  const maxReassembledBytes = options.maxReassembledBytes ?? DEFAULT_MAX_REASSEMBLED_BYTES;
   const misses = keepalive?.misses ?? 3;
   if (
     keepalive &&
@@ -91,6 +95,11 @@ export function multiplexPort(
   // A frame of no bytes would never advance the split: refuse it here.
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
     throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
+  }
+  if (!(Number.isSafeInteger(maxReassembledBytes) && maxReassembledBytes > 0)) {
+    throw new RangeError(
+      `webrun-rpc: maxReassembledBytes must be a positive integer, got ${maxReassembledBytes}`,
+    );
   }
 
   /**
@@ -117,7 +126,7 @@ export function multiplexPort(
      */
     exact: boolean;
     outstanding: number;
-    queue: { send: () => void; size: number }[];
+    queue: { send: (whole?: boolean) => void; size: number }[];
     queued: number;
     unconsumed: number;
     waiters: { below: number; resolve: () => void }[];
@@ -138,10 +147,28 @@ export function multiplexPort(
   interface Entry extends PortInfo {
     handle: PortRecord;
     credit?: Credit;
-    /** The frames of a message still arriving. */
-    partial?: { chunks: Uint8Array[]; bytes: number };
+    /**
+     * The frames of a message still arriving. `room`: what the window left
+     * when the first came, if anything was still owed back then. `charged`:
+     * its bytes past the window, counted in `reassembling`.
+     */
+    partial?: {
+      chunks: Uint8Array[];
+      bytes: number;
+      room?: number;
+      owed: number;
+      charged: number;
+    };
   }
   const open = new Map<number, Entry>();
+  // Bytes of partial messages held past their port's window, across every
+  // port (`maxReassembledBytes`). What fits a window is bounded by it already.
+  let reassembling = 0;
+  const freePartial = (entry: Entry | undefined): void => {
+    if (!entry?.partial) return;
+    reassembling -= entry.partial.charged;
+    entry.partial = undefined;
+  };
   // A port collected while still open: report it, then free its slot on both
   // ends as its close would. Only with `onLeak` — a registry costs per port.
   const leaks = onLeak
@@ -346,14 +373,22 @@ export function multiplexPort(
           !bytes && waits
             ? { ...envelope, payload: structuredClone(payload, { transfer }) }
             : undefined;
-        const send = (): void => {
+        // `whole`: at close, what is still queued leaves past the window, and
+        // a frame past the window is what the peer refuses (`maxReassembledBytes`).
+        const send = (whole = false): void => {
           if (!bytes) {
             sendOnPort(id, held ? () => post(held) : () => post(envelope, transfer));
             return;
           }
           // Frames only once the peer has acknowledged exact sizing: before
           // that, it may be a peer that cannot reassemble them.
-          if (frameSize != null && c.enforced && c.exact && bytes.byteLength > frameSize) {
+          if (
+            !whole &&
+            frameSize != null &&
+            c.enforced &&
+            c.exact &&
+            bytes.byteLength > frameSize
+          ) {
             for (let at = 0; at < bytes.byteLength; at += frameSize) {
               const data = bytes.subarray(at, at + frameSize);
               const frame: PortEnvelope =
@@ -376,6 +411,7 @@ export function multiplexPort(
       },
     );
     function release(reason: unknown): void {
+      freePartial(open.get(id));
       open.delete(id);
       leaks?.unregister(record);
       // What is queued goes out now, before the close and regardless of the
@@ -384,7 +420,7 @@ export function multiplexPort(
       // kept for a port nobody holds. Without a window it would all have
       // gone out at once anyway.
       if (c?.queue.length) {
-        for (const item of c.queue.splice(0)) item.send();
+        for (const item of c.queue.splice(0)) item.send(true);
         c.queued = 0;
       }
       // Behind this port's frames, so the peer gets the whole message first.
@@ -520,16 +556,51 @@ export function multiplexPort(
 
     if (envelope.type === "frame") {
       // Only where this end advertised exact sizing — the one place a peer may
-      // frame. A frame sequence buffers no more than the same message sent
-      // whole, which a byte transport would also have to hold entire.
+      // frame. What a partial message may hold is bounded below, so frames
+      // that never end cannot make this side buffer without limit.
       if (!entry?.credit?.exact || !codec.decode || !(envelope.data instanceof Uint8Array)) return;
       touch(envelope.id);
-      const partial = entry.partial ?? { chunks: [], bytes: 0 };
+      const c = entry.credit;
+      // What this side still owes back (delivered and unconsumed, or consumed
+      // and not yet granted) is never more than what the sender counted as
+      // outstanding. So an honest sender starts a message only when owed plus
+      // the message fits the window, or when nothing is owed at all: a message
+      // larger than the window, bounded by `maxReassembledBytes` alone.
+      const owed = c.unconsumed + c.toGrant;
+      const partial = entry.partial ?? {
+        chunks: [],
+        bytes: 0,
+        owed,
+        charged: 0,
+        ...(owed > 0 ? { room: c.window - owed } : {}),
+      };
       entry.partial = partial;
+      const size = envelope.data.byteLength;
+      // Only a message begun with nothing owed may pass the window; what it
+      // holds past it is what the cap, shared by all ports, bounds.
+      const charged = partial.room == null ? Math.max(0, partial.bytes + size - c.window) : 0;
+      const overrun =
+        partial.room != null && partial.bytes + size > partial.room
+          ? `what the window left (${partial.room} of ${c.window} bytes, ${partial.owed} still owed)`
+          : reassembling - partial.charged + charged > maxReassembledBytes
+            ? `maxReassembledBytes (${maxReassembledBytes} bytes past the window, across all ports)`
+            : undefined;
+      if (overrun) {
+        // A peer that frames past what it may send: hold none of it.
+        freePartial(entry);
+        dropOutgoing(envelope.id);
+        open.delete(envelope.id);
+        releaseWaiters(c);
+        entry.handle.markClosed(new RangeError(`webrun-rpc: a framed message passed ${overrun}`));
+        post({ type: "close", id: envelope.id, reason: "max-reassembled-bytes" });
+        return;
+      }
+      partial.bytes += size;
+      reassembling += charged - partial.charged;
+      partial.charged = charged;
       partial.chunks.push(envelope.data);
-      partial.bytes += envelope.data.byteLength;
       if (!envelope.last) return;
-      entry.partial = undefined;
+      freePartial(entry);
       const whole = new Uint8Array(partial.bytes);
       let at = 0;
       for (const chunk of partial.chunks) {
@@ -545,6 +616,7 @@ export function multiplexPort(
     // The peer closed the port: whatever it still had to receive is moot.
     dropOutgoing(envelope.id);
     if (!entry) return;
+    freePartial(entry);
     open.delete(envelope.id);
     releaseWaiters(entry.credit);
     entry.handle.markClosed(new Error("webrun-rpc: the peer closed the port"));

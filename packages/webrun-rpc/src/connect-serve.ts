@@ -210,6 +210,8 @@ export interface OverPipeOptions {
   window?: number;
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
   frameSize?: number;
+  /** Ceiling on a message reassembled from frames — see `PortMuxOptions.maxReassembledBytes`. */
+  maxReassembledBytes?: number;
   /** Liveness of the peer by ping/pong — see `PortMuxOptions.keepalive`. */
   keepalive?: { intervalMs: number; misses?: number };
   /** Development aid: report ports dropped without `close()` — see `PortMuxOptions.onLeak`. */
