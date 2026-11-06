@@ -33,8 +33,8 @@ const DEFAULT_MAX_STREAMS = 256;
 const DEFAULT_MTU = 64 * 1024;
 const DEFAULT_MAX_STREAM_BUFFER = 8 * 1024 * 1024;
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+const textEncoder = /* @__PURE__ */ new TextEncoder();
+const textDecoder = /* @__PURE__ */ new TextDecoder();
 
 interface Stream {
   id: number;

@@ -1,6 +1,6 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
-import { type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
+import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { NULL_BODY_STATUSES } from "./http-stubs.js";
 import type { ByteSource } from "./message.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
@@ -10,7 +10,7 @@ import { collectBytes, supportsRequestStreams } from "./request-streams.js";
  * but they are meaningless to a `Request`/`Response`, and re-emitting them
  * from a relay would corrupt its framing.
  */
-const HOP_BY_HOP = new Set([
+const HOP_BY_HOP = /* @__PURE__ */ new Set([
   "connection",
   "host",
   "keep-alive",
@@ -126,7 +126,14 @@ export async function fetchOverDuplex(
     const buffered = new Uint8Array(await request.arrayBuffer());
     if (buffered.byteLength > 0) body = [buffered];
   }
-  const { envelope, body: respBody, release } = await httpFetch(call, env, body, options);
+  const {
+    envelope,
+    body: respBody,
+    release,
+  } = await httpFetch(call, env, body, {
+    ...options,
+    signal: request.signal ?? undefined,
+  });
   const responseInit: ResponseInit = {
     status: envelope.status,
     statusText: envelope.statusText,
@@ -220,12 +227,4 @@ async function* withAbort(
     if (signal.aborted) throw abortReason(signal);
     yield chunk;
   }
-}
-
-function abortReason(signal: AbortSignal): Error {
-  const reason = (signal as unknown as { reason?: unknown }).reason;
-  if (reason instanceof Error) return reason;
-  const err = new Error(reason === undefined ? "Aborted" : String(reason));
-  err.name = "AbortError";
-  return err;
 }

@@ -7,7 +7,7 @@ import { newSniffingCodec } from "./sniff.js";
  * Writes HTTP/1.1; accepts HTTP/1.1 or the legacy JSON envelope. Used whenever
  * no `codec` option is supplied.
  */
-export const defaultCodec: MessageCodec = newSniffingCodec({
+export const defaultCodec: MessageCodec = /* @__PURE__ */ newSniffingCodec({
   write: httpCodec,
   accept: [httpCodec, jsonEnvelopeCodec],
 });

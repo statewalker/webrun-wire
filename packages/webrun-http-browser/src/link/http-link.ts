@@ -19,6 +19,13 @@ export interface HttpLinkOptions {
    * none: a slow consumer is throttled, never failed.
    */
   streamTimeout?: number;
+  /**
+   * Ceiling on the requests in flight on the link at once: webrun-rpc's
+   * `maxPorts`, one multiplexed port per request (default 1024). A request
+   * past it fails on the calling end; one the answering end has no room for is
+   * refused. Every exchange gives its port back when it ends, however it ends.
+   */
+  maxPorts?: number;
 }
 
 /** The calling end of a link: sends requests, gets responses. */
@@ -62,10 +69,10 @@ const LINK_CLOSE = "webrun-http:link-close";
 /** Opens the calling end of a link on `port` (one port per link). */
 export async function connectHttpLink(
   port: MessagePort,
-  { streamTimeout }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts }: HttpLinkOptions = {},
 ): Promise<HttpLink> {
   const { call, close } = await connect({
-    mux: overPipe(port, { codec: structuredCodec, side: "initiator" }),
+    mux: overPipe(port, { codec: structuredCodec, side: "initiator", maxPorts }),
     timeout: streamTimeout,
   });
   return trackedLink(
@@ -87,11 +94,11 @@ export async function connectHttpLink(
 export async function serveHttpLink(
   port: MessagePort,
   handler: (request: Request) => Response | Promise<Response>,
-  { streamTimeout }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts }: HttpLinkOptions = {},
 ): Promise<() => Promise<void>> {
   const teardown = await serve(
     {
-      mux: overPipe(port, { codec: structuredCodec, side: "responder" }),
+      mux: overPipe(port, { codec: structuredCodec, side: "responder", maxPorts }),
       timeout: streamTimeout,
     },
     serveFetchOverDuplex(async (request) => await handler(request)),

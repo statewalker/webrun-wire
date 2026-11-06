@@ -17,6 +17,12 @@ export const PEER_ERROR_HEADER = "x-webrun-error";
 export type HttpDataOptions = {
   /** Wire format. Defaults to `defaultCodec`: writes HTTP/1.1, accepts either. */
   codec?: MessageCodec;
+  /**
+   * `httpFetch` only: aborting it while the response head is awaited releases
+   * the call and rejects with the signal's reason. (Once the head is in, the
+   * body is the caller's to leave.)
+   */
+  signal?: AbortSignal;
 };
 
 export interface HttpFetchResult {
@@ -166,15 +172,39 @@ export async function httpFetch(
   options: HttpDataOptions = {},
 ): Promise<HttpFetchResult> {
   const codec = options.codec ?? defaultCodec;
+  const { signal } = options;
+  if (signal?.aborted) throw abortReason(signal);
   const output = call(codec.encodeRequest(env, body));
-  const decoded = await codec.decodeResponse(output, { method: env.method });
-  const release = async () => {
-    try {
-      await output.return?.(undefined);
-    } catch {
-      /* the call is being abandoned; nothing to report */
-    }
+  // The call is one Duplex invocation, and only its own generator's ending
+  // ends it: on a multiplexed transport that `finally` is what frees the
+  // call's port. So every way out of an exchange runs it once — the body read
+  // to its end, left early, never started (bodyless), a peer error, a
+  // response that could not be decoded, an abort while waiting for the head.
+  let released: Promise<void> | undefined;
+  const release = () => {
+    released ??= (async () => {
+      try {
+        await output.return?.(undefined);
+      } catch {
+        /* the call is being abandoned; nothing to report */
+      }
+    })();
+    return released;
   };
+  let decoded: Awaited<ReturnType<MessageCodec["decodeResponse"]>>;
+  try {
+    decoded = await untilAborted(codec.decodeResponse(output, { method: env.method }), signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      // `.return()` on a generator with a `next()` in flight is queued behind
+      // it: the call ends once the peer answers that `next()`, which an abort
+      // must not wait for.
+      void release();
+    } else {
+      await release();
+    }
+    throw error;
+  }
   const result: HttpFetchResult = {
     envelope: decoded.envelope,
     body: releasingOnExit(decoded.body, release),
@@ -184,27 +214,57 @@ export async function httpFetch(
   return result;
 }
 
+/** `promise`, rejected with the signal's reason if it aborts first. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** The signal's reason as an `Error` (`AbortError` when it gave none). */
+export function abortReason(signal: AbortSignal): Error {
+  const reason = (signal as unknown as { reason?: unknown }).reason;
+  if (reason instanceof Error) return reason;
+  const err = new Error(reason === undefined ? "Aborted" : String(reason));
+  err.name = "AbortError";
+  return err;
+}
+
 /**
- * `body`, but leaving it before its end releases the call.
+ * `body`, releasing the call however it is left: read to its end, or left
+ * early.
  *
  * The body the codec hands back is a generator of its own over a `ByteReader`,
- * and `.return()` on it never reaches the call's `output` (see
- * `throwIfPeerError` for why the codec must not do that itself). So a caller
- * that stopped reading — an aborted `fetch`, a cancelled response stream —
- * left the peer's producer parked forever, holding its handler open. Safe here
- * for the same reason it is safe in `throwIfPeerError`: `output` is this
- * call's own response-only generator, and the request was fully sent.
+ * and its ending never reaches the call's `output` (see `throwIfPeerError` for
+ * why the codec must not do that itself). A caller that stopped reading — an
+ * aborted `fetch`, a cancelled response stream — left the peer's producer
+ * parked forever; and one that read the body to its end left the call itself
+ * open, which on a multiplexed transport is one port per exchange until the
+ * multiplexer refuses to open more (`maxPorts`). Safe here for the same reason
+ * it is safe in `throwIfPeerError`: `output` is this call's own response-only
+ * generator, and the request was fully sent.
  */
 async function* releasingOnExit(
   body: AsyncIterable<Uint8Array>,
   release: () => Promise<void>,
 ): AsyncGenerator<Uint8Array> {
-  let completed = false;
   try {
     yield* body;
-    completed = true;
   } finally {
-    if (!completed) await release();
+    await release();
   }
 }
 

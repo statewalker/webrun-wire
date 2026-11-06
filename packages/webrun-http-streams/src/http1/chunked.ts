@@ -4,9 +4,9 @@ import type { ByteSource } from "../message.js";
 import { HttpParseError } from "./errors.js";
 import { decodeLatin1 } from "./headers.js";
 
-const CRLF = new Uint8Array([0x0d, 0x0a]);
-const LAST_CHUNK = new Uint8Array([0x30, 0x0d, 0x0a, 0x0d, 0x0a]); // "0\r\n\r\n"
-const encoder = new TextEncoder();
+const CRLF = /* @__PURE__ */ new Uint8Array([0x0d, 0x0a]);
+const LAST_CHUNK = /* @__PURE__ */ new Uint8Array([0x30, 0x0d, 0x0a, 0x0d, 0x0a]); // "0\r\n\r\n"
+const encoder = /* @__PURE__ */ new TextEncoder();
 
 /**
  * Chunk sizes are written in HEXADECIMAL — a 21-byte chunk is `15`. Writing

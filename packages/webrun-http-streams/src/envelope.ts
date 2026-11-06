@@ -15,8 +15,8 @@ const NEWLINE = 0x0a;
 
 /** Mirrors the HTTP/1.1 codec's default `maxHeaderBytes`. */
 const MAX_ENVELOPE_BYTES = 65536;
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+const encoder = /* @__PURE__ */ new TextEncoder();
+const decoder = /* @__PURE__ */ new TextDecoder();
 
 /**
  * Encode an HTTP envelope plus optional body as one continuous byte stream:
