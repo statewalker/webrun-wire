@@ -10,7 +10,6 @@
 
 ### Patch Changes
 
-- 65570e4: Depends on `@statewalker/webrun-rpc` 0.7.1.
 - Updated dependencies [eec24c8]
 - Updated dependencies [cf94377]
   - @statewalker/webrun-rpc@0.8.0
