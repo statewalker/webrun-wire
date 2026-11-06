@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 // the `multiplexPort` that registers its ports with them, also when this runs
 // from the package's own directory, where the package name resolves to `dist`.
 import {
+  getPortCloseSignal,
   type MessageListener,
   type MessageTarget,
   multiplexPort,
@@ -223,5 +224,22 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
     expect(endPort(portA)).toBe(true);
     await waitFor(() => seenB.includes("end"), "B reads A's end");
     await whenPortEnded(portB);
+  });
+
+  it("a port closed with its end still queued sends the close alone, and refuses a later end", async () => {
+    const { a, portA, portB, seenB } = await pair();
+    receiver(portB, { stall: true });
+    // The first message spends the window and the stalled peer returns no
+    // credit, so the second, and the end behind it, stay queued.
+    portA.postMessage(new Uint8Array(200 * KiB));
+    portA.postMessage(new Uint8Array(1 * KiB));
+    expect(endPort(portA)).toBe(true);
+    await waitFor(() => (a.ports()[0]?.queued ?? 0) > 0, "the second message waits for credit");
+    const signal = getPortCloseSignal(portB);
+    portA.close?.();
+    expect(endPort(portA)).toBe(false);
+    await waitFor(() => seenB.includes("close"), "B reads the close");
+    expect(seenB).not.toContain("end");
+    expect(signal?.reason).toMatchObject({ message: "webrun-rpc: the peer closed the port" });
   });
 });

@@ -357,7 +357,8 @@ after one window.
 behind everything already posted on that port: it is a size-0 item in the port's window queue, so
 it needs no credit, and with `frameSize` it takes its turn in the port's queue behind the frames of
 the last message. So the peer has every byte before it sees the end, even of a last message larger
-than the window. Anything posted on that side afterwards is dropped. The other direction keeps
+than the window. Anything posted on that side afterwards is dropped. A port closed while its `end`
+still waits in the queue sends its `close` alone: an abandoned port never looks finished. The other direction keeps
 sending, and both keep returning credit, until it ends too. Once both directions have ended, each
 end frees the id on its own, with no `close` on the wire, and the port's close signal aborts with
 `webrun-rpc: the port ended in both directions`. No exported function sends `end`: it is internal

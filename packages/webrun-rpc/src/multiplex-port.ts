@@ -155,7 +155,7 @@ export function multiplexPort(
     /** This side's `end` is queued: anything posted afterwards is dropped. */
     ending: boolean;
     /** This side's `end` has left, behind the port's frames. */
-    ended: boolean;
+    endSent: boolean;
     /** The peer's `end` has arrived. */
     peerEnded: boolean;
     /** Resolves `whenPortEnded`, once someone waits for it. */
@@ -312,7 +312,7 @@ export function multiplexPort(
    */
   const freeIfEnded = (id: number, c: Credit): void => {
     const entry = open.get(id);
-    if (!c.ended || !c.peerEnded || entry?.credit !== c) return;
+    if (!c.endSent || !c.peerEnded || entry?.credit !== c) return;
     freePartial(entry);
     open.delete(id);
     leaks?.unregister(entry.handle);
@@ -401,7 +401,7 @@ export function multiplexPort(
             toGrant: 0,
             grantScheduled: false,
             ending: false,
-            ended: false,
+            endSent: false,
             peerEnded: false,
           }
         : undefined;
@@ -508,8 +508,8 @@ export function multiplexPort(
       });
       setPortEndState(self.port, {
         end: () => {
-          if (c.ending) return true;
           if (isClosed() || !c.caps.has("end")) return false;
+          if (c.ending) return true;
           c.ending = true;
           // Behind what this side already posted: first in the window queue
           // (a size-0 item), then in the fair-framing ring behind its frames.
@@ -517,15 +517,18 @@ export function multiplexPort(
             size: 0,
             send: () =>
               sendOnPort(id, () => {
+                // A port closed meanwhile was abandoned, not ended: its peer
+                // hears the close alone, never an end that looks like a normal finish.
+                if (open.get(id)?.credit !== c) return;
                 post({ type: "end", id });
-                c.ended = true;
+                c.endSent = true;
                 freeIfEnded(id, c);
               }),
           });
           flush(c);
           return true;
         },
-        ended: () => {
+        whenPeerEnded: () => {
           if (!c.onPeerEnd) {
             let resolve: () => void = () => {};
             const promise = new Promise<void>((r) => {

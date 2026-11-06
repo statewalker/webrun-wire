@@ -96,7 +96,7 @@ export interface PortEndState {
   /** Queue this side's `end`; `false` when `end` was not agreed. */
   end(): boolean;
   /** Resolves once the peer has ended its direction. */
-  ended(): Promise<void>;
+  whenPeerEnded(): Promise<void>;
 }
 
 const ends = new WeakMap<MessageTarget, PortEndState>();
@@ -118,9 +118,11 @@ export function endPort(port: MessageTarget): boolean {
 }
 
 /**
- * @internal Resolves once the peer has ended its direction of `port`; never,
- * on a port where it cannot. Not exported from the package.
+ * @internal Resolves once the peer has ended its direction of `port`. It never
+ * settles otherwise: not on a port where `end` cannot be agreed, and not when
+ * the port closes first, so a caller races it against the port's close
+ * signal. Not exported from the package.
  */
 export function whenPortEnded(port: MessageTarget): Promise<void> {
-  return ends.get(port)?.ended() ?? new Promise<void>(() => {});
+  return ends.get(port)?.whenPeerEnded() ?? new Promise<void>(() => {});
 }
