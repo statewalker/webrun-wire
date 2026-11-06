@@ -1,5 +1,12 @@
 # @statewalker/webrun-rpc
 
+## 0.7.0
+
+### Minor Changes
+
+- ec33737: `multiplexPort` / `overPipe` take `keepalive: { intervalMs, misses? }`, off by default. The mux pings the peer every `intervalMs`; the peer answers, and anything it sends counts. After `misses` (default 3) unanswered pings in a row from a peer that has answered before, the mux closes with `webrun-rpc: the peer did not answer …`, catching a realm that died or froze. Ticks while this end's own pipe reports a backlog are not counted. Every current mux answers pings, so one end is enough; an older peer is never closed for it. New `ping` / `pong` envelopes on an id no port takes (`Number.MAX_SAFE_INTEGER`), accepted by `structuredCodec` and `msgpackCodec`.
+- 626599d: `multiplexPort` / `overPipe` take `onLeak`, a development aid: a port its consumer dropped without `close()` is reported with its `PortInfo` once the garbage collector reclaims it, and freed on both ends if it has no listener left (one that still listens is still receiving, and is left open). The mux no longer holds a consumer's port object, only its own record, and `openPort`'s `signal` closes its port through that record, so a dropped port can be collected and is still freed when the signal aborts. `Symbol.dispose` also works detached from its port.
+
 ## 0.6.0
 
 ### Minor Changes
