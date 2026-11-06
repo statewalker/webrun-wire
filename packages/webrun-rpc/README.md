@@ -298,7 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
-| `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux when a peer that answered before goes silent. See "A port lives until its transport or its user lets go" below. |
+| `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -383,8 +383,8 @@ already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta?, window?, exact? }`, `{ type: "message", id, payload }`,
 `{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, exact? }`, with
-`frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id: 0 }` /
-`{ type: "pong", id: 0 }`. The codecs' `read` accept only objects with a non-negative integer `id`
+`frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id }` /
+`{ type: "pong", id }` (on `Number.MAX_SAFE_INTEGER`). The codecs' `read` accept only objects with a non-negative integer `id`
 and one of those seven types, so other traffic on a shared port is
 ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
@@ -412,17 +412,30 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
 
 **When nothing reports the death, `keepalive` probes for it.** With
 `keepalive: { intervalMs: 5000, misses: 3 }` the mux pings every 5 s, the peer answers, and
-anything the peer sends counts as an answer. After 3 intervals with nothing from a peer that has
-answered before, the mux closes with `webrun-rpc: the peer did not answer for 3 keepalive
-intervals of 5000 ms`, as if `signal` had aborted. That catches what no transport event does: a
-realm that died with no lock to tell, a frozen one, and a live peer that stopped reading. It
-cannot tell a peer whose event loop is blocked longer than `intervalMs × misses` from a dead one,
-so size the product above the longest pause you expect. The probe needs both ends: a peer that has
-never pinged or answered (an older one, or one without `keepalive`) is never closed for it, so a
-one-sided setting runs as before. The two ends' intervals need not match, because each answers
-the other's pings. `ping` and `pong` are envelopes of their own (`id` 0); older codecs drop them.
-The interval timer is `unref`'d in Node, so it never keeps a process alive. `intervalMs` must be a
-positive number and `misses` a positive integer, or `multiplexPort` throws a `RangeError`.
+anything the peer sends counts as an answer. After 3 pings in a row with nothing back from a peer
+that has answered before, the mux closes with `webrun-rpc: the peer did not answer 3 keepalive
+pings, 5000 ms apart`, as if `signal` had aborted. The silence it takes is between `misses ×
+intervalMs` and one interval more. That catches a realm that died with no lock to tell and one
+that froze. It cannot tell a peer whose event loop is blocked for that long from a dead one, so
+size the product above the longest pause you expect.
+
+- **What counts as silence.** Misses are pings unanswered, not time since the last message, so
+  timer jitter cannot turn a prompt answer into a miss, and `misses: 1` is usable. A tick taken
+  while this end's own pipe reports a backlog (`bufferedAmount > 0`, as `messageTargetOverStream`
+  does) is not counted: a ping stuck behind this end's own upload has not reached the peer.
+- **Who is held to it.** Every current mux answers pings, whether or not it sets `keepalive`, so
+  one end is enough, and the two ends' intervals need not match. An older peer never answers and
+  is never closed for it. Nor is a peer that dies before its first answer: wire `signal` as well
+  where the transport can report death.
+- **What it does not catch.** A peer that keeps sending but stopped consuming is alive by this
+  measure; the window (`window`) is what bounds that.
+- **Wire.** `ping` and `pong` are envelopes of their own, sent on the largest safe integer id,
+  which no port takes. An older mux whose codec passes unknown envelopes through reads them as a
+  close of that id, and so closes nothing. The bundled codecs of older versions drop them.
+
+The interval timer is `unref`'d in Node, so it never keeps a process alive. `intervalMs` must be in
+(0, 2³¹ − 1] (past that, timers fire at once) and `misses` a positive integer, or `multiplexPort`
+throws a `RangeError`.
 
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.

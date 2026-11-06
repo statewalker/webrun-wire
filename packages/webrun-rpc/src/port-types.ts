@@ -15,7 +15,7 @@ export type PortEnvelope =
   | { type: "credit"; id: number; bytes: number; exact?: boolean }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
-  /** Keepalive (`keepalive`): the mux's own liveness probe and its answer; `id` is 0. */
+  /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */
   | { type: "ping"; id: number }
   | { type: "pong"; id: number };
 
@@ -124,14 +124,15 @@ export interface PortMuxOptions {
    */
   frameSize?: number;
   /**
-   * Liveness of the peer (off when unset). Every `intervalMs` the mux pings;
-   * the peer answers, and any message from it counts as an answer. After
-   * `misses` intervals (default 3) with nothing from a peer that has answered
+   * Liveness of the peer (off when unset). Every `intervalMs` the mux pings
+   * and the peer answers; anything from it counts as an answer. After `misses`
+   * pings in a row (default 3) with nothing back from a peer that has answered
    * before, the mux closes with `webrun-rpc: the peer did not answer …`: the
-   * peer died, froze, or stopped reading. A peer that has never answered or
-   * pinged — one without keepalive — is never closed for it, so enable it on
-   * both ends. The ends' intervals need not match: each answers the other's
-   * pings.
+   * peer died or froze. A tick taken while this end's own pipe reports a
+   * backlog (`bufferedAmount`) is not counted. Every current mux answers pings,
+   * with or without this option; an older one never does and is never closed
+   * for it — nor is a peer that dies before its first answer, so wire
+   * `signal` too where the transport can report death.
    */
   keepalive?: { intervalMs: number; misses?: number };
 }

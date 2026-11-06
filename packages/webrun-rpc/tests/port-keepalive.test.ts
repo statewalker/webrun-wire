@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getPortCloseSignal } from "../src/close-signal.js";
+import type { MessageTarget } from "../src/message-target.js";
 import { multiplexPort } from "../src/multiplex-port.js";
 import type { PortCodec, PortMux, PortMuxOptions } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
@@ -127,5 +128,98 @@ describe("keepalive", () => {
     expect(() =>
       multiplexPort(ch.port1, { codec: structuredCodec, keepalive: { intervalMs: 0 } }),
     ).toThrow(RangeError);
+  });
+
+  it("misses: 1 keeps a live peer, and closes a silent one after one interval", async () => {
+    const peer = silenceable();
+    const one = { intervalMs: 30, misses: 1 };
+    const { a } = pair({ keepalive: one }, { keepalive: one, codec: peer.codec });
+    const port = await a.openPort();
+    await sleep(one.intervalMs * 8);
+    const signal = getPortCloseSignal(port);
+    expect(signal?.aborted).toBe(false);
+    peer.state.silent = true;
+    await new Promise((r) => signal?.addEventListener("abort", r, { once: true }));
+  });
+
+  it("closes no sooner than interval × misses after the last thing the peer sent", async () => {
+    const peer = silenceable();
+    const slow = { intervalMs: 50, misses: 3 };
+    const { a } = pair({ keepalive: slow }, { keepalive: slow, codec: peer.codec });
+    const port = await a.openPort();
+    await sleep(120);
+    peer.state.silent = true;
+    const silentSince = Date.now();
+    const signal = getPortCloseSignal(port);
+    await new Promise((r) => signal?.addEventListener("abort", r, { once: true }));
+    expect(Date.now() - silentSince).toBeGreaterThanOrEqual(slow.intervalMs * slow.misses - 10);
+  });
+
+  it("its own unsent backlog is not the peer's silence", async () => {
+    // This end's transport still holds bytes: its pings have not left yet.
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    const backlogged = Object.assign(ch.port1, { bufferedAmount: 1 });
+    const peer = silenceable();
+    const a = multiplexPort(backlogged, { codec: structuredCodec, keepalive });
+    const b = multiplexPort(ch.port2, {
+      codec: peer.codec,
+      side: "responder",
+      onPort: () => true,
+      keepalive,
+    });
+    muxes.push(a, b);
+    const port = await a.openPort();
+    await sleep(60);
+    peer.state.silent = true;
+    await sleep(keepalive.intervalMs * keepalive.misses * 4);
+    expect(getPortCloseSignal(port)?.aborted).toBe(false);
+  });
+
+  it("a ping does not close port 0 on an older mux that takes unknown envelopes for close", async () => {
+    // An older mux treats every type it does not know as a close of that id.
+    const olderMux: PortCodec = {
+      post: (port, envelope, transfer) => structuredCodec.post(port, envelope, transfer),
+      read: (e) => {
+        const envelope = structuredCodec.read(e);
+        return envelope?.type === ("ping" as string) || envelope?.type === ("pong" as string)
+          ? { type: "close", id: envelope.id }
+          : envelope;
+      },
+    };
+    let accepted: MessageTarget | undefined;
+    const { a } = pair(
+      { keepalive },
+      {
+        codec: olderMux,
+        onPort: (p) => {
+          accepted = p;
+          return true;
+        },
+      },
+    );
+    const port = await a.openPort(); // id 0, the initiator's first port
+    port.postMessage("hello");
+    await sleep(keepalive.intervalMs * 4);
+    expect(accepted && getPortCloseSignal(accepted)?.aborted).toBe(false);
+  });
+
+  it("an interval past what timers can hold is a RangeError", () => {
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    expect(() =>
+      multiplexPort(ch.port1, { codec: structuredCodec, keepalive: { intervalMs: 2 ** 31 } }),
+    ).toThrow(RangeError);
+  });
+
+  it("one end is enough: a current peer without the option still answers, so its silence is caught", async () => {
+    const peer = silenceable();
+    const { a } = pair({ keepalive }, { codec: peer.codec });
+    const port = await a.openPort();
+    await sleep(keepalive.intervalMs * keepalive.misses * 3);
+    const signal = getPortCloseSignal(port);
+    expect(signal?.aborted).toBe(false);
+    peer.state.silent = true;
+    await new Promise((r) => signal?.addEventListener("abort", r, { once: true }));
   });
 });

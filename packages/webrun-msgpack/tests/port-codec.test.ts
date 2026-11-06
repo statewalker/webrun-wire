@@ -51,8 +51,10 @@ describe("msgpackCodec — round trip", () => {
   });
 
   it("carries the keepalive ping and pong", () => {
-    expect(roundTrip({ type: "ping", id: 0 })).toEqual({ type: "ping", id: 0 });
-    expect(roundTrip({ type: "pong", id: 0 })).toEqual({ type: "pong", id: 0 });
+    // The mux sends them with an id no port takes: the largest safe integer.
+    const id = Number.MAX_SAFE_INTEGER;
+    expect(roundTrip({ type: "ping", id })).toEqual({ type: "ping", id });
+    expect(roundTrip({ type: "pong", id })).toEqual({ type: "pong", id });
   });
 
   it("carries a Uint8Array payload byte-for-byte", () => {
