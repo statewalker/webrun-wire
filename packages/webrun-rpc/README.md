@@ -335,12 +335,20 @@ wedged. A message larger than the window is sent once nothing else is outstandin
 **Older peers.** A peer from before the window reads `window` in an `open` but never sends
 credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
 other has shown it reads credit: the responder acknowledges the window with a zero-byte `credit`
-as soon as it accepts the port, and the opener answers that ack with one of its own. Until then
+before `onPort` runs (so what `onPort` posts reaches the opener after it, counted the same way on
+both ends), and the opener answers that ack with one of its own. Until then
 each end counts bytes but holds nothing back, so a port to an older peer, or over an older codec,
 keeps running without flow control, as it always did; `ports()` reports `window` only once it is
-in force. A port closed while its queue still drains keeps crediting what the peer sends, so two
-ends that both close with full queues still drain and close. A peer's `window` that is not a
-positive integer is ignored. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
+in force. A peer's `window` that is not a positive integer is ignored.
+
+**Closing does not wait for credit.** A port closed with messages still queued sends them at once,
+then its close, regardless of the window: a peer that stopped returning credit (a listener that
+never settles) must still learn the port is closed, and nothing is kept for a port nobody holds.
+A message that has to wait in the queue is copied when posted (`structuredClone`, or encoded at
+once by a byte codec), as `postMessage` copies at once, so a caller reusing its buffer does not
+change what is sent. `listenPort` counts a request as consumed when it reaches its handler, not
+when the handler finishes, so a handler waiting on a later call on the same port does not hold
+the window that call needs. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
 throughput.
 
 ### Large messages take turns with small ones
