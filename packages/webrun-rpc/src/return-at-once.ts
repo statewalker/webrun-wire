@@ -1,3 +1,5 @@
+import { asyncDisposable } from "./async-dispose.js";
+
 /**
  * `gen`, except that `return()` and `throw()` take effect at once.
  *
@@ -44,5 +46,6 @@ export function returningAtOnce<T>(
       return wrapped;
     },
   };
-  return wrapped;
+  // `await using` ends the stream as leaving a `for await` early does.
+  return asyncDisposable(wrapped, () => wrapped.return(undefined));
 }

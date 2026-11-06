@@ -126,4 +126,32 @@ describe("return() while a next() is pending", () => {
     for await (const c of call([])) chunks.push(c);
     expect(opened).toBe(1);
   });
+  it("Symbol.asyncDispose ends the stream as return() does (`await using`)", async () => {
+    const asyncDispose = (Symbol as { asyncDispose?: symbol }).asyncDispose;
+    if (!asyncDispose) return; // a runtime without explicit resource management
+    const channel = new MessageChannel();
+    const state = { started: 0, ended: 0 };
+    const stop = await serve(
+      { mux: overPipe(channel.port2, { codec: structuredCodec, side: "responder", maxPorts: 2 }) },
+      silent(state),
+    );
+    const { call, close } = await connect({
+      mux: overPipe(channel.port1, { codec: structuredCodec, side: "initiator", maxPorts: 2 }),
+    });
+    closers.push(
+      close,
+      stop,
+      () => channel.port1.close(),
+      () => channel.port2.close(),
+    );
+    for (let i = 0; i < 5; i++) {
+      const stream = call([new Uint8Array([i])]) as AsyncGenerator<Uint8Array> &
+        Record<symbol, () => Promise<void>>;
+      const pending = stream.next();
+      for (let k = 0; k < 100 && state.started <= i; k++) await tick(2);
+      await stream[asyncDispose]();
+      expect(await pending).toEqual({ done: true, value: undefined });
+    }
+    expect(state.started).toBe(5);
+  });
 });

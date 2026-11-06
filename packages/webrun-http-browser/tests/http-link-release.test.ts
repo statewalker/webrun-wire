@@ -475,4 +475,13 @@ describe("a link gives every request's port back", () => {
     }
     expect(link.inflight).toBe(0);
   });
+  it("Symbol.asyncDispose closes the link (`await using`)", async () => {
+    const asyncDispose = (Symbol as { asyncDispose?: symbol }).asyncDispose;
+    if (!asyncDispose) return; // a runtime without explicit resource management
+    const { link } = await linked(async () => new Response("ok"));
+    expect(await (await link.send(new Request("http://x/"))).text()).toBe("ok");
+    await (link as unknown as Record<symbol, () => Promise<void>>)[asyncDispose]();
+    expect(link.closed).toBe(true);
+    await expect(link.send(new Request("http://x/"))).rejects.toThrow(/closed/);
+  });
 });

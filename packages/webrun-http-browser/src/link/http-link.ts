@@ -1,5 +1,6 @@
 import { fetchOverDuplex, serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
 import { connect, overPipe, serve, structuredCodec } from "@statewalker/webrun-rpc";
+import { asyncDisposable } from "./async-dispose.js";
 
 /**
  * The version of the HTTP-over-`MessagePort` protocol this package speaks,
@@ -198,7 +199,8 @@ export function trackedLink(
       } catch {}
     },
   };
-  return link;
+  // `await using link = await connectHttpLink(port)` closes it at the end of the block.
+  return asyncDisposable(link, () => link.close());
 }
 
 /**

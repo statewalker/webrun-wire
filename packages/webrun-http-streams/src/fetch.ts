@@ -1,4 +1,5 @@
 import type { Duplex } from "@statewalker/webrun-streams";
+import { asyncDisposable } from "./async-dispose.js";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { NULL_BODY_STATUSES } from "./http-stubs.js";
@@ -299,6 +300,7 @@ function trackingEnd(source: AsyncIterable<Uint8Array>): {
       return { done: true, value: undefined };
     },
   };
+  asyncDisposable(tracked, () => tracked.return?.() ?? Promise.resolve());
   const settle = (idleMs: number): Promise<void> => {
     if (isEnded || !Number.isFinite(idleMs)) return ended;
     return new Promise<void>((resolve) => {
