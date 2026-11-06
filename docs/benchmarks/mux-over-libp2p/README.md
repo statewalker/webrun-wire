@@ -72,7 +72,7 @@ How the window trades latency against bulk throughput (scenario 1, B3, 2 process
 
 - **Per-port credit removes head-of-line blocking and unbounded buffering.** A slow or stalled channel costs the others nothing, and memory stays flat. Under load, latency is 20× better than one stream per channel (p50 2.9 against 57 ms).
 - **The window is a knob.** 256 KiB favours latency. 4 MiB brings bulk throughput above A's (275–305 against 253 MB/s) with pings still about 5× better.
-- **Small messages: B3 matches raw ports, about 70–80% of A.** The gap is the same without credit (B1), so it comes from one shared stream plus per-message framing, not from the window.
+- **Small messages: B3 matches raw ports, at 65–82% of A (K = 1–100).** The gap is the same without credit (B1), so it comes from one shared stream plus per-message framing, not from the window.
 - **A (httpeers today) has no end-to-end backpressure either.** libp2p's stream iterator buffers without limit, and a dead peer hangs or silently ends its calls (statewalker/webrun-wire#40).
 
 ## Caveats
