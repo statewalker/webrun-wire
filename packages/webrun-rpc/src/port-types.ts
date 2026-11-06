@@ -3,9 +3,10 @@ import type { MessageTarget } from "./message-target.js";
 /**
  * What a multiplexer exchanges over the underlying port.
  *
- * Three types and nothing more. There is no DATA/ACK split, no credit and no
- * error type: `close` carries an opaque `reason` that layer 1 never inspects,
- * because stream semantics belong above this layer.
+ * `open`, `message` and `close`, plus `credit` (a port's window) and `frame`
+ * (a piece of a large message, with `frameSize`). There is no DATA/ACK split
+ * and no error type: `close` carries an opaque `reason` that layer 1 never
+ * inspects, because stream semantics belong above this layer.
  */
 export type PortEnvelope =
   | { type: "open"; id: number; meta?: unknown; window?: number; exact?: boolean }

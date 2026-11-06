@@ -182,10 +182,27 @@ jobs:
           path: packages
 
       # Skips a version already on npm: a first version published by hand while this job waited
-      # for approval, or what an earlier attempt of a re-run job published.
+      # for approval, or what an earlier attempt of a re-run job published. Publishes in dependency
+      # order, so a package never reaches npm before a new version it depends on.
       - name: Publish
         run: |
-          for t in packages/*.tgz; do
+          order=$(node -e '
+            const { execFileSync } = require("node:child_process");
+            const files = process.argv.slice(1);
+            const pkg = new Map(files.map((f) => [f, JSON.parse(execFileSync("tar", ["-xzOf", f, "package/package.json"]))]));
+            const byName = new Map([...pkg].map(([f, p]) => [p.name, f]));
+            const out = [], seen = new Set();
+            const visit = (f) => {
+              if (seen.has(f)) return;
+              seen.add(f);
+              const p = pkg.get(f);
+              for (const d of Object.keys({ ...p.dependencies, ...p.peerDependencies })) if (byName.has(d)) visit(byName.get(d));
+              out.push(f);
+            };
+            files.forEach(visit);
+            console.log(out.join("\n"));
+          ' packages/*.tgz)
+          for t in $order; do
             id=$(tar -xzOf "$t" package/package.json | node -p "const p=JSON.parse(require('fs').readFileSync(0));p.name+'@'+p.version")
             if npm view "$id" version >/dev/null 2>&1; then echo "$id: already on npm"; continue; fi
             npm publish "./$t" --provenance --access public
