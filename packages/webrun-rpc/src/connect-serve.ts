@@ -201,6 +201,8 @@ export interface OverPipeOptions {
   window?: number;
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
   frameSize?: number;
+  /** Liveness of the peer by ping/pong — see `PortMuxOptions.keepalive`. */
+  keepalive?: { intervalMs: number; misses?: number };
 }
 
 /**

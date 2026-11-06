@@ -50,6 +50,11 @@ describe("msgpackCodec — round trip", () => {
     });
   });
 
+  it("carries the keepalive ping and pong", () => {
+    expect(roundTrip({ type: "ping", id: 0 })).toEqual({ type: "ping", id: 0 });
+    expect(roundTrip({ type: "pong", id: 0 })).toEqual({ type: "pong", id: 0 });
+  });
+
   it("carries a Uint8Array payload byte-for-byte", () => {
     const value = new Uint8Array([0, 1, 127, 128, 255]);
     const out = roundTrip({

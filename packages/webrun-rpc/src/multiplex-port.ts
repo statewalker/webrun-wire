@@ -60,7 +60,22 @@ export function multiplexPort(
     signal,
     window,
     frameSize,
+    keepalive,
   } = options;
+  const misses = keepalive?.misses ?? 3;
+  if (
+    keepalive &&
+    !(
+      Number.isFinite(keepalive.intervalMs) &&
+      keepalive.intervalMs > 0 &&
+      Number.isSafeInteger(misses) &&
+      misses > 0
+    )
+  ) {
+    throw new RangeError(
+      "webrun-rpc: keepalive needs a positive intervalMs and a positive integer misses",
+    );
+  }
   // A frame of no bytes would never advance the split: refuse it here.
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
     throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
@@ -350,6 +365,13 @@ export function multiplexPort(
 
   const handleEnvelope = (envelope: PortEnvelope, event: MessageEvent): void => {
     if (muxClosed) return;
+    // Anything from the peer shows it is alive and reading.
+    silentTicks = 0;
+    if (envelope.type === "ping" || envelope.type === "pong") {
+      peerKeepsAlive = true;
+      if (envelope.type === "ping") post({ type: "pong", id: 0 });
+      return;
+    }
 
     if (envelope.type === "open") {
       // A duplicate id is a peer bug; ignoring it is safer than replacing a
@@ -467,8 +489,30 @@ export function multiplexPort(
     if (envelope) handleEnvelope(envelope, event);
   };
 
+  // KEEPALIVE: a MessagePort reports neither death nor a peer that stopped
+  // reading, so the mux probes. It holds a peer to it only once that peer has
+  // answered (or pinged), so an end without keepalive is never closed for it.
+  let peerKeepsAlive = false;
+  let silentTicks = 0;
+  const pinger = keepalive
+    ? setInterval(() => {
+        if (peerKeepsAlive && ++silentTicks >= misses) {
+          close(
+            new Error(
+              `webrun-rpc: the peer did not answer for ${misses} keepalive intervals of ${keepalive.intervalMs} ms`,
+            ),
+          ).catch(() => {});
+          return;
+        }
+        post({ type: "ping", id: 0 });
+      }, keepalive.intervalMs)
+    : undefined;
+  // A probe must not keep a Node process alive on its own.
+  (pinger as { unref?: () => void } | undefined)?.unref?.();
+
   const close = async (reason?: unknown): Promise<void> => {
     if (muxClosed) return;
+    clearInterval(pinger);
     // Closed BEFORE the ports: `markClosed` runs their close-signal listeners
     // synchronously, and one that reopens (reconnect logic) must be refused
     // rather than add a port after the snapshot below, which nothing would

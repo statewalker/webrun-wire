@@ -14,7 +14,10 @@ export type PortEnvelope =
   /** Per-port flow control (`window`): the receiver has consumed `bytes` more. */
   | { type: "credit"; id: number; bytes: number; exact?: boolean }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
-  | { type: "frame"; id: number; data: Uint8Array; last?: boolean };
+  | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
+  /** Keepalive (`keepalive`): the mux's own liveness probe and its answer; `id` is 0. */
+  | { type: "ping"; id: number }
+  | { type: "pong"; id: number };
 
 /**
  * How an envelope reaches the wire.
@@ -120,6 +123,17 @@ export interface PortMuxOptions {
    * whole. 16-64 KiB is a reasonable range.
    */
   frameSize?: number;
+  /**
+   * Liveness of the peer (off when unset). Every `intervalMs` the mux pings;
+   * the peer answers, and any message from it counts as an answer. After
+   * `misses` intervals (default 3) with nothing from a peer that has answered
+   * before, the mux closes with `webrun-rpc: the peer did not answer …`: the
+   * peer died, froze, or stopped reading. A peer that has never answered or
+   * pinged — one without keepalive — is never closed for it, so enable it on
+   * both ends. The ends' intervals need not match: each answers the other's
+   * pings.
+   */
+  keepalive?: { intervalMs: number; misses?: number };
 }
 
 /** What `PortMux.ports()` reports for one open port. */

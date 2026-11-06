@@ -298,6 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
+| `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux when a peer that answered before goes silent. See "A port lives until its transport or its user lets go" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -381,9 +382,10 @@ peer is ignored rather than replacing a live port, and a local `openPort` skips 
 already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta?, window?, exact? }`, `{ type: "message", id, payload }`,
-`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, exact? }`, and with
-`frameSize` `{ type: "frame", id, data, last? }`. The codecs' `read` accept only objects with a
-non-negative integer `id` and one of those five types, so other traffic on a shared port is
+`{ type: "close", id, reason? }`, with a window `{ type: "credit", id, bytes, exact? }`, with
+`frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id: 0 }` /
+`{ type: "pong", id: 0 }`. The codecs' `read` accept only objects with a non-negative integer `id`
+and one of those seven types, so other traffic on a shared port is
 ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
@@ -407,6 +409,20 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
   `using port = (await mux.openPort()) as MessageTarget & Disposable` closes it on scope exit. The
   cast is needed because the declared type leaves `Symbol.dispose` out: naming it would require
   every consumer to compile with the `esnext.disposable` lib.
+
+**When nothing reports the death, `keepalive` probes for it.** With
+`keepalive: { intervalMs: 5000, misses: 3 }` the mux pings every 5 s, the peer answers, and
+anything the peer sends counts as an answer. After 3 intervals with nothing from a peer that has
+answered before, the mux closes with `webrun-rpc: the peer did not answer for 3 keepalive
+intervals of 5000 ms`, as if `signal` had aborted. That catches what no transport event does: a
+realm that died with no lock to tell, a frozen one, and a live peer that stopped reading. It
+cannot tell a peer whose event loop is blocked longer than `intervalMs × misses` from a dead one,
+so size the product above the longest pause you expect. The probe needs both ends: a peer that has
+never pinged or answered (an older one, or one without `keepalive`) is never closed for it, so a
+one-sided setting runs as before. The two ends' intervals need not match, because each answers
+the other's pings. `ping` and `pong` are envelopes of their own (`id` 0); older codecs drop them.
+The interval timer is `unref`'d in Node, so it never keeps a process alive. `intervalMs` must be a
+positive number and `misses` a positive integer, or `multiplexPort` throws a `RangeError`.
 
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.
