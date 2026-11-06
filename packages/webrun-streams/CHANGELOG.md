@@ -1,5 +1,11 @@
 # @statewalker/webrun-streams
 
+## 0.2.3
+
+### Patch Changes
+
+- a7d06aa: Module-level constants (text encoders, the close-signal table) are annotated pure, so bundlers drop them with the code that uses them.
+
 ## 0.2.2
 
 ### Patch Changes

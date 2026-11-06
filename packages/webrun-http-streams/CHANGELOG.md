@@ -1,5 +1,19 @@
 # @statewalker/webrun-http-streams
 
+## 0.3.1
+
+### Patch Changes
+
+- a7d06aa: `httpFetch` (and so `fetchOverDuplex`) ends its call however the exchange ends. A response body read to its end left the call open, and on a multiplexed transport (webrun-rpc's `connect`) that kept one port per exchange: every GET or POST over one link held a port for good, and the link refused calls with `webrun-rpc: maxPorts (1024) reached` after 1024 of them.
+  
+  - A body read to its end, or a response with none (HEAD, 204, 304...), now reads the call to its end in the background (`HttpFetchResult.finish()`): the peer ends the call once its side of the exchange is over. A body left early abandons the call, as before, and so does an abort of the request's signal while the call is being read to its end. Against a peer that never ends a call (a socket that never reaches EOF), that abort is what ends it.
+  - On the serving side, `serveFetchOverDuplex` ends its side once the response is out and the handler is done with the request body: a handler that answers first (`202`) and reads the upload afterwards gets all of it, as long as it keeps reading; a body it never took is cancelled, and one it took and stopped reading (a reader dropped, a clone nobody reads) is abandoned once nothing asked it for a chunk for `requestIdleMs` (a new option, default 30 s), its later reads failing. The time a handler spends on one chunk before it asks for the next counts as idle: one that pauses longer between reads needs a larger `requestIdleMs`. `HttpDataHandlerResult` takes the hook for that, `settled`; `release` is called only for a response abandoned before its end.
+  - The call also ends when the response cannot be decoded, and when the request's signal aborts while the head is awaited: the exchange rejects with the signal's reason at once (it used to wait for the head). `HttpDataOptions` takes that `signal`.
+  
+  The module-level codec and constants are annotated pure, so a bundle that does not use the HTTP codec drops it.
+- Updated dependencies [a7d06aa]
+  - @statewalker/webrun-streams@0.2.3
+
 ## 0.3.0
 
 ### Minor Changes

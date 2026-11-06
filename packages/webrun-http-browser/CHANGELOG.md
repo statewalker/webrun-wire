@@ -1,5 +1,21 @@
 # @statewalker/webrun-http-browser
 
+## 0.7.1
+
+### Patch Changes
+
+- b224431: Ready for `await using` where the runtime has `Symbol.asyncDispose`: `connect`'s calls and `duplexOverPort`'s caller streams dispose as `return()` (the stream ends at once, even with a `next()` pending), and an `HttpLink` disposes as `close()`. Native async generators get this from `AsyncIteratorPrototype` in runtimes that implement it; these hand-written iterators carry it themselves. Installed at run time only, and kept off the declared types, which would otherwise require the `esnext.disposable` lib.
+- a7d06aa: HTTP links (`connectHttpLink` / `serveHttpLink`, so the same-origin dispatcher's links to handlers, workers' links through it, and the relay's) give every request's multiplexed port back when its exchange ends, with webrun-http-streams' and webrun-rpc's fixes bundled in. Before, each GET or POST whose response was read to its end kept its port, an aborted request to a handler that never answered kept its port, and a link stopped taking requests after 1024 of them. An exchange ends when the response is over and the handler is done with the request body (it may answer first and read the upload afterwards). `HttpLinkOptions` takes `maxPorts`, the ceiling on requests in flight on a link at once (default 1024), and, for the answering end, `requestIdleMs`: how long a request body may sit unread after the response before the exchange is ended (default 30 s).
+  
+  The bundles no longer carry the HTTP stack into code that does not use it: a page that imports only the WebSocket client (`createWebSocketClass`) bundles about 8 KB of it instead of 20 KB, the server end (`upgradeWebSocket`, `ServerWebSocket`) about 6 KB instead of 18 KB.
+- Updated dependencies [b224431]
+- Updated dependencies [a7d06aa]
+- Updated dependencies [a7d06aa]
+- Updated dependencies [839e6f7]
+  - @statewalker/webrun-rpc@0.5.1
+  - @statewalker/webrun-http-streams@0.3.1
+  - @statewalker/webrun-streams@0.2.3
+
 ## 0.7.0
 
 ### Minor Changes
