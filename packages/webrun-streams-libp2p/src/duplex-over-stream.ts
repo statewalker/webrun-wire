@@ -138,8 +138,10 @@ export async function* duplexOverStream(
   // connection dies (a killed process, a dropped network), libp2p closes the
   // stream WITHOUT an error and its iterator ends exactly as it does after the
   // peer's close — so a truncated response read as a complete one. Listened
-  // for before the first pull below, like the iterator's own listener.
-  let peerClosedWrite = false;
+  // for before the first pull below, like the iterator's own listener. A
+  // generator's body runs only on the consumer's first `next()`, so the peer
+  // may have closed already; its state is read for that case.
+  let peerClosedWrite = stream.remoteWriteStatus === "closed";
   let closeError: unknown;
   let onStreamClosed!: () => void;
   const streamClosed = new Promise<void>((resolve) => {
@@ -208,14 +210,24 @@ export async function* duplexOverStream(
     // subscribe is lost and this loop would never end. Every current path from
     // dialProtocol/onStream to here is microtask-only, so a socket FIN cannot
     // interleave. Inserting an await above would break that.
-    for await (const frame of parseFrames(stream)) {
-      if (frame.type === TYPE_DATA) {
-        yield frame.payload;
-      } else if (frame.type === TYPE_ERROR) {
-        const err = decodeError(frame.payload);
-        firePeerInputEnd(err);
-        throw err;
+    let peerError: Error | undefined;
+    try {
+      for await (const frame of parseFrames(stream)) {
+        if (frame.type === TYPE_DATA) {
+          yield frame.payload;
+        } else if (frame.type === TYPE_ERROR) {
+          peerError = decodeError(frame.payload);
+          firePeerInputEnd(peerError);
+          throw peerError;
+        }
       }
+    } catch (err) {
+      if (err === peerError) throw err;
+      // The stream itself failed (reset, aborted, its connection dropped):
+      // the call did not finish, whatever libp2p named the error.
+      const gone = new PeerGoneError(err);
+      firePeerInputEnd(gone);
+      throw gone;
     }
     if (!peerClosedWrite) {
       const gone = new PeerGoneError(closeError);
