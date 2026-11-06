@@ -21,7 +21,12 @@ export * from "./io-send.js";
 export * from "./listen-bidi.js";
 export * from "./listen-port.js";
 export * from "./message-target.js";
-export { DEFAULT_MAX_PORTS, MUX_CLOSED_MESSAGE, multiplexPort } from "./multiplex-port.js";
+export {
+  DEFAULT_MAX_PORTS,
+  DEFAULT_MAX_REASSEMBLED_BYTES,
+  MUX_CLOSED_MESSAGE,
+  multiplexPort,
+} from "./multiplex-port.js";
 export { type PortSendState, portBufferedAmount, whenPortReady } from "./port-credit.js";
 export type {
   OpenPortOptions,

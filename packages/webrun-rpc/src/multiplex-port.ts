@@ -29,6 +29,9 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
 export const DEFAULT_MAX_PORTS = 1024;
 
+/** Default ceiling on one message reassembled from frames (`maxReassembledBytes`). */
+export const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
+
 /**
  * What a message costs a port's window when the codec cannot say
  * (`PortCodec.encode`): its bytes and string lengths, found in its values up
@@ -70,6 +73,7 @@ export function multiplexPort(
     signal,
     window,
     frameSize,
+    maxReassembledBytes = DEFAULT_MAX_REASSEMBLED_BYTES,
     keepalive,
     onLeak,
   } = options;
@@ -91,6 +95,11 @@ export function multiplexPort(
   // A frame of no bytes would never advance the split: refuse it here.
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
     throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
+  }
+  if (!(Number.isSafeInteger(maxReassembledBytes) && maxReassembledBytes > 0)) {
+    throw new RangeError(
+      `webrun-rpc: maxReassembledBytes must be a positive integer, got ${maxReassembledBytes}`,
+    );
   }
 
   /**
@@ -138,8 +147,12 @@ export function multiplexPort(
   interface Entry extends PortInfo {
     handle: PortRecord;
     credit?: Credit;
-    /** The frames of a message still arriving. */
-    partial?: { chunks: Uint8Array[]; bytes: number };
+    /**
+     * The frames of a message still arriving, and what this side had not yet
+     * granted back when the first one came (`budget`: the window minus that,
+     * or the cap alone when nothing was owed).
+     */
+    partial?: { chunks: Uint8Array[]; bytes: number; budget: number };
   }
   const open = new Map<number, Entry>();
   // A port collected while still open: report it, then free its slot on both
@@ -520,14 +533,37 @@ export function multiplexPort(
 
     if (envelope.type === "frame") {
       // Only where this end advertised exact sizing — the one place a peer may
-      // frame. A frame sequence buffers no more than the same message sent
-      // whole, which a byte transport would also have to hold entire.
+      // frame. What a partial message may hold is bounded below, so frames
+      // that never end cannot make this side buffer without limit.
       if (!entry?.credit?.exact || !codec.decode || !(envelope.data instanceof Uint8Array)) return;
       touch(envelope.id);
-      const partial = entry.partial ?? { chunks: [], bytes: 0 };
+      const c = entry.credit;
+      // What is still owed back is a floor under what the sender counts as
+      // outstanding, so an honest sender keeps owed + message within the window,
+      // or starts a larger message with nothing owed (it then has the cap).
+      const owed = c.unconsumed + c.toGrant;
+      const partial = entry.partial ?? {
+        chunks: [],
+        bytes: 0,
+        budget: owed > 0 ? Math.min(c.window - owed, maxReassembledBytes) : maxReassembledBytes,
+      };
       entry.partial = partial;
-      partial.chunks.push(envelope.data);
       partial.bytes += envelope.data.byteLength;
+      if (partial.bytes > partial.budget) {
+        // A peer that frames past what it may send: hold none of it.
+        entry.partial = undefined;
+        dropOutgoing(envelope.id);
+        open.delete(envelope.id);
+        releaseWaiters(c);
+        entry.handle.markClosed(
+          new RangeError(
+            `webrun-rpc: a framed message passed ${partial.budget} bytes (the window ${c.window} or maxReassembledBytes ${maxReassembledBytes})`,
+          ),
+        );
+        post({ type: "close", id: envelope.id, reason: "max-reassembled-bytes" });
+        return;
+      }
+      partial.chunks.push(envelope.data);
       if (!envelope.last) return;
       entry.partial = undefined;
       const whole = new Uint8Array(partial.bytes);

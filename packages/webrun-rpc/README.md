@@ -298,6 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
+| `maxReassembledBytes` | Ceiling on one message reassembled from the peer's frames, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what the port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
 | `onLeak` | Development aid, off when unset: called with a port's `PortInfo` when its consumer dropped it without `close()`, and the port is freed. See "A port lives until its transport or its user lets go" below. |
 
@@ -374,10 +375,22 @@ frames of messages posted together interleave.
 It also needs `window` and byte codecs (`encode` / `decode`) on both ends. A side frames only on a
 port whose window is in force with exact sizes agreed (`exact: true` in the `open` and in its
 acknowledgement), and accepts frames only there; a frame anywhere else is dropped. An older peer,
-or one whose codec cannot decode, gets whole messages. A frame sequence buffers no more than the
-same message sent whole would. If the pipe's `whenDrained()` rejects, the mux closes with that
+or one whose codec cannot decode, gets whole messages. If the pipe's `whenDrained()` rejects, the mux closes with that
 error, so the ports waiting behind it fail instead of hanging. 16-64 KiB frames cost one small envelope each (about 15 bytes with
 `msgpackCodec`).
+
+**A peer cannot make this side hold frames without limit.** A partial message is counted against
+the port's window as it arrives: an honest sender keeps what is owed back plus the message within
+the window, or starts a larger message only when nothing is owed, and then it may grow up to
+`maxReassembledBytes` (64 MiB by default). A peer that frames past either limit gets its port
+closed: the partial message is dropped, the port's close signal aborts with a `RangeError`
+("webrun-rpc: a framed message passed … bytes"), and the peer receives a `close` with reason
+`"max-reassembled-bytes"`. Set `maxReassembledBytes` above the largest message the peer
+legitimately sends; a message just past it looks like a closed port, not a lost message.
+
+Frames carry no sequence number. Reassembly relies on what every `MessageTarget` already
+promises: an ordered, reliable pipe. Each port's frames leave from its own queue in order, and
+other ports' frames interleave but are told apart by port id.
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
 peer to accept. That keeps layer 1 free of round trips: messages posted before a rejection are

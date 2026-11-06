@@ -69,7 +69,7 @@ interface Arrival {
 }
 
 function pair(
-  options: { frameSize?: number; window?: number },
+  options: { frameSize?: number; window?: number; maxReassembledBytes?: number },
   responderCodec: PortCodec = msgpackCodec,
 ) {
   const channel = new MessageChannel();
@@ -88,6 +88,7 @@ function pair(
     codec: responderCodec,
     side: "responder",
     frameSize: options.frameSize,
+    maxReassembledBytes: options.maxReassembledBytes,
     onPort: (port, meta) => {
       port.addEventListener("message", (e) => {
         arrivals.push({ port: String(meta), data: e.data as Uint8Array });
@@ -255,6 +256,84 @@ describe("review fixes (#48)", () => {
   });
 });
 
+describe("a message reassembled from frames is bounded (#50)", () => {
+  /**
+   * A responder mux, and a raw peer on the other end that opens port 0 with an
+   * exact-sized window and then posts whatever envelopes the test chooses.
+   * `hold` makes the responder's listener never settle, so what it delivered
+   * stays uncredited.
+   */
+  async function hostile(options: {
+    window: number;
+    maxReassembledBytes?: number;
+    hold?: boolean;
+  }) {
+    const channel = new MessageChannel();
+    cleanups.push(() => {
+      channel.port1.close();
+      channel.port2.close();
+    });
+    const got: unknown[] = [];
+    const b = multiplexPort(channel.port2, {
+      codec: msgpackCodec,
+      side: "responder",
+      maxReassembledBytes: options.maxReassembledBytes,
+      onPort: (p) => {
+        p.addEventListener("message", (e) => {
+          got.push(e.data);
+          return options.hold ? new Promise<void>(() => {}) : undefined;
+        });
+        return true;
+      },
+    });
+    cleanups.push(() => b.close());
+    const closes: unknown[] = [];
+    channel.port1.addEventListener("message", (event) => {
+      const envelope = msgpackCodec.read(event);
+      if (envelope?.type === "close") closes.push(envelope.reason);
+    });
+    channel.port1.start();
+    const peer = (envelope: Parameters<typeof msgpackCodec.post>[1]) =>
+      msgpackCodec.post(channel.port1, envelope);
+    peer({ type: "open", id: 0, window: options.window, exact: true });
+    await waitFor(() => b.ports().length === 1, "the port opens");
+    return { b, got, closes, peer };
+  }
+
+  it("frames past maxReassembledBytes close the port and free what they held", async () => {
+    const { b, closes, peer } = await hostile({ window: 64 * KiB, maxReassembledBytes: 256 * KiB });
+    for (let i = 0; i < 5; i++) peer({ type: "frame", id: 0, data: pattern(64 * KiB, i) });
+    await waitFor(() => closes.length > 0, "the responder closes the port");
+    expect(closes).toEqual(["max-reassembled-bytes"]);
+    expect(b.ports()).toEqual([]);
+  });
+
+  it("frames past what the window leaves close the port, under the cap", async () => {
+    const { b, got, closes, peer } = await hostile({ window: 64 * KiB, hold: true });
+    peer({ type: "message", id: 0, payload: pattern(40 * KiB, 0) });
+    await waitFor(() => got.length === 1, "the held message arrives");
+    peer({ type: "frame", id: 0, data: pattern(16 * KiB, 1) });
+    peer({ type: "frame", id: 0, data: pattern(16 * KiB, 2) });
+    await waitFor(() => closes.length > 0, "the responder closes the port");
+    expect(closes).toEqual(["max-reassembled-bytes"]);
+    expect(b.ports()).toEqual([]);
+  });
+
+  it("a framed message larger than the window, just under the cap, arrives whole", async () => {
+    const { a, arrivals } = pair({
+      frameSize: 16 * KiB,
+      window: 64 * KiB,
+      maxReassembledBytes: 256 * KiB,
+    });
+    const port = await a.openPort("big");
+    await acknowledged(a, 1);
+    const data = pattern(240 * KiB, 7);
+    port.postMessage(data);
+    await waitFor(() => arrivals.length === 1, "the large message arrives");
+    expect(arrivals[0]?.data).toEqual(data);
+  });
+});
+
 describe("frameSize validation", () => {
   it.each([0, -1, 1.5, Number.NaN])(
     "refuses frameSize %s instead of hanging",
@@ -262,6 +341,9 @@ describe("frameSize validation", () => {
       const { port1, port2 } = new MessageChannel();
       try {
         expect(() => multiplexPort(port1, { codec: msgpackCodec, frameSize })).toThrow(RangeError);
+        expect(() =>
+          multiplexPort(port1, { codec: msgpackCodec, maxReassembledBytes: frameSize }),
+        ).toThrow(RangeError);
       } finally {
         port1.close();
         port2.close();
