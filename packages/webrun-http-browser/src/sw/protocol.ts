@@ -93,11 +93,12 @@ export const WORKER_HELLO = "webrun-http:worker-hello";
 export type WorkerControlMessage =
   // worker → page, once: the worker serves, and holds this owner lock.
   | { type: "ready"; ownerLock?: string }
-  // page → worker: a fresh link (ports: down, ctl, up).
-  | { type: "link"; key: string; routerLock?: string }
+  // page → worker: a fresh link (ports: down, ctl, up), numbered per control port.
+  | { type: "link"; key: string; routerLock?: string; seq?: number }
   // page → worker: drop the links of this key.
   | { type: "unlink"; key: string }
   // worker → page: my links are dead and a call waits; attach me again.
-  | { type: "relink" }
+  // `seen`: the `seq` of the last link received on this port (0: none yet).
+  | { type: "relink"; seen?: number }
   // worker → page: a call is in flight; keep the ServiceWorker awake.
   | { type: "keepalive" };
