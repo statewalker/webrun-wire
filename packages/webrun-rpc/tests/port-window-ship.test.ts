@@ -4,7 +4,7 @@ import { listenPort } from "../src/listen-port.js";
 import type { MessageTarget } from "../src/message-target.js";
 import { multiplexPort } from "../src/multiplex-port.js";
 import { whenPortReady } from "../src/port-credit.js";
-import type { PortCodec, PortMux } from "../src/port-types.js";
+import type { PortCodec, PortEnvelope, PortMux } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
 
 // What the window needs before it ships (#45): it must not stall against an
@@ -197,19 +197,22 @@ describe("review fixes (#47)", () => {
 
   it("ends that size messages differently fall back to the shared estimate instead of wedging", async () => {
     let got = 0;
-    const exact: PortCodec = {
-      ...structuredCodec,
-      prepare: (envelope, transfer) => ({
-        size: 3,
-        post: (port) => structuredCodec.post(port, envelope, transfer),
-      }),
-      size: () => 3,
+    // A byte codec (JSON) on both ends; only the opener's says it can count bytes.
+    const json = {
+      encode: (envelope: PortEnvelope) => new TextEncoder().encode(JSON.stringify(envelope)),
+      decode: (data: unknown) =>
+        data instanceof Uint8Array ? JSON.parse(new TextDecoder().decode(data)) : undefined,
     };
+    const older: PortCodec = {
+      post: (port, envelope) => port.postMessage(json.encode(envelope)),
+      read: (e) => json.decode(e.data),
+    };
+    const exact: PortCodec = { ...older, ...json };
     const ch = new MessageChannel();
     rawPorts.push(ch.port1, ch.port2);
     const a = multiplexPort(ch.port1, { codec: exact, side: "initiator", window: 4 * KiB });
     const b = multiplexPort(ch.port2, {
-      codec: structuredCodec,
+      codec: older,
       side: "responder",
       onPort: (p) => {
         p.addEventListener("message", (e) => p.postMessage(e.data));

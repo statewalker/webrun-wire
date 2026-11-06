@@ -15,7 +15,8 @@ function isEnvelope(value: unknown): value is PortEnvelope {
     candidate.type === "open" ||
     candidate.type === "message" ||
     candidate.type === "close" ||
-    candidate.type === "credit"
+    candidate.type === "credit" ||
+    candidate.type === "frame"
   );
 }
 
@@ -28,6 +29,21 @@ function toBytes(data: unknown): Uint8Array | undefined {
     return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   }
   return undefined;
+}
+
+function decodeEnvelope(data: unknown): PortEnvelope | undefined {
+  const bytes = toBytes(data);
+  if (!bytes || bytes.byteLength === 0) return undefined;
+  let decoded: unknown;
+  try {
+    decoded = deserialize(bytes);
+  } catch {
+    // A malformed frame is a peer bug or hostile traffic. Dropping it keeps
+    // layer 1's drop-never-queue posture; throwing here would escape into
+    // the raw port's own listener, outside any consumer's reach.
+    return undefined;
+  }
+  return isEnvelope(decoded) ? decoded : undefined;
 }
 
 /**
@@ -54,29 +70,17 @@ export const msgpackCodec: PortCodec = {
     port.postMessage(serialize(envelope));
   },
 
-  // A port with a window counts the frame's real length: encoded once here,
-  // posted as is, and measured the same way on arrival.
-  prepare(envelope) {
-    const bytes = serialize(envelope);
-    return { size: bytes.byteLength, post: (port) => port.postMessage(bytes) };
+  // A port with a window counts the frame's real length, posts these very
+  // bytes (encoding once) and, with `frameSize`, splits them.
+  encode(envelope) {
+    return serialize(envelope);
   },
 
-  size(event) {
-    return toBytes(event.data)?.byteLength ?? 0;
+  decode(data) {
+    return decodeEnvelope(data);
   },
 
   read(event) {
-    const bytes = toBytes(event.data);
-    if (!bytes || bytes.byteLength === 0) return undefined;
-    let decoded: unknown;
-    try {
-      decoded = deserialize(bytes);
-    } catch {
-      // A malformed frame is a peer bug or hostile traffic. Dropping it keeps
-      // layer 1's drop-never-queue posture; throwing here would escape into
-      // the raw port's own listener, outside any consumer's reach.
-      return undefined;
-    }
-    return isEnvelope(decoded) ? decoded : undefined;
+    return decodeEnvelope(event.data);
   },
 };

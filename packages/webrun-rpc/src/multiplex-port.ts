@@ -21,7 +21,7 @@ export const DEFAULT_MAX_PORTS = 1024;
 
 /**
  * What a message costs a port's window when the codec cannot say
- * (`PortCodec.prepare`): its bytes and string lengths, found in its values up
+ * (`PortCodec.encode`): its bytes and string lengths, found in its values up
  * to 4 levels deep (at most 256 values), and at least 64. Both ends compute it
  * from the same structured value, so they agree.
  */
@@ -59,7 +59,12 @@ export function multiplexPort(
     maxMessageSize,
     signal,
     window,
+    frameSize,
   } = options;
+  // A frame of no bytes would never advance the split: refuse it here.
+  if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
+    throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
+  }
 
   /**
    * Flow control of one port (`PortMuxOptions.window`): the send side's queue
@@ -77,9 +82,11 @@ export function multiplexPort(
     /** This side opened the port; the other answers its window with an ack. */
     opener: boolean;
     /**
-     * Both ends count encoded bytes (`PortCodec.prepare` / `size`). If either
-     * cannot, both count the shared estimate: two ends counting different
-     * sizes would leak window on every message until the port wedged.
+     * Both ends count encoded bytes (`PortCodec.encode` / `decode`), and so
+     * may split a large message into frames (`frameSize`). If either cannot,
+     * both count the shared estimate and send messages whole: two ends
+     * counting different sizes would leak window on every message until the
+     * port wedged.
      */
     exact: boolean;
     outstanding: number;
@@ -93,6 +100,8 @@ export function multiplexPort(
   interface Entry extends PortInfo {
     handle: VirtualPortHandle;
     credit?: Credit;
+    /** The frames of a message still arriving. */
+    partial?: { chunks: Uint8Array[]; bytes: number };
   }
   const open = new Map<number, Entry>();
   const touch = (id: number): void => {
@@ -101,6 +110,8 @@ export function multiplexPort(
   };
   let nextId = side === "initiator" ? 0 : 1;
   let muxClosed = false;
+  /** This end counts encoded bytes and reassembles frames. */
+  const exactCodec = codec.encode != null && codec.decode != null;
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
@@ -113,6 +124,66 @@ export function multiplexPort(
     } catch {
       // The underlying port is gone. There is nothing useful to do here and
       // no flow control to unwind — layer 1 holds no state on its behalf.
+    }
+  };
+
+  // FAIR FRAMING (`frameSize`): what each port has to put on the pipe, taken
+  // one item per port in turn whenever the pipe has room (`whenDrained`). A
+  // large message is split into frames first, so a small one on another port
+  // waits for one frame, not for the whole message. Without `frameSize`
+  // everything is posted at once, as before.
+  const outgoing = new Map<number, Array<() => void>>();
+  const ring: number[] = [];
+  let pumping = false;
+  const pump = async (): Promise<void> => {
+    pumping = true;
+    try {
+      while (ring.length && !muxClosed) {
+        // A pipe without the method has no way to say it is full; the loop
+        // then runs to the end synchronously.
+        if (port.whenDrained) await port.whenDrained();
+        if (muxClosed) break;
+        // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the ring is not empty.
+        const id = ring.shift()!;
+        const queue = outgoing.get(id);
+        const item = queue?.shift();
+        if (queue?.length) ring.push(id);
+        else outgoing.delete(id);
+        item?.();
+      }
+    } catch (err) {
+      // The pipe failed while this mux waited for room: nothing queued can
+      // go out now, and the ports must hear so rather than wait forever.
+      close(err).catch(() => {});
+    } finally {
+      pumping = false;
+    }
+  };
+  const sendOnPort = (id: number, item: () => void): void => {
+    if (frameSize == null) {
+      item();
+      return;
+    }
+    let queue = outgoing.get(id);
+    if (!queue) {
+      queue = [];
+      outgoing.set(id, queue);
+      ring.push(id);
+    }
+    queue.push(item);
+    if (!pumping) void pump();
+  };
+  const dropOutgoing = (id: number): void => {
+    if (!outgoing.delete(id)) return;
+    const at = ring.indexOf(id);
+    if (at >= 0) ring.splice(at, 1);
+  };
+  const postBytes = (bytes: Uint8Array): void => {
+    if (muxClosed) return;
+    try {
+      port.postMessage(bytes);
+    } catch {
+      // The underlying port is gone, as in `post`.
     }
   };
 
@@ -191,36 +262,48 @@ export function multiplexPort(
     self = newVirtualPort(
       (payload, transfer) => {
         touch(id);
+        const envelope: PortEnvelope = { type: "message", id, payload };
+        // Without a window nothing frames or waits: post at once, so the
+        // payload is read now, while the caller still expects it to be.
         if (!c) {
-          post({ type: "message", id, payload }, transfer);
+          post(envelope, transfer);
           return;
         }
-        const envelope: PortEnvelope = { type: "message", id, payload };
         // Encoded once, here, when the codec can: the exact wire size is then
-        // what the window counts, on both ends.
-        const prepared = c.exact ? codec.prepare?.(envelope, transfer) : undefined;
-        const size = prepared?.size ?? estimateMessageSize(payload);
-        // A message that will wait is copied now, as `postMessage` would copy
-        // it at once: the caller may reuse its buffer as soon as it returns.
+        // what the window counts, on both ends, and the bytes are what frames split.
+        const bytes = c.exact ? codec.encode?.(envelope) : undefined;
+        const size = bytes?.byteLength ?? estimateMessageSize(payload);
+        // A message that will wait (for credit, or for the pump when framing)
+        // is copied now, as `postMessage` would copy it at once: the caller may
+        // reuse its buffer as soon as it returns. Encoded bytes are a copy already.
         const waits =
+          frameSize != null ||
           c.queue.length > 0 ||
           (c.enforced && c.outstanding > 0 && c.outstanding + size > c.window);
         const held =
-          !prepared && waits
+          !bytes && waits
             ? { ...envelope, payload: structuredClone(payload, { transfer }) }
             : undefined;
-        const send = prepared
-          ? () => {
-              if (muxClosed) return;
-              try {
-                prepared.post(port);
-              } catch {
-                // The underlying port is gone, as in `post`.
-              }
+        const send = (): void => {
+          if (!bytes) {
+            sendOnPort(id, held ? () => post(held) : () => post(envelope, transfer));
+            return;
+          }
+          // Frames only once the peer has acknowledged exact sizing: before
+          // that, it may be a peer that cannot reassemble them.
+          if (frameSize != null && c.enforced && c.exact && bytes.byteLength > frameSize) {
+            for (let at = 0; at < bytes.byteLength; at += frameSize) {
+              const data = bytes.subarray(at, at + frameSize);
+              const frame: PortEnvelope =
+                at + frameSize >= bytes.byteLength
+                  ? { type: "frame", id, data, last: true }
+                  : { type: "frame", id, data };
+              sendOnPort(id, () => post(frame));
             }
-          : held
-            ? () => post(held)
-            : () => post(envelope, transfer);
+            return;
+          }
+          sendOnPort(id, () => postBytes(bytes));
+        };
         c.queue.push({ send, size });
         c.queued += size;
         flush(c);
@@ -236,7 +319,8 @@ export function multiplexPort(
           for (const item of c.queue.splice(0)) item.send();
           c.queued = 0;
         }
-        post({ type: "close", id, reason });
+        // Behind this port's frames, so the peer gets the whole message first.
+        sendOnPort(id, () => post({ type: "close", id, reason }));
         releaseWaiters(c);
         self.markClosed(reason);
       },
@@ -281,7 +365,7 @@ export function multiplexPort(
         envelope.meta,
         envelope.window,
         false,
-        envelope.exact === true && codec.prepare != null,
+        envelope.exact === true && exactCodec,
       );
       // Acknowledge the window before `onPort` runs: what `onPort` posts then
       // reaches the opener after the ack, so both ends count it the same way
@@ -339,13 +423,39 @@ export function multiplexPort(
       // closed has no consumer, and holding its traffic would be exactly the
       // buffering layer 1 refuses to do.
       const sizeOf = (c: Credit) =>
-        c.exact && codec.size ? codec.size(event) : estimateMessageSize(envelope.payload);
+        (c.exact ? byteLengthOf(event.data) : undefined) ?? estimateMessageSize(envelope.payload);
       if (!entry) return;
       touch(envelope.id);
       entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
       return;
     }
 
+    if (envelope.type === "frame") {
+      // Only where this end advertised exact sizing — the one place a peer may
+      // frame. A frame sequence buffers no more than the same message sent
+      // whole, which a byte transport would also have to hold entire.
+      if (!entry?.credit?.exact || !codec.decode || !(envelope.data instanceof Uint8Array)) return;
+      touch(envelope.id);
+      const partial = entry.partial ?? { chunks: [], bytes: 0 };
+      entry.partial = partial;
+      partial.chunks.push(envelope.data);
+      partial.bytes += envelope.data.byteLength;
+      if (!envelope.last) return;
+      entry.partial = undefined;
+      const whole = new Uint8Array(partial.bytes);
+      let at = 0;
+      for (const chunk of partial.chunks) {
+        whole.set(chunk, at);
+        at += chunk.byteLength;
+      }
+      const inner = codec.decode(whole);
+      if (inner?.type !== "message" || inner.id !== envelope.id) return;
+      entry.handle.deliver(inner.payload, whole.byteLength);
+      return;
+    }
+
+    // The peer closed the port: whatever it still had to receive is moot.
+    dropOutgoing(envelope.id);
     if (!entry) return;
     open.delete(envelope.id);
     releaseWaiters(entry.credit);
@@ -366,14 +476,21 @@ export function multiplexPort(
     muxClosed = true;
     signal?.removeEventListener("abort", onTransportAbort);
     port.removeEventListener("message", listener);
+    const closedNow = new Set<number>();
     for (const [id, { handle, credit }] of [...open]) {
       // A port that a close-signal listener closed meanwhile is still sent its close here: its own
       // close() posts nothing once the mux is closing.
+      closedNow.add(id);
       codecPost({ type: "close", id });
       open.delete(id);
       releaseWaiters(credit);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
     }
+    // Ports closed here whose close still waits behind their frames: it goes
+    // now, or the peer would hold them open forever.
+    for (const id of outgoing.keys()) if (!closedNow.has(id)) codecPost({ type: "close", id });
+    outgoing.clear();
+    ring.length = 0;
     await port.close?.();
   };
   // Nobody awaits the transport's close on this path, and a dead transport's
@@ -406,11 +523,10 @@ export function multiplexPort(
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const exact = codec.prepare != null;
-      const handle = attach(id, meta, window, true, exact);
+      const handle = attach(id, meta, window, true, exactCodec);
       post(
         window
-          ? exact
+          ? exactCodec
             ? { type: "open", id, meta, window, exact: true }
             : { type: "open", id, meta, window }
           : { type: "open", id, meta },
@@ -443,6 +559,12 @@ export function multiplexPort(
       );
     },
   };
+}
+
+/** The byte length of a received message's data, or `undefined` if it is not bytes. */
+function byteLengthOf(data: unknown): number | undefined {
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return data.byteLength;
+  return undefined;
 }
 
 /**
