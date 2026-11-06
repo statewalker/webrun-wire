@@ -115,7 +115,9 @@ export async function launchRawChromium(): Promise<RawChromium> {
       ws.close();
       child.kill();
       await new Promise((resolve) => child.once("exit", resolve));
-      rmSync(profile, { recursive: true, force: true });
+      // Chromium's helper processes can still be writing to the profile after
+      // the browser process exits (ENOTEMPTY); `rmSync` retries those.
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }

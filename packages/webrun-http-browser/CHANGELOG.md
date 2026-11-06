@@ -1,5 +1,19 @@
 # @statewalker/webrun-http-browser
 
+## 0.8.0
+
+### Minor Changes
+
+- de98774: Built against `@statewalker/webrun-rpc` 0.6 (bundled into the `sw`, `relay-sw` and `sw-worker` entries). No API change.
+
+### Patch Changes
+
+- f062c1d: A worker's first `service.fetch` no longer loses its call when it runs before the worker's first link has arrived. The worker asked its page to attach it again, the page did, and the duplicate link replaced the one the call was already running on: the call failed with "webrun-rpc: the peer abandoned the stream" or, 30 s later, "The link was closed; it may or may not have been applied." Links sent to a worker are now numbered, a relink request says which one the worker has, and the page attaches again only when the worker has its latest link, not while that link is on its way.
+- Updated dependencies [30d2cff]
+- Updated dependencies [f98d2c4]
+- Updated dependencies [76c3b6d]
+  - @statewalker/webrun-rpc@0.6.0
+
 ## 0.7.1
 
 ### Patch Changes

@@ -181,7 +181,7 @@ export function trackedLink(
         return response;
       }
       return new Response(
-        guardBody(response.body, lost, () => lostReason, finish),
+        guardBody(response.body, lost, () => lostReason, finish, request.signal),
         {
           status: response.status,
           statusText: response.statusText,
@@ -204,35 +204,71 @@ export function trackedLink(
 }
 
 /**
- * A response body that reports its end (done, cancelled or failed) and fails
- * with the link's reason when the link is lost mid-stream.
+ * A response body that reports its end (done, cancelled, failed or aborted) and
+ * fails with the link's reason when the link is lost mid-stream. An abort of the
+ * request's signal ends it at once, read or not: the exchange is over (the layer
+ * below has given its port back), so the request leaves `inflight` then.
  */
 function guardBody(
   body: ReadableStream<Uint8Array>,
   lost: Promise<never>,
   reason: () => Error | undefined,
   finish: () => void,
+  signal: AbortSignal | undefined,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let ended = false;
+  const end = () => {
+    ended = true;
+    signal?.removeEventListener("abort", onAbort);
+    finish();
+  };
+  const onAbort = () => {
+    if (ended) return;
+    end();
+    void reader.cancel().catch(() => {});
+    try {
+      controller.error(abortError(signal as AbortSignal));
+    } catch {
+      /* already closed or errored */
+    }
+  };
   return new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+    },
     async pull(controller) {
       try {
         const { done, value } = await Promise.race([reader.read(), lost]);
+        if (ended) return;
         if (done) {
-          finish();
+          end();
           controller.close();
           return;
         }
         controller.enqueue(value);
       } catch (error) {
-        finish();
+        if (ended) return;
+        end();
         void reader.cancel().catch(() => {});
         controller.error(reason() ?? error);
       }
     },
     async cancel(why) {
-      finish();
+      end();
       await reader.cancel(why).catch(() => {});
     },
   });
+}
+
+/** The signal's reason as an `Error` (`AbortError` when it gave none). */
+function abortError(signal: AbortSignal): Error {
+  const why = (signal as unknown as { reason?: unknown }).reason;
+  if (why instanceof Error) return why;
+  const err = new Error(why === undefined ? "Aborted" : String(why));
+  err.name = "AbortError";
+  return err;
 }
