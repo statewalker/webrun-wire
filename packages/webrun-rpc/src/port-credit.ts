@@ -61,7 +61,7 @@ export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
 }
 
 /** A capability two ends agree on for one windowed port, in its `open` and the ack. */
-export type PortCap = "pipeline";
+export type PortCap = "pipeline" | "end";
 
 /**
  * What two ends have agreed for one windowed port so far. `caps`: what both
@@ -89,4 +89,38 @@ export function setPortAgreement(port: MessageTarget, agreement: () => PortAgree
  */
 export function portAgreement(port: MessageTarget): PortAgreement | undefined {
   return agreements.get(port)?.();
+}
+
+/** @internal The half-close of one windowed port (capability `"end"`). */
+export interface PortEndState {
+  /** Queue this side's `end`; `false` when `end` was not agreed. */
+  end(): boolean;
+  /** Resolves once the peer has ended its direction. */
+  ended(): Promise<void>;
+}
+
+const ends = new WeakMap<MessageTarget, PortEndState>();
+
+/** @internal Registered by the multiplexer for each port with a window. */
+export function setPortEndState(port: MessageTarget, state: PortEndState): void {
+  ends.set(port, state);
+}
+
+/**
+ * @internal End this side's direction of `port`: an `end` is queued behind
+ * everything already posted on it, and anything posted afterwards is dropped.
+ * `false`, and nothing changes, when `end` was not agreed (no window, the
+ * handshake not answered yet, or a peer that does not speak it): the caller
+ * then closes the port. Never waits on the peer. Not exported from the package.
+ */
+export function endPort(port: MessageTarget): boolean {
+  return ends.get(port)?.end() ?? false;
+}
+
+/**
+ * @internal Resolves once the peer has ended its direction of `port`; never,
+ * on a port where it cannot. Not exported from the package.
+ */
+export function whenPortEnded(port: MessageTarget): Promise<void> {
+  return ends.get(port)?.ended() ?? new Promise<void>(() => {});
 }

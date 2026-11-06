@@ -345,13 +345,25 @@ keeps running without flow control, as it always did; `ports()` reports `window`
 in force. A peer's `window` that is not a positive integer is ignored.
 
 **A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
-`caps: ["pipeline"]`, what this mux speaks on the port, and the responder's ack answers with the
+`caps: ["pipeline", "end"]`, what this mux speaks on the port, and the responder's ack answers with the
 subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
 could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
 control is one chunk, or the window where both ends pipeline" below); nothing else changes
 meaning. The responder still holds its own sends back only once the opener has answered its ack,
 as above: a responder over a codec that drops credit envelopes would otherwise wedge its own port
 after one window.
+
+**Where `end` is agreed, each direction of a port can end on its own.** An `end` envelope leaves
+behind everything already posted on that port: it is a size-0 item in the port's window queue, so
+it needs no credit, and with `frameSize` it takes its turn in the port's queue behind the frames of
+the last message. So the peer has every byte before it sees the end, even of a last message larger
+than the window. Anything posted on that side afterwards is dropped. The other direction keeps
+sending, and both keep returning credit, until it ends too. Once both directions have ended, each
+end frees the id on its own, with no `close` on the wire, and the port's close signal aborts with
+`webrun-rpc: the port ended in both directions`. No exported function sends `end`: it is internal
+to this package. An `end` from a peer where it was not agreed (no window, or not in the handshake) is a
+protocol violation: the port closes, with `close` reason `"protocol"`, and its close signal aborts
+with `webrun-rpc: the peer ended a port where end was not agreed`.
 
 **Closing does not wait for credit.** A port closed with messages still queued sends them at once,
 then its close, regardless of the window: a peer that stopped returning credit (a listener that
@@ -426,17 +438,18 @@ already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta?, window?, exact?, caps? }`,
 `{ type: "message", id, payload }`, `{ type: "close", id, reason? }`, with a window
-`{ type: "credit", id, bytes, exact?, caps? }`, with
+`{ type: "credit", id, bytes, exact?, caps? }` and, where agreed, `{ type: "end", id }`, with
 `frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id }` /
 `{ type: "pong", id }` (on `Number.MAX_SAFE_INTEGER`). The codecs' `read` accept only objects with a non-negative integer `id`
-and one of those seven types, so other traffic on a shared port is
+and one of those eight types, so other traffic on a shared port is
 ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
 
 ### A port lives until its transport or its user lets go
 
-A port leaves the table only when one side closes it or the mux closes. Nothing else frees it, and
+A port leaves the table only when one side closes it, both directions end (`end`, above) or the mux
+closes. Nothing else frees it, and
 a full table refuses every new port. So both lifetimes are wired in explicitly:
 
 - **The transport.** A `MessagePort`, a terminated worker or a dead libp2p stream gives no close

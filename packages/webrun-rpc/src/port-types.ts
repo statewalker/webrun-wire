@@ -19,6 +19,8 @@ export type PortEnvelope =
    * opener listed some.
    */
   | { type: "credit"; id: number; bytes: number; exact?: boolean; caps?: string[] }
+  /** Half-close (capability `"end"`): the sender's direction of the port has ended. */
+  | { type: "end"; id: number }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
   /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */

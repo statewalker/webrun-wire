@@ -3,8 +3,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     // The build config roots at `src` to shape `dist`. This one only
-    // typechecks, so it widens the root to take `tests` in as well.
-    "rootDir": ".",
+    // typechecks, so it widens the root to take `tests` in as well, and the
+    // webrun-rpc internals a test imports by path (`port-end.test.ts`).
+    "rootDir": "../..",
     "noEmit": true,
     "types": ["node", "vitest/globals"]
   },

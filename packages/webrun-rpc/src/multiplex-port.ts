@@ -1,6 +1,12 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import { nextTask, type PortCap, setPortAgreement, setPortSendState } from "./port-credit.js";
+import {
+  nextTask,
+  type PortCap,
+  setPortAgreement,
+  setPortEndState,
+  setPortSendState,
+} from "./port-credit.js";
 import type {
   OpenPortOptions,
   PortEnvelope,
@@ -27,7 +33,7 @@ const KEEPALIVE_ID = Number.MAX_SAFE_INTEGER;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** What a windowed port offers in its `open`: every capability this end speaks. */
-const OWN_CAPS: readonly PortCap[] = ["pipeline"];
+const OWN_CAPS: readonly PortCap[] = ["pipeline", "end"];
 
 /**
  * The capabilities in a peer's `caps` that this end speaks too, or
@@ -146,6 +152,14 @@ export function multiplexPort(
     waiters: { below: number; resolve: () => void }[];
     toGrant: number;
     grantScheduled: boolean;
+    /** This side's `end` is queued: anything posted afterwards is dropped. */
+    ending: boolean;
+    /** This side's `end` has left, behind the port's frames. */
+    ended: boolean;
+    /** The peer's `end` has arrived. */
+    peerEnded: boolean;
+    /** Resolves `whenPortEnded`, once someone waits for it. */
+    onPeerEnd?: { promise: Promise<void>; resolve: () => void };
   }
   /**
    * What the mux keeps of a port: never the consumer's `port` object itself,
@@ -291,6 +305,29 @@ export function multiplexPort(
     }
   };
 
+  /**
+   * Both directions have ended: free the id as a close would, with no `close`
+   * on the wire (each end frees it on its own once it has seen both ends).
+   * Aborting the close signal is how the port's consumer learns it is gone.
+   */
+  const freeIfEnded = (id: number, c: Credit): void => {
+    const entry = open.get(id);
+    if (!c.ended || !c.peerEnded || entry?.credit !== c) return;
+    freePartial(entry);
+    open.delete(id);
+    leaks?.unregister(entry.handle);
+    entry.handle.markClosed(new Error("webrun-rpc: the port ended in both directions"));
+  };
+  /** A peer that broke the port's protocol: hold none of its traffic, and close. */
+  const failPort = (id: number, entry: Entry, error: Error, reason: string): void => {
+    freePartial(entry);
+    dropOutgoing(id);
+    open.delete(id);
+    releaseWaiters(entry.credit);
+    entry.handle.markClosed(error);
+    post({ type: "close", id, reason });
+  };
+
   const releaseWaiters = (c: Credit | undefined): void => {
     for (const w of c?.waiters.splice(0) ?? []) w.resolve();
   };
@@ -299,8 +336,10 @@ export function multiplexPort(
     while (c.queue.length) {
       // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the queue is not empty.
       const next = c.queue[0]!;
-      // A message larger than the window goes out once nothing else is outstanding.
-      if (c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window) break;
+      // A message larger than the window goes out once nothing else is
+      // outstanding. An `end` (size 0) costs no window and never waits for credit.
+      if (next.size > 0 && c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window)
+        break;
       c.queue.shift();
       c.queued -= next.size;
       c.outstanding += next.size;
@@ -361,10 +400,15 @@ export function multiplexPort(
             waiters: [],
             toGrant: 0,
             grantScheduled: false,
+            ending: false,
+            ended: false,
+            peerEnded: false,
           }
         : undefined;
     const self = newVirtualPort(
       (payload, transfer) => {
+        // This side's direction has ended: nothing more goes out on it.
+        if (c?.ending) return;
         touch(id);
         const envelope: PortEnvelope = { type: "message", id, payload };
         // Without a window nothing frames or waits: post at once, so the
@@ -461,6 +505,37 @@ export function multiplexPort(
             if (c.queued <= below || isClosed()) nextTask(resolve);
             else c.waiters.push({ below, resolve: () => nextTask(resolve) });
           }),
+      });
+      setPortEndState(self.port, {
+        end: () => {
+          if (c.ending) return true;
+          if (isClosed() || !c.caps.has("end")) return false;
+          c.ending = true;
+          // Behind what this side already posted: first in the window queue
+          // (a size-0 item), then in the fair-framing ring behind its frames.
+          c.queue.push({
+            size: 0,
+            send: () =>
+              sendOnPort(id, () => {
+                post({ type: "end", id });
+                c.ended = true;
+                freeIfEnded(id, c);
+              }),
+          });
+          flush(c);
+          return true;
+        },
+        ended: () => {
+          if (!c.onPeerEnd) {
+            let resolve: () => void = () => {};
+            const promise = new Promise<void>((r) => {
+              resolve = r;
+            });
+            c.onPeerEnd = { promise, resolve };
+            if (c.peerEnded) resolve();
+          }
+          return c.onPeerEnd.promise;
+        },
       });
       setPortAgreement(self.port, () => ({
         window: c.window,
@@ -613,12 +688,12 @@ export function multiplexPort(
             : undefined;
       if (overrun) {
         // A peer that frames past what it may send: hold none of it.
-        freePartial(entry);
-        dropOutgoing(envelope.id);
-        open.delete(envelope.id);
-        releaseWaiters(c);
-        entry.handle.markClosed(new RangeError(`webrun-rpc: a framed message passed ${overrun}`));
-        post({ type: "close", id: envelope.id, reason: "max-reassembled-bytes" });
+        failPort(
+          envelope.id,
+          entry,
+          new RangeError(`webrun-rpc: a framed message passed ${overrun}`),
+          "max-reassembled-bytes",
+        );
         return;
       }
       partial.bytes += size;
@@ -636,6 +711,27 @@ export function multiplexPort(
       const inner = codec.decode(whole);
       if (inner?.type !== "message" || inner.id !== envelope.id) return;
       entry.handle.deliver(inner.payload, whole.byteLength);
+      return;
+    }
+
+    if (envelope.type === "end") {
+      if (!entry) return;
+      const c = entry.credit;
+      // Only where `end` was agreed. Anywhere else the peer broke the protocol,
+      // as with a pipelined chunk where pipelining was not agreed.
+      if (!c?.caps.has("end")) {
+        failPort(
+          envelope.id,
+          entry,
+          new Error("webrun-rpc: the peer ended a port where end was not agreed"),
+          "protocol",
+        );
+        return;
+      }
+      touch(envelope.id);
+      c.peerEnded = true;
+      c.onPeerEnd?.resolve();
+      freeIfEnded(envelope.id, c);
       return;
     }
 
