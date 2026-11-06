@@ -121,6 +121,17 @@ export interface PortMuxOptions {
    * whole. 16-64 KiB is a reasonable range.
    */
   frameSize?: number;
+  /**
+   * Leak detection, for development (off when unset). A port its consumer
+   * dropped without `close()` is reported here once the garbage collector
+   * reclaims it. If it has no listener left it is freed on both ends, as a
+   * close would free it; one that still has a listener is still receiving, so
+   * it is reported and left open. A listener that closes over its own port
+   * keeps it reachable from the mux, so such a port is never collected, and
+   * never reported. Each port costs a `FinalizationRegistry` entry, and when
+   * the collector runs is up to the runtime.
+   */
+  onLeak?: (info: PortInfo) => void;
 }
 
 /** What `PortMux.ports()` reports for one open port. */

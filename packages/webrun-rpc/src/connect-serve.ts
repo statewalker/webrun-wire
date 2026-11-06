@@ -6,7 +6,7 @@ import {
 } from "./duplex-over-port.js";
 import type { MessageTarget } from "./message-target.js";
 import { multiplexPort } from "./multiplex-port.js";
-import type { PortCodec, PortMux } from "./port-types.js";
+import type { PortCodec, PortMux, PortMuxOptions } from "./port-types.js";
 import { returningAtOnce } from "./return-at-once.js";
 
 /**
@@ -201,6 +201,8 @@ export interface OverPipeOptions {
   window?: number;
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
   frameSize?: number;
+  /** Development aid: report ports dropped without `close()` — see `PortMuxOptions.onLeak`. */
+  onLeak?: PortMuxOptions["onLeak"];
 }
 
 /**

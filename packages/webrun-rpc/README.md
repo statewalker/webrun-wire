@@ -298,6 +298,7 @@ port cannot grow memory here.
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
 | `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
+| `onLeak` | Development aid, off when unset: called with a port's `PortInfo` when its consumer dropped it without `close()`, and the port is freed. See "A port lives until its transport or its user lets go" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -335,12 +336,20 @@ wedged. A message larger than the window is sent once nothing else is outstandin
 **Older peers.** A peer from before the window reads `window` in an `open` but never sends
 credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
 other has shown it reads credit: the responder acknowledges the window with a zero-byte `credit`
-as soon as it accepts the port, and the opener answers that ack with one of its own. Until then
+before `onPort` runs (so what `onPort` posts reaches the opener after it, counted the same way on
+both ends), and the opener answers that ack with one of its own. Until then
 each end counts bytes but holds nothing back, so a port to an older peer, or over an older codec,
 keeps running without flow control, as it always did; `ports()` reports `window` only once it is
-in force. A port closed while its queue still drains keeps crediting what the peer sends, so two
-ends that both close with full queues still drain and close. A peer's `window` that is not a
-positive integer is ignored. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
+in force. A peer's `window` that is not a positive integer is ignored.
+
+**Closing does not wait for credit.** A port closed with messages still queued sends them at once,
+then its close, regardless of the window: a peer that stopped returning credit (a listener that
+never settles) must still learn the port is closed, and nothing is kept for a port nobody holds.
+A message that has to wait in the queue is copied when posted (`structuredClone`, or encoded at
+once by a byte codec), as `postMessage` copies at once, so a caller reusing its buffer does not
+change what is sent. `listenPort` counts a request as consumed when it reaches its handler, not
+when the handler finishes, so a handler waiting on a later call on the same port does not hold
+the window that call needs. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
 throughput.
 
 ### Large messages take turns with small ones
@@ -408,11 +417,61 @@ a full table refuses every new port. So both lifetimes are wired in explicitly:
   cast is needed because the declared type leaves `Symbol.dispose` out: naming it would require
   every consumer to compile with the `esnext.disposable` lib.
 
+What aborts `signal` depends on the transport. A Node worker reports its death:
+
+```ts
+import { Worker } from "node:worker_threads";
+
+const worker = new Worker(new URL("./worker.js", import.meta.url));
+const { port1, port2 } = new MessageChannel();
+worker.postMessage({ port: port2 }, [port2]);
+const exited = new AbortController();
+worker.once("exit", (code) => exited.abort(new Error(`the worker exited (${code})`)));
+const mux = multiplexPort(port1, { codec: structuredCodec, signal: exited.signal });
+```
+
+A browser realm (a tab, an iframe, a worker) reports nothing, but the browser releases its
+[Web Locks](https://developer.mozilla.org/docs/Web/API/Web_Locks_API) when it ends. The other realm
+holds a lock for its whole life, and this side asks for the same lock, which it gets only then:
+
+```ts
+// In the other realm: a name of its own (realms of one origin share locks), and
+// "ready" only from inside the callback, once the lock is really held.
+const lock = `realm:${crypto.randomUUID()}`;
+navigator.locks.request(lock, () => {
+  port.postMessage({ ready: lock });
+  return new Promise(() => {}); // held until this realm ends
+});
+
+// Here, on that "ready" — asked before the lock is held, it would be granted at once:
+const gone = new AbortController();
+navigator.locks.request(ready.lock, () => gone.abort(new Error("the other realm is gone")));
+const mux = multiplexPort(port, { codec: structuredCodec, signal: gone.signal });
+```
+
+Locks are per browser profile, so this works between realms of one origin, never across a
+network. In Node 24 a worker's locks are not visible to the thread that started it (the parent's
+request is granted while the worker holds the lock), so use `exit` there.
+
 `ports()` lists what is open, with each port's `meta`, `openedAt` and `lastActivity` (the last
 message either way), for finding a consumer that never closes.
 
-Weak references are not the fix: the mux must hold each port strongly to deliver to it, and an
-abandoned port's listeners usually close over the port, so it stays reachable from the table.
+**A dropped port can be reported (`onLeak`).** Weak references cannot free leaks on their own:
+the mux must deliver to every open port, and an abandoned port's listeners usually close over the
+port, so it stays reachable from the table. What they can do is catch the ports nothing else
+holds. The mux keeps only its own record of a port, never the consumer's object, so with
+`onLeak` a port its consumer dropped without `close()` is reported once the collector reclaims it
+(`onLeak(info)`, with its `meta`). What happens next depends on its listeners:
+
+- **No listener left:** nothing can reach the port again, so it is freed on both ends as a close
+  would free it. Its close signal aborts with `webrun-rpc: the port was dropped without close()`;
+  the peer's port closes as on any close (`webrun-rpc: the peer closed the port`).
+- **A listener left** (a subscription that keeps only its handler): the port is still receiving,
+  so it is reported and left open. Hold the port, or close it, to silence the report.
+
+A port whose own listener refers to it is never collected, so never reported; when the collector
+runs is up to the runtime. It is a development aid: each port costs a `FinalizationRegistry`
+entry.
 
 ### No close is observable at layer 1
 
