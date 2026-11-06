@@ -52,7 +52,9 @@ describe("close(reason)", () => {
     const { a } = pair();
     const port = await a.openPort();
     await a.close();
-    expect((getPortCloseSignal(port)?.reason as Error | undefined)?.message).toBe(MUX_CLOSED_MESSAGE);
+    expect((getPortCloseSignal(port)?.reason as Error | undefined)?.message).toBe(
+      MUX_CLOSED_MESSAGE,
+    );
   });
 });
 
