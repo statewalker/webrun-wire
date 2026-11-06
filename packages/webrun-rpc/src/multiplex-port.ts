@@ -72,7 +72,7 @@ export function multiplexPort(
       (reason) => {
         post({ type: "close", id, reason });
         open.delete(id);
-        self.markClosed();
+        self.markClosed(reason);
       },
     );
     const now = Date.now();
@@ -140,6 +140,8 @@ export function multiplexPort(
     signal?.removeEventListener("abort", onTransportAbort);
     port.removeEventListener("message", listener);
     for (const [id, { handle }] of [...open]) {
+      // A port that a close-signal listener closed meanwhile is still sent its close here: its own
+      // close() posts nothing once the mux is closing.
       codecPost({ type: "close", id });
       open.delete(id);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
@@ -209,6 +211,7 @@ function describeKinds(entries: Iterable<PortInfo>): string {
     const name = typeof kind === "string" ? kind : "?";
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
+  if (!counts.size) return "none";
   return [...counts]
     .sort((x, y) => y[1] - x[1])
     .slice(0, 3)
