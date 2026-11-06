@@ -11,7 +11,12 @@ function isEnvelope(value: unknown): value is PortEnvelope {
   const candidate = value as { type?: unknown; id?: unknown };
   if (typeof candidate.id !== "number") return false;
   if (!Number.isInteger(candidate.id) || candidate.id < 0) return false;
-  return candidate.type === "open" || candidate.type === "message" || candidate.type === "close";
+  return (
+    candidate.type === "open" ||
+    candidate.type === "message" ||
+    candidate.type === "close" ||
+    candidate.type === "credit"
+  );
 }
 
 /** Accept whatever byte shape a transport pump hands over. */
@@ -47,6 +52,17 @@ function toBytes(data: unknown): Uint8Array | undefined {
 export const msgpackCodec: PortCodec = {
   post(port, envelope) {
     port.postMessage(serialize(envelope));
+  },
+
+  // A port with a window counts the frame's real length: encoded once here,
+  // posted as is, and measured the same way on arrival.
+  prepare(envelope) {
+    const bytes = serialize(envelope);
+    return { size: bytes.byteLength, post: (port) => port.postMessage(bytes) };
+  },
+
+  size(event) {
+    return toBytes(event.data)?.byteLength ?? 0;
   },
 
   read(event) {

@@ -1,5 +1,6 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
+import { nextTask, setPortSendState } from "./port-credit.js";
 import type {
   OpenPortOptions,
   PortEnvelope,
@@ -19,6 +20,28 @@ export const MUX_CLOSED_MESSAGE = "webrun-rpc: the multiplexer was closed";
 export const DEFAULT_MAX_PORTS = 1024;
 
 /**
+ * What a message costs a port's window when the codec cannot say
+ * (`PortCodec.prepare`): its bytes and string lengths, found in its values up
+ * to 4 levels deep (at most 256 values), and at least 64. Both ends compute it
+ * from the same structured value, so they agree.
+ */
+export function estimateMessageSize(payload: unknown): number {
+  let budget = 256;
+  const walk = (v: unknown, depth: number): number => {
+    if (budget-- <= 0) return 0;
+    if (typeof v === "string") return v.length;
+    if (v instanceof ArrayBuffer) return v.byteLength;
+    if (ArrayBuffer.isView(v)) return v.byteLength;
+    if (v === null || typeof v !== "object" || depth >= 4) return 8;
+    let n = 16;
+    if (Array.isArray(v)) for (const x of v) n += walk(x, depth + 1);
+    else for (const k in v) n += k.length + walk((v as Record<string, unknown>)[k], depth + 1);
+    return n;
+  };
+  return Math.max(64, walk(payload, 0));
+}
+
+/**
  * The default `PortMux`: emulates multiplexing over a single port.
  *
  * A transport that already multiplexes natively supplies its own `PortMux`
@@ -35,10 +58,41 @@ export function multiplexPort(
     maxPorts = DEFAULT_MAX_PORTS,
     maxMessageSize,
     signal,
+    window,
   } = options;
 
+  /**
+   * Flow control of one port (`PortMuxOptions.window`): the send side's queue
+   * and the bytes delivered but not yet consumed, and the receive side's
+   * consumed bytes not yet granted back.
+   */
+  interface Credit {
+    window: number;
+    /**
+     * The peer applies the window. Until it says so (the responder's
+     * zero-byte `credit`), bytes are counted but nothing waits: an older peer
+     * never sends credit, and its ports must run as they did before.
+     */
+    enforced: boolean;
+    /** This side opened the port; the other answers its window with an ack. */
+    opener: boolean;
+    /**
+     * Both ends count encoded bytes (`PortCodec.prepare` / `size`). If either
+     * cannot, both count the shared estimate: two ends counting different
+     * sizes would leak window on every message until the port wedged.
+     */
+    exact: boolean;
+    outstanding: number;
+    queue: { send: () => void; size: number }[];
+    queued: number;
+    unconsumed: number;
+    waiters: { below: number; resolve: () => void }[];
+    toGrant: number;
+    grantScheduled: boolean;
+  }
   interface Entry extends PortInfo {
     handle: VirtualPortHandle;
+    credit?: Credit;
   }
   const open = new Map<number, Entry>();
   const touch = (id: number): void => {
@@ -62,25 +116,155 @@ export function multiplexPort(
     }
   };
 
-  const attach = (id: number, meta: unknown): VirtualPortHandle => {
+  const releaseWaiters = (c: Credit | undefined): void => {
+    for (const w of c?.waiters.splice(0) ?? []) w.resolve();
+  };
+
+  const flush = (c: Credit): void => {
+    while (c.queue.length) {
+      // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the queue is not empty.
+      const next = c.queue[0]!;
+      // A message larger than the window goes out once nothing else is outstanding.
+      if (c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window) break;
+      c.queue.shift();
+      c.queued -= next.size;
+      c.outstanding += next.size;
+      next.send();
+    }
+    for (const w of [...c.waiters]) {
+      if (c.queued <= w.below) {
+        c.waiters.splice(c.waiters.indexOf(w), 1);
+        w.resolve();
+      }
+    }
+  };
+
+  // Credit goes back in batches: at once from a quarter of the window, else on
+  // the next task (so a burst of small messages costs one credit envelope, and
+  // a quiet port still gets its last bytes back).
+  const grant = (id: number, c: Credit, bytes: number): void => {
+    c.unconsumed -= bytes;
+    c.toGrant += bytes;
+    const send = () => {
+      c.grantScheduled = false;
+      if (!c.toGrant || !open.has(id)) return;
+      post({ type: "credit", id, bytes: c.toGrant });
+      c.toGrant = 0;
+    };
+    if (c.toGrant >= c.window / 4) {
+      send();
+      return;
+    }
+    if (c.grantScheduled) return;
+    c.grantScheduled = true;
+    setTimeout(send, 0);
+  };
+
+  const attach = (
+    id: number,
+    meta: unknown,
+    portWindow: unknown,
+    opener: boolean,
+    exact: boolean,
+  ): VirtualPortHandle => {
     let self!: VirtualPortHandle;
+    // A peer's window must be a positive integer; anything else means none.
+    const c: Credit | undefined =
+      typeof portWindow === "number" && Number.isSafeInteger(portWindow) && portWindow > 0
+        ? {
+            window: portWindow,
+            // Nobody holds back until the other end has shown it reads credit:
+            // the responder's ack proves that to the opener, and the opener's
+            // answer to the ack proves it to the responder.
+            enforced: false,
+            opener,
+            exact,
+            outstanding: 0,
+            queue: [],
+            queued: 0,
+            unconsumed: 0,
+            waiters: [],
+            toGrant: 0,
+            grantScheduled: false,
+          }
+        : undefined;
     self = newVirtualPort(
       (payload, transfer) => {
         touch(id);
-        post({ type: "message", id, payload }, transfer);
+        if (!c) {
+          post({ type: "message", id, payload }, transfer);
+          return;
+        }
+        const envelope: PortEnvelope = { type: "message", id, payload };
+        // Encoded once, here, when the codec can: the exact wire size is then
+        // what the window counts, on both ends.
+        const prepared = c.exact ? codec.prepare?.(envelope, transfer) : undefined;
+        const size = prepared?.size ?? estimateMessageSize(payload);
+        // A message that will wait is copied now, as `postMessage` would copy
+        // it at once: the caller may reuse its buffer as soon as it returns.
+        const waits =
+          c.queue.length > 0 ||
+          (c.enforced && c.outstanding > 0 && c.outstanding + size > c.window);
+        const held =
+          !prepared && waits
+            ? { ...envelope, payload: structuredClone(payload, { transfer }) }
+            : undefined;
+        const send = prepared
+          ? () => {
+              if (muxClosed) return;
+              try {
+                prepared.post(port);
+              } catch {
+                // The underlying port is gone, as in `post`.
+              }
+            }
+          : held
+            ? () => post(held)
+            : () => post(envelope, transfer);
+        c.queue.push({ send, size });
+        c.queued += size;
+        flush(c);
       },
       (reason) => {
-        post({ type: "close", id, reason });
         open.delete(id);
+        // What is queued goes out now, before the close and regardless of the
+        // window: a peer that stopped returning credit (a listener that never
+        // settles) must still learn that the port is closed, and nothing is
+        // kept for a port nobody holds. Without a window it would all have
+        // gone out at once anyway.
+        if (c?.queue.length) {
+          for (const item of c.queue.splice(0)) item.send();
+          c.queued = 0;
+        }
+        post({ type: "close", id, reason });
+        releaseWaiters(c);
         self.markClosed(reason);
       },
     );
+    if (c) {
+      const deliver = self.deliver.bind(self);
+      self.deliver = (payload, size = estimateMessageSize(payload)) => {
+        c.unconsumed += size;
+        const done = deliver(payload);
+        if (done) void done.then(() => grant(id, c, size));
+        else grant(id, c, size);
+        return done;
+      };
+      setPortSendState(self.port, {
+        bufferedAmount: () => c.queued,
+        ready: (below = 0) =>
+          new Promise<void>((resolve) => {
+            if (c.queued <= below || self.isClosed()) nextTask(resolve);
+            else c.waiters.push({ below, resolve: () => nextTask(resolve) });
+          }),
+      });
+    }
     const now = Date.now();
-    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: self });
+    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: self, credit: c });
     return self;
   };
 
-  const handleEnvelope = (envelope: PortEnvelope): void => {
+  const handleEnvelope = (envelope: PortEnvelope, event: MessageEvent): void => {
     if (muxClosed) return;
 
     if (envelope.type === "open") {
@@ -91,7 +275,25 @@ export function multiplexPort(
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      const handle = attach(envelope.id, envelope.meta);
+      // The opener asked for a window and is known to speak it.
+      const handle = attach(
+        envelope.id,
+        envelope.meta,
+        envelope.window,
+        false,
+        envelope.exact === true && codec.prepare != null,
+      );
+      // Acknowledge the window before `onPort` runs: what `onPort` posts then
+      // reaches the opener after the ack, so both ends count it the same way
+      // (exact bytes or the estimate). A rejection's close follows the ack.
+      const credit = open.get(envelope.id)?.credit;
+      if (credit) {
+        post(
+          credit.exact
+            ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
+            : { type: "credit", id: envelope.id, bytes: 0 },
+        );
+      }
       let accepted = false;
       if (onPort) {
         try {
@@ -104,30 +306,55 @@ export function multiplexPort(
         open.delete(envelope.id);
         handle.markClosed(new Error("webrun-rpc: the port was rejected"));
         post({ type: "close", id: envelope.id, reason: "rejected" });
+        return;
       }
+
       return;
     }
 
-    const handle = open.get(envelope.id)?.handle;
+    const entry = open.get(envelope.id);
+
+    if (envelope.type === "credit") {
+      const c = entry?.credit;
+      if (!c || !(envelope.bytes >= 0)) return;
+      if (!c.enforced && c.opener) {
+        // The ack. It also settles the sizing: if the responder cannot count
+        // exact bytes, both ends fall back to the estimate, and what was
+        // counted exactly before the ack no longer matches what comes back.
+        if (c.exact && envelope.exact !== true) {
+          c.exact = false;
+          c.outstanding = 0;
+        }
+        // Show the responder its codec reads credit, so it may hold back too.
+        post({ type: "credit", id: envelope.id, bytes: 0 });
+      }
+      c.enforced = true;
+      c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
+      flush(c);
+      return;
+    }
 
     if (envelope.type === "message") {
       // Drop, never queue. An id that was rejected, never opened, or already
       // closed has no consumer, and holding its traffic would be exactly the
       // buffering layer 1 refuses to do.
-      if (!handle) return;
+      const sizeOf = (c: Credit) =>
+        c.exact && codec.size ? codec.size(event) : estimateMessageSize(envelope.payload);
+      if (!entry) return;
       touch(envelope.id);
-      handle.deliver(envelope.payload);
+      entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
       return;
     }
 
-    if (!handle) return;
+    if (!entry) return;
     open.delete(envelope.id);
-    handle.markClosed(new Error("webrun-rpc: the peer closed the port"));
+    releaseWaiters(entry.credit);
+    entry.handle.markClosed(new Error("webrun-rpc: the peer closed the port"));
   };
 
   const listener = (event: MessageEvent): void => {
     const envelope = codec.read(event);
-    if (envelope) handleEnvelope(envelope);
+    if (envelope) handleEnvelope(envelope, event);
   };
 
   const close = async (reason?: unknown): Promise<void> => {
@@ -139,11 +366,12 @@ export function multiplexPort(
     muxClosed = true;
     signal?.removeEventListener("abort", onTransportAbort);
     port.removeEventListener("message", listener);
-    for (const [id, { handle }] of [...open]) {
+    for (const [id, { handle, credit }] of [...open]) {
       // A port that a close-signal listener closed meanwhile is still sent its close here: its own
       // close() posts nothing once the mux is closing.
       codecPost({ type: "close", id });
       open.delete(id);
+      releaseWaiters(credit);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
     }
     await port.close?.();
@@ -178,8 +406,15 @@ export function multiplexPort(
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id, meta);
-      post({ type: "open", id, meta });
+      const exact = codec.prepare != null;
+      const handle = attach(id, meta, window, true, exact);
+      post(
+        window
+          ? exact
+            ? { type: "open", id, meta, window, exact: true }
+            : { type: "open", id, meta, window }
+          : { type: "open", id, meta },
+      );
       if (portSignal) {
         const onAbort = () => void handle.port.close?.(portSignal.reason);
         portSignal.addEventListener("abort", onAbort, { once: true });
@@ -195,7 +430,17 @@ export function multiplexPort(
     close,
 
     ports(): PortInfo[] {
-      return [...open.values()].map(({ handle: _, ...info }) => info);
+      return [...open.values()].map(({ handle: _, credit, ...info }) =>
+        credit
+          ? {
+              ...info,
+              ...(credit.enforced ? { window: credit.window } : {}),
+              queued: credit.queued,
+              outstanding: credit.outstanding,
+              unconsumed: credit.unconsumed,
+            }
+          : info,
+      );
     },
   };
 }

@@ -62,7 +62,7 @@ Stream tier and adapter:
 | `serve(params: PortParams, handler)` | Registers a `Duplex` handler. Resolves an idempotent teardown that abandons live streams, then closes the mux. |
 | `PortParams` | `{ mux: PortMuxFactory; timeout?: number }`. |
 | `PortMuxFactory`, `OnPort` | `(onPort?: OnPort) => PortMux \| Promise<PortMux>`; `(port, meta?) => boolean \| undefined`, `false` rejects. |
-| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`. |
+| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`, `window`. |
 | `overPorts(factory)` | Pass-through, for a mux this package knows nothing about. |
 | `duplexOverPort(port, options?)` | A `Duplex` running one stream on `port`. |
 | `serveDuplexOverPort(port, handler, options?)` | The serving half. Returns an idempotent teardown that abandons the stream and notifies the peer. |
@@ -76,8 +76,9 @@ Port multiplexing:
 | `multiplexPort(port, options: PortMuxOptions)` | Emulated multiplexing over one port. |
 | `transferPortMux(target, options?: TransferPortMuxOptions)` | Multiplexing with real transferred `MessagePort`s. |
 | `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
+| `portBufferedAmount(port)`, `whenPortReady(port, below?)` | A windowed port's queued bytes, and a promise for room. See below. |
 | `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
-| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`. |
+| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `prepare(envelope)` / `size(event)` for exact window sizes. |
 | `structuredCodec` | Envelopes passed through unencoded. |
 | `DEFAULT_MAX_PORTS` | `1024`. |
 | `PORT_TRANSFER` | `"webrun-rpc:port-transfer"`, the `type` of the message that carries a port. |
@@ -279,8 +280,9 @@ multiplexer's port, and the RPC tier runs over a virtual port with no byte-strea
 
 ### A port sends and receives messages, nothing more
 
-`multiplexPort` has no backpressure, acknowledgements, credit or buffer ceiling. That matches
-`MessagePort` semantics; waiting strategies belong above. The one safety property it holds: **a
+Without `window`, `multiplexPort` has no backpressure, acknowledgements, credit or buffer ceiling.
+That matches `MessagePort` semantics; waiting strategies belong above, or in the opt-in window
+described below. The one safety property it always holds: **a
 message for a port with no consumer is dropped, never queued**, so a peer flooding an unaccepted
 port cannot grow memory here.
 
@@ -294,6 +296,51 @@ port cannot grow memory here.
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
+| `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
+
+### A port with a window holds only its own bytes
+
+Without a window, a port has no backpressure: a slow consumer turns into unbounded memory, and
+every other port waits behind the shared queue. With `window: n`, each port this mux opens asks
+for flow control in its `open`, and the peer's mux applies it to that port in both directions.
+Each side may then have at most `n` bytes of a port's messages delivered to the other side and
+not yet consumed. What exceeds the window waits in the port's send queue:
+
+- `portBufferedAmount(port)` returns the queued bytes;
+- `whenPortReady(port, below = 0)` resolves once at most `below` bytes are queued.
+
+A sender that must not queue without bound awaits `whenPortReady` before posting more. It always
+resolves on a later task, never synchronously: a producer loop with room to spare would otherwise
+never yield, and the transport's own events (the credit that refills the window, the socket's
+writes) would never run.
+
+A message counts as consumed once every listener has returned, or, for a listener that returns a
+promise, once it settles. A consumer that takes messages from its own queue returns a promise
+that settles when it takes them. **A listener whose promise never settles keeps its port's window
+spent for good**: correct for backpressure, and visible in `mux.ports()`, whose `unconsumed`
+stays at the window (with `queued` and `outstanding` on the sending side).
+
+Credit goes back in batches: at once from a quarter of the window, else on the next task. 10,000
+small messages and their echoes take fewer than 200 credit envelopes.
+
+**What a message costs.** When both ends' codecs implement `prepare` / `size`, as `msgpackCodec`
+does, the window counts the encoded frame, envelope included, and the message is encoded once.
+Each end says so in its `open` or its ack (`exact: true`); if either cannot, both count an
+estimate computed from the same value: byte length for `ArrayBuffer`s and typed arrays, a
+string's length, an object's values 4 levels deep and at most 256 of them, and at least 64 bytes.
+Two ends counting different sizes would leak window on every message until the port wedged. A
+message larger than the window is sent once nothing else is outstanding.
+
+**Older peers.** A peer from before the window reads `window` in an `open` but never sends
+credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
+other has shown it reads credit: the responder acknowledges the window with a zero-byte `credit`
+as soon as it accepts the port, and the opener answers that ack with one of its own. Until then
+each end counts bytes but holds nothing back, so a port to an older peer, or over an older codec,
+keeps running without flow control, as it always did; `ports()` reports `window` only once it is
+in force. A port closed while its queue still drains keeps crediting what the peer sends, so two
+ends that both close with full queues still drain and close. A peer's `window` that is not a
+positive integer is ignored. The window is off by default: 256 KiB favours latency under load, 1-4 MiB favours bulk
+throughput.
 
 `openPort(meta?)` allocates a port, announces it and returns the local end without waiting for the
 peer to accept. That keeps layer 1 free of round trips: messages posted before a rejection are
@@ -306,9 +353,10 @@ the consumer that filled it (`"?"` counts ports without a kind). A duplicate `op
 peer is ignored rather than replacing a live port, and a local `openPort` skips ids the peer
 already claimed with the wrong parity.
 
-`PortEnvelope` is `{ type: "open", id, meta? }`, `{ type: "message", id, payload }` or
-`{ type: "close", id, reason? }`. `structuredCodec.read` accepts only objects with a non-negative
-integer `id` and one of those three types, so other traffic on a shared port is ignored.
+`PortEnvelope` is `{ type: "open", id, meta?, window? }`, `{ type: "message", id, payload }`,
+`{ type: "close", id, reason? }` or, with a window, `{ type: "credit", id, bytes }`. The codecs'
+`read` accept only objects with a non-negative integer `id` and one of those four types, so other
+traffic on a shared port is ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
 
