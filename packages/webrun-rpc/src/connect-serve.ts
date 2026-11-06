@@ -195,6 +195,8 @@ export interface OverPipeOptions {
    * transport's real ceiling — see `PortMuxOptions.maxMessageSize`.
    */
   maxMessageSize?: number;
+  /** The pipe's life: aborting it closes the mux. See `PortMuxOptions.signal`. */
+  signal?: AbortSignal;
 }
 
 /**

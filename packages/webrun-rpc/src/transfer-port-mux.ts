@@ -1,5 +1,5 @@
 import type { MessageTarget } from "./message-target.js";
-import type { PortMux } from "./port-types.js";
+import type { OpenPortOptions, PortMux } from "./port-types.js";
 
 /** The `type` of the envelope that carries a transferred port to the peer. */
 export const PORT_TRANSFER = "webrun-rpc:port-transfer";
@@ -43,7 +43,8 @@ export function transferPortMux(
   options: TransferPortMuxOptions = {},
 ): PortMux {
   const { onPort, maxMessageSize } = options;
-  const issued = new Set<MessagePort>();
+  // Each port this side issued, with the function that detaches it from its `openPort` signal.
+  const issued = new Map<MessagePort, () => void>();
   let closed = false;
 
   const listener = (event: MessageEvent): void => {
@@ -67,7 +68,14 @@ export function transferPortMux(
       port.close();
       return;
     }
-    issued.add(port);
+    // A port its user closes is forgotten, as on the opening side.
+    const forget = () => issued.delete(port);
+    issued.set(port, forget);
+    const close = port.close.bind(port);
+    port.close = () => {
+      forget();
+      close();
+    };
   };
 
   target.addEventListener("message", listener);
@@ -76,25 +84,41 @@ export function transferPortMux(
   return {
     maxMessageSize,
 
-    async openPort(meta?: unknown): Promise<MessageTarget> {
+    async openPort(meta?: unknown, { signal }: OpenPortOptions = {}): Promise<MessageTarget> {
       if (closed) throw new Error("webrun-rpc: the multiplexer is closed");
+      if (signal?.aborted) throw signal.reason;
       const channel = new MessageChannel();
       channel.port1.start();
       // The transferred end is not referenced from the message itself, so it
       // arrives in `event.ports` on the peer — the platform's own hand-off,
       // identical in Node and in browsers.
       target.postMessage({ type: PORT_TRANSFER, meta }, [channel.port2]);
-      issued.add(channel.port1);
-      return channel.port1;
+      const port = channel.port1;
+      const onAbort = () => port.close();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      // The port is done when its user closes it, the signal aborts, or the mux closes: each
+      // forgets it and removes the signal's listener, so a long-lived signal reused for many
+      // ports holds none of them.
+      const forget = () => {
+        signal?.removeEventListener("abort", onAbort);
+        issued.delete(port);
+      };
+      issued.set(port, forget);
+      const close = port.close.bind(port);
+      port.close = () => {
+        forget();
+        close();
+      };
+      return port;
     },
 
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
       target.removeEventListener("message", listener);
-      for (const port of issued) {
+      for (const port of [...issued.keys()]) {
         try {
-          port.close();
+          port.close(); // forgets it too
         } catch {
           /* already gone */
         }

@@ -1,5 +1,12 @@
+import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import type { PortEnvelope, PortMux, PortMuxOptions } from "./port-types.js";
+import type {
+  OpenPortOptions,
+  PortEnvelope,
+  PortInfo,
+  PortMux,
+  PortMuxOptions,
+} from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
 
 /**
@@ -17,21 +24,36 @@ export const DEFAULT_MAX_PORTS = 1024;
  * A transport that already multiplexes natively supplies its own `PortMux`
  * instead — this implementation is for transports that offer one pipe.
  */
-export function multiplexPort(port: MessageTarget, options: PortMuxOptions): PortMux {
+export function multiplexPort(
+  port: MessageTarget,
+  options: PortMuxOptions,
+): PortMux & { ports(): PortInfo[] } {
   const {
     codec,
     onPort,
     side = "initiator",
     maxPorts = DEFAULT_MAX_PORTS,
     maxMessageSize,
+    signal,
   } = options;
 
-  const open = new Map<number, VirtualPortHandle>();
+  interface Entry extends PortInfo {
+    handle: VirtualPortHandle;
+  }
+  const open = new Map<number, Entry>();
+  const touch = (id: number): void => {
+    const entry = open.get(id);
+    if (entry) entry.lastActivity = Date.now();
+  };
   let nextId = side === "initiator" ? 0 : 1;
   let muxClosed = false;
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
+    codecPost(envelope, transfer);
+  };
+  /** Like `post`, also while closing: the mux's own close notices. */
+  const codecPost = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     try {
       codec.post(port, envelope, transfer);
     } catch {
@@ -40,17 +62,21 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     }
   };
 
-  const attach = (id: number): VirtualPortHandle => {
+  const attach = (id: number, meta: unknown): VirtualPortHandle => {
     let self!: VirtualPortHandle;
     self = newVirtualPort(
-      (payload, transfer) => post({ type: "message", id, payload }, transfer),
+      (payload, transfer) => {
+        touch(id);
+        post({ type: "message", id, payload }, transfer);
+      },
       (reason) => {
         post({ type: "close", id, reason });
         open.delete(id);
-        self.markClosed();
+        self.markClosed(reason);
       },
     );
-    open.set(id, self);
+    const now = Date.now();
+    open.set(id, { id, meta, openedAt: now, lastActivity: now, handle: self });
     return self;
   };
 
@@ -65,7 +91,7 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      const handle = attach(envelope.id);
+      const handle = attach(envelope.id, envelope.meta);
       let accepted = false;
       if (onPort) {
         try {
@@ -82,13 +108,14 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       return;
     }
 
-    const handle = open.get(envelope.id);
+    const handle = open.get(envelope.id)?.handle;
 
     if (envelope.type === "message") {
       // Drop, never queue. An id that was rejected, never opened, or already
       // closed has no consumer, and holding its traffic would be exactly the
       // buffering layer 1 refuses to do.
       if (!handle) return;
+      touch(envelope.id);
       handle.deliver(envelope.payload);
       return;
     }
@@ -103,16 +130,47 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
     if (envelope) handleEnvelope(envelope);
   };
 
+  const close = async (reason?: unknown): Promise<void> => {
+    if (muxClosed) return;
+    // Closed BEFORE the ports: `markClosed` runs their close-signal listeners
+    // synchronously, and one that reopens (reconnect logic) must be refused
+    // rather than add a port after the snapshot below, which nothing would
+    // ever close.
+    muxClosed = true;
+    signal?.removeEventListener("abort", onTransportAbort);
+    port.removeEventListener("message", listener);
+    for (const [id, { handle }] of [...open]) {
+      // A port that a close-signal listener closed meanwhile is still sent its close here: its own
+      // close() posts nothing once the mux is closing.
+      codecPost({ type: "close", id });
+      open.delete(id);
+      handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
+    }
+    await port.close?.();
+  };
+  // Nobody awaits the transport's close on this path, and a dead transport's
+  // `close()` often rejects (a stream already reset): never let that become
+  // an unhandled rejection.
+  const onTransportAbort = (): void => {
+    close(signal?.reason).catch(() => {});
+  };
+
   port.addEventListener("message", listener);
   void port.start?.();
+  if (signal?.aborted) close(signal.reason).catch(() => {});
+  else signal?.addEventListener("abort", onTransportAbort, { once: true });
 
   return {
     maxMessageSize,
 
-    async openPort(meta?: unknown): Promise<MessageTarget> {
+    async openPort(meta?: unknown, { signal: portSignal }: OpenPortOptions = {}) {
       if (muxClosed) throw new Error("webrun-rpc: the multiplexer is closed");
+      // As `fetch` does: a signal already aborted opens nothing.
+      if (portSignal?.aborted) throw portSignal.reason;
       if (open.size >= maxPorts) {
-        throw new RangeError(`webrun-rpc: maxPorts (${maxPorts}) reached`);
+        throw new RangeError(
+          `webrun-rpc: maxPorts (${maxPorts}) reached; open ports by kind: ${describeKinds(open.values())}`,
+        );
       }
       // A hostile or misconfigured peer may have opened using our own
       // parity. Skipping a claimed id costs one line and keeps a local open
@@ -120,21 +178,43 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id);
+      const handle = attach(id, meta);
       post({ type: "open", id, meta });
+      if (portSignal) {
+        const onAbort = () => void handle.port.close?.(portSignal.reason);
+        portSignal.addEventListener("abort", onAbort, { once: true });
+        getPortCloseSignal(handle.port)?.addEventListener(
+          "abort",
+          () => portSignal.removeEventListener("abort", onAbort),
+          { once: true },
+        );
+      }
       return handle.port;
     },
 
-    async close(): Promise<void> {
-      if (muxClosed) return;
-      for (const [id, handle] of [...open]) {
-        post({ type: "close", id });
-        open.delete(id);
-        handle.markClosed(new Error(MUX_CLOSED_MESSAGE));
-      }
-      muxClosed = true;
-      port.removeEventListener("message", listener);
-      await port.close?.();
+    close,
+
+    ports(): PortInfo[] {
+      return [...open.values()].map(({ handle: _, ...info }) => info);
     },
   };
+}
+
+/**
+ * `"http: 1000, ws: 24"`: the three commonest `meta.kind`s among `entries`, so
+ * a full table names who filled it. A port without a kind counts as `"?"`.
+ */
+function describeKinds(entries: Iterable<PortInfo>): string {
+  const counts = new Map<string, number>();
+  for (const { meta } of entries) {
+    const kind = (meta as { kind?: unknown } | undefined)?.kind;
+    const name = typeof kind === "string" ? kind : "?";
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  if (!counts.size) return "none";
+  return [...counts]
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, 3)
+    .map(([name, n]) => `${name}: ${n}`)
+    .join(", ");
 }

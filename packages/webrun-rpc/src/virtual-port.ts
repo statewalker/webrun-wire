@@ -50,16 +50,26 @@ export function newVirtualPort(
       if (closed) return;
       send(message, transfer);
     },
-    close() {
+    close(reason?: unknown) {
       if (closed) return;
       closed = true;
       const notify = requestClose;
       listeners.clear();
-      notify();
-      abort();
+      // The mux frees the port first (its slot and its entry in `ports()`), then the close
+      // signal fires with the caller's reason: a listener that reopens (reconnect logic) finds
+      // the slot free. `notify` passes the reason on to `markClosed`, which aborts with it.
+      notify(reason);
+      abort(reason);
     },
   };
   setPortCloseSignal(port, closing.signal);
+  // `using port = await mux.openPort()` closes it on scope exit. Installed
+  // only where the runtime has the symbol, and kept off the declared type,
+  // which would require consumers to compile with `esnext.disposable`.
+  const dispose = (Symbol as { dispose?: symbol }).dispose;
+  if (dispose) {
+    Object.defineProperty(port, dispose, { value: () => port.close?.(), configurable: true });
+  }
 
   return {
     port,
