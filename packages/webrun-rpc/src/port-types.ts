@@ -144,8 +144,9 @@ export interface PortMux {
   /** Allocate a port, announce it, and return the local end. */
   openPort(meta?: unknown, options?: OpenPortOptions): Promise<MessageTarget>;
   /**
-   * Close every virtual port, then release the underlying port. `reason`
-   * becomes the reason of every port's close signal.
+   * Close every port, then release the underlying port. With
+   * `multiplexPort`, `reason` becomes the reason of every port's close signal
+   * (`getPortCloseSignal`); `transferPortMux`'s real ports have none.
    */
   close(reason?: unknown): Promise<void>;
   /** The ports open now, to find who holds a full table. */

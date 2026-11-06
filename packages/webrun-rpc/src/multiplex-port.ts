@@ -71,7 +71,10 @@ const nextTask: (fn: () => void) => void = setImmediateFn
  * A transport that already multiplexes natively supplies its own `PortMux`
  * instead — this implementation is for transports that offer one pipe.
  */
-export function multiplexPort(port: MessageTarget, options: PortMuxOptions): PortMux {
+export function multiplexPort(
+  port: MessageTarget,
+  options: PortMuxOptions,
+): PortMux & { ports(): PortInfo[] } {
   const {
     codec,
     onPort,
@@ -122,6 +125,10 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
+    codecPost(envelope, transfer);
+  };
+  /** Like `post`, also while closing: the mux's own close notices. */
+  const codecPost = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     try {
       codec.post(port, envelope, transfer);
     } catch {
@@ -339,26 +346,38 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
   const close = async (reason?: unknown): Promise<void> => {
     if (muxClosed) return;
+    // Closed BEFORE the ports: `markClosed` runs their close-signal listeners
+    // synchronously, and one that reopens (reconnect logic) must be refused
+    // rather than add a port after the snapshot below, which nothing would
+    // ever close.
+    muxClosed = true;
     signal?.removeEventListener("abort", onTransportAbort);
+    port.removeEventListener("message", listener);
     for (const [id, { handle, credit }] of [...open]) {
-      post({ type: "close", id });
+      codecPost({ type: "close", id });
       open.delete(id);
       releaseWaiters(credit);
       handle.markClosed(reason ?? new Error(MUX_CLOSED_MESSAGE));
     }
-    for (const c of draining.values()) releaseWaiters(c);
+    // Ports closed locally while their queue drained: the peer still waits
+    // for their close.
+    for (const [id, c] of draining) {
+      codecPost({ type: "close", id });
+      releaseWaiters(c);
+    }
     draining.clear();
-    muxClosed = true;
-    port.removeEventListener("message", listener);
     await port.close?.();
   };
+  // Nobody awaits the transport's close on this path, and a dead transport's
+  // `close()` often rejects (a stream already reset): never let that become
+  // an unhandled rejection.
   const onTransportAbort = (): void => {
-    void close(signal?.reason);
+    close(signal?.reason).catch(() => {});
   };
 
   port.addEventListener("message", listener);
   void port.start?.();
-  if (signal?.aborted) void close(signal.reason);
+  if (signal?.aborted) close(signal.reason).catch(() => {});
   else signal?.addEventListener("abort", onTransportAbort, { once: true });
 
   return {
@@ -366,6 +385,8 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
 
     async openPort(meta?: unknown, { signal: portSignal }: OpenPortOptions = {}) {
       if (muxClosed) throw new Error("webrun-rpc: the multiplexer is closed");
+      // As `fetch` does: a signal already aborted opens nothing.
+      if (portSignal?.aborted) throw portSignal.reason;
       if (open.size >= maxPorts) {
         throw new RangeError(
           `webrun-rpc: maxPorts (${maxPorts}) reached; open ports by kind: ${describeKinds(open.values())}`,
@@ -380,16 +401,13 @@ export function multiplexPort(port: MessageTarget, options: PortMuxOptions): Por
       const handle = attach(id, meta, window, false);
       post(window ? { type: "open", id, meta, window } : { type: "open", id, meta });
       if (portSignal) {
-        const onAbort = () => void handle.port.close?.();
-        if (portSignal.aborted) onAbort();
-        else {
-          portSignal.addEventListener("abort", onAbort, { once: true });
-          getPortCloseSignal(handle.port)?.addEventListener(
-            "abort",
-            () => portSignal.removeEventListener("abort", onAbort),
-            { once: true },
-          );
-        }
+        const onAbort = () => void handle.port.close?.(portSignal.reason);
+        portSignal.addEventListener("abort", onAbort, { once: true });
+        getPortCloseSignal(handle.port)?.addEventListener(
+          "abort",
+          () => portSignal.removeEventListener("abort", onAbort),
+          { once: true },
+        );
       }
       return handle.port;
     },
