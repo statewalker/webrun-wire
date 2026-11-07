@@ -35,8 +35,22 @@ import { resolveWorkerUrl } from "./worker-url.js";
 export interface SwHttpAdapterOptions {
   /** The first path segment under the scope that this page's handlers serve. */
   key: string;
+  /** The worker's scope. Default: the folder of `serviceWorkerUrl`, or `registration`'s scope. */
   scope?: string;
   serviceWorkerUrl?: string;
+  /**
+   * How the browser loads the worker script: `"module"` for an ES-module worker (one that
+   * `import`s `startHttpDispatcher` from this package's `sw.js`), `"classic"` — the default — for
+   * one that `importScripts` `sw-worker.js`. A script registered again with another type than
+   * its registration's fails to update, so this must match how the page registers it.
+   */
+  type?: WorkerType;
+  /**
+   * A registration the page made itself, for a worker it registers its own way (its own script,
+   * scope or type). The adapter then registers nothing, and `stop()` leaves the registration in
+   * place: it is not the adapter's to remove. `scope` defaults to the registration's.
+   */
+  registration?: ServiceWorkerRegistration;
   /**
    * Upper bound, in ms, for `start()`'s wait for the worker to activate, take
    * control of the page and answer the handshake. `start()` rejects with a
@@ -145,7 +159,10 @@ export class SwHttpAdapter {
   }
 
   get scope(): string {
-    return this.options.scope ?? new URL("./", this.serviceWorkerUrl).pathname;
+    if (this.options.scope) return this.options.scope;
+    const registration = this.options.registration;
+    if (registration) return new URL(registration.scope).pathname;
+    return new URL("./", this.serviceWorkerUrl).pathname;
   }
 
   /**
@@ -157,6 +174,9 @@ export class SwHttpAdapter {
    * sits next to it).
    */
   get rootUrl(): URL {
+    const registration = this.options.registration;
+    if (registration && !this.options.serviceWorkerUrl)
+      return new URL(this.scope, registration.scope);
     const base = this.options.serviceWorkerUrl ? this.serviceWorkerUrl : import.meta.url;
     return new URL(this.scope, base);
   }
@@ -183,9 +203,12 @@ export class SwHttpAdapter {
   async start(): Promise<void> {
     if (!this._registrationPromise) {
       this._registrationPromise = (async () => {
-        const registration = await navigator.serviceWorker.register(this.serviceWorkerUrl, {
-          scope: this.scope,
-        });
+        const registration =
+          this.options.registration ??
+          (await navigator.serviceWorker.register(this.serviceWorkerUrl, {
+            scope: this.scope,
+            ...(this.options.type ? { type: this.options.type } : {}),
+          }));
         this._registration = registration;
         const stopListening = handleChannelCalls(
           navigator.serviceWorker,
@@ -238,7 +261,7 @@ export class SwHttpAdapter {
     return this._registrationPromise;
   }
 
-  /** Detaches every link, and unregisters the worker. */
+  /** Detaches every link, and unregisters the worker (unless the page passed its `registration`). */
   async stop(): Promise<void> {
     for (const cleanup of this._cleanup.splice(0)) cleanup();
     for (const worker of [...this._workers]) await worker.detach().catch(() => {});
@@ -255,7 +278,7 @@ export class SwHttpAdapter {
     this._registration = undefined;
     this._registrationPromise = undefined;
     try {
-      await registration?.unregister();
+      if (!this.options.registration) await registration?.unregister();
     } catch (error) {
       console.log("Service Worker unregistration failed: ", error);
     }

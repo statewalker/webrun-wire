@@ -79,6 +79,7 @@ interface Outcome {
   status?: number;
   body?: string;
   controlled?: boolean;
+  stillRegistered?: boolean;
   relayControlled?: boolean;
   name?: string;
   reason?: string;
@@ -188,6 +189,37 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expectServed(await outcome(page));
         await page.reload();
         expectServed(await outcome(page));
+      });
+
+      it("a module worker (type: module): installs, takes control, serves", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&stop`);
+        const result = await outcome(page);
+        expectServed(result);
+        // The adapter registered it, so it removes it.
+        expect(result.stillRegistered).toBe(false);
+      });
+
+      it("a module worker the page registered itself: served, and left registered on stop()", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&own&stop`);
+        const result = await outcome(page);
+        expectServed(result);
+        expect(result.stillRegistered).toBe(true);
+      });
+
+      it("the page's own module worker, reloaded: served again", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&own`);
+        expectServed(await outcome(page));
+        await page.reload();
+        expectServed(await outcome(page));
+      });
+
+      it("a module worker registered as a classic one: rejects (why `type` is needed)", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&timeout=3000`);
+        expect(await outcome(page)).toMatchObject({ ok: false });
       });
 
       it("hard reload: the page starts uncontrolled and is taken over", async () => {
