@@ -362,8 +362,9 @@ than the window. Anything posted on that side afterwards is dropped. A port clos
 still waits in the queue sends its `close` alone: an abandoned port never looks finished. The other
 direction keeps sending, and both keep returning credit, until it ends too. Once both directions have ended, each
 end frees the id on its own, with no `close` on the wire, and the port's close signal aborts with
-`webrun-rpc: the port ended in both directions`. No exported function sends `end`: it is internal
-to this package. An `end` from a peer where it was not agreed (no window, or not in the handshake) is a
+`webrun-rpc: the port ended in both directions`. `duplexOverPort` sends it when a stream ends
+normally (see "A stream that ends normally ends its port" below); no exported function sends it
+directly. An `end` from a peer where it was not agreed (no window, or not in the handshake) is a
 protocol violation: the port closes, with `close` reason `"protocol"`, and its close signal aborts
 with `webrun-rpc: the peer ended a port where end was not agreed`. So is a `message` or `frame`
 from a peer after its own `end` (`webrun-rpc: the peer sent on a port after its end`): an honest
@@ -685,6 +686,40 @@ Know what you buy if you set it. The clock resets only when a chunk call returns
 is withheld until the consumer has pulled past the value (a pipelined chunk resets it when sent
 and when received, and the window holds the next one back the same way). The clock cannot tell
 "slow" from "dead": a consumer slower than the timeout **is** failed.
+
+### A stream that ends normally ends its port
+
+Where both ends agreed `end`, a stream that ends normally in both directions frees its port on
+both ends with no `close` on the wire, and `ports()` no longer lists it. So the port's life
+follows the stream's own end, not a `close()` someone has to remember: a side that forgets it, or
+a relay that sees the stream end and still holds the port, no longer keeps an id until the mux
+closes. Each side posts its last chunk (`done`), then ends its direction:
+
+- **The caller** ends once the handler's last chunk arrived without an error and its own last
+  chunk left without one: posted when pipelined, confirmed when not.
+- **The serving side** ends once the handler's last chunk left without an error and no more input
+  is coming: the caller's last chunk arrived without an error, or the caller ended its direction.
+  The second is a handler that returned without reading all its pipelined input; that input is
+  dropped, as a close would drop it. A confirmed chunk the handler never read is never confirmed,
+  so the caller's own end never left: that stream is closed (below). It happens to input sent
+  before the handshake settled, so a short request whose handler ignores its body closes.
+
+Nothing either side still owes the other is lost behind its `end`, after which anything it posts
+is dropped: each side's last confirmation leaves before its `end`, and the caller ends only once
+its own last chunk was confirmed, so the serving side owes it nothing more. Freeing the port
+aborts its close signal with `webrun-rpc: the port ended in both directions` once both sides have
+finished, so no result or chunk in flight fails, and neither the caller nor the handler sees an
+error.
+
+Anything else is an abandonment, closed with the notice first (below): the caller returning
+early, a timeout, a teardown, and a last chunk that carries an error, from the handler or from the
+caller's input. Without `end` (no window, a peer or a codec that does not offer it) the caller
+closes a normally finished stream too, notice and then `close()`, and the serving side waits for
+that close.
+
+A peer that stops before it ends its own direction keeps the port in both ends' `ports()` until
+the port or a mux closes. A stream's `timeout` has stopped on the side that already ended, so it
+takes the transport's `signal` or `keepalive` to notice, as for any peer that goes silent.
 
 ### How an abandoned stream is reported
 

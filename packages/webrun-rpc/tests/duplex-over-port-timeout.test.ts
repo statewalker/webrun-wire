@@ -1,7 +1,13 @@
 import type { Duplex } from "@statewalker/webrun-streams";
 import { collectBytes } from "@statewalker/webrun-streams";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type DuplexOverPortOptions, duplexOverPort, serveDuplexOverPort } from "../src/index.js";
+import {
+  type DuplexOverPortOptions,
+  duplexOverPort,
+  getPortCloseSignal,
+  serveDuplexOverPort,
+} from "../src/index.js";
+import { streamPorts } from "./stream-ports.js";
 
 const enc = new TextEncoder();
 
@@ -29,24 +35,23 @@ afterEach(() => {
   for (const c of open.splice(0)) c();
 });
 
-function streamPair(handler: Duplex, options: DuplexOverPortOptions = {}) {
-  const channel = new MessageChannel();
-  channel.port1.start();
-  channel.port2.start();
+async function streamPair(windowed: boolean, handler: Duplex, options: DuplexOverPortOptions = {}) {
+  const channel = await streamPorts(windowed, open);
   const off = serveDuplexOverPort(channel.port2, handler, options);
-  open.push(() => {
-    off();
-    channel.port1.close();
-    channel.port2.close();
-  });
-  return duplexOverPort(channel.port1, options);
+  open.push(off);
+  return { call: duplexOverPort(channel.port1, options), channel };
 }
 
-describe("duplexOverPort — the stream timeout (spec D8)", () => {
+// Each case runs on a plain port and on a windowed one where both ends agreed
+// `pipeline` and `end`: the clock aborts and disarms alike.
+describe.each([
+  { windowed: false, mode: "no window" },
+  { windowed: true, mode: "a window, pipeline and end agreed" },
+])("duplexOverPort — the stream timeout (spec D8, $mode)", ({ windowed }) => {
   it("F5: a consumer slower than the old 1000 ms default completes the transfer", async () => {
     // This is the regression that D8 exists for. It fails on the pre-B2 stack,
     // where every chunk carried callPort's 1000 ms deadline.
-    const call = streamPair(async function* echo(input) {
+    const { call } = await streamPair(windowed, async function* echo(input) {
       for await (const chunk of input) yield chunk;
     });
     const received: string[] = [];
@@ -72,7 +77,8 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
     // (well under half the natural-completion time) so this can't flake on
     // a loaded machine, while still being tight enough that only the
     // configured 150 ms clock — not the fixture's own sleep — explains it.
-    const call = streamPair(
+    const { call, channel } = await streamPair(
+      windowed,
       async function* stalling(input) {
         for await (const _ of input) {
           /* drain */
@@ -87,12 +93,19 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
       /webrun-rpc: stream idle for 150 ms/,
     );
     expect(Date.now() - startedAt).toBeLessThan(1000);
+    if (windowed) {
+      // The timed-out caller closes its port: the serving side hears it.
+      const closed = getPortCloseSignal(channel.port2);
+      await waitFor("the serving side's port closed", () => closed?.aborted === true);
+      expect(String(closed?.reason)).not.toMatch(/ended in both directions/);
+    }
   }, 20_000);
 
   it("progress resets the clock: many slow-but-steady chunks complete", async () => {
     // The floor for the assertion above. Each gap is under the timeout, the
     // total is many times over it, and a non-resetting timer kills this.
-    const call = streamPair(
+    const { call } = await streamPair(
+      windowed,
       async function* steady() {
         for (let i = 0; i < 8; i++) {
           await new Promise((r) => setTimeout(r, 60));
@@ -106,7 +119,7 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
   }, 20_000);
 
   it("no timeout by default: a 1.5 s stall is not an error", async () => {
-    const call = streamPair(async function* slowStart() {
+    const { call } = await streamPair(windowed, async function* slowStart() {
       await new Promise((r) => setTimeout(r, 1500));
       yield enc.encode("eventually");
     });
@@ -142,7 +155,8 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
     }) as typeof clearTimeout);
 
     try {
-      const call = streamPair(
+      const { call } = await streamPair(
+        windowed,
         async function* echo(input) {
           for await (const chunk of input) yield chunk;
         },
@@ -198,9 +212,7 @@ describe("duplexOverPort — the stream timeout (spec D8)", () => {
       return realClearTimeout(handle);
     }) as typeof clearTimeout);
 
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const off = serveDuplexOverPort(
       channel.port2,
       async function* takeOne(input) {

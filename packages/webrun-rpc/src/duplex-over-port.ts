@@ -12,7 +12,13 @@ import { callPort, NO_TIMEOUT } from "./call-port.js";
 import { getPortCloseSignal } from "./close-signal.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
-import { portAgreement, portBufferedAmount, whenPortReady } from "./port-credit.js";
+import {
+  endPort,
+  portAgreement,
+  portBufferedAmount,
+  whenPortEnded,
+  whenPortReady,
+} from "./port-credit.js";
 import { returningAtOnce } from "./return-at-once.js";
 import { throughAbort } from "./through-abort.js";
 
@@ -180,17 +186,58 @@ export function serveDuplexOverPort(
       options,
       controller.signal,
       clock.touch,
+      () => {},
     );
     void pump.catch(() => {});
     disarmClockWhenBothSidesSettle(clock, pump, inbound.ended);
     return teardownOnce(controller, notice, clock, inbound, undefined);
   }
-  const pump = sendChunks(port, CHANNEL_OUT, output, options, controller.signal, clock.touch);
+  let onSent = () => {};
+  const sent = new Promise<void>((resolve) => {
+    onSent = resolve;
+  });
+  const pump = sendChunks(
+    port,
+    CHANNEL_OUT,
+    output,
+    options,
+    controller.signal,
+    clock.touch,
+    onSent,
+  );
   void pump.catch(() => {
     // Reported to the peer inside sendChunks; nothing to surface locally.
   });
   disarmClockWhenBothSidesSettle(clock, pump, inbound.ended);
+  void endServedStream(port, sent, inbound.completed);
   return teardownOnce(controller, notice, clock, inbound, output);
+}
+
+/**
+ * The serving side's normal finish. Once the handler's last chunk has gone
+ * without an error, and no more input is coming — the caller's end of input
+ * arrived without an error, or the caller ended its direction (a handler that
+ * did not read all its input) — this side ends its direction too, where `end`
+ * was agreed. Without `end` nothing happens here: the caller closes the port.
+ * A stream that never gets that far was abandoned, and the caller's
+ * notice and `close` free the port; this then never resumes. It does not race
+ * the port's close signal: a listener there would let the mux reach the port,
+ * and `onLeak` could never report it, while a wait nobody can settle is
+ * collected with the port.
+ *
+ * Nothing this side still posts is lost behind its `end`. The caller ends only
+ * once its own last chunk was confirmed, so no confirmation is owed to it
+ * here, and what the freed port's close signal aborts has settled: the last
+ * chunk has left, and input nobody reads is dropped, as on a close.
+ */
+async function endServedStream(
+  port: MessageTarget,
+  sent: Promise<void>,
+  completed: Promise<void>,
+): Promise<void> {
+  await sent;
+  await Promise.race([completed, whenPortEnded(port)]);
+  endPort(port);
 }
 
 /**
@@ -252,16 +299,24 @@ function runCallerSide(
   abortOnPortClose(port, controller);
   const clock = installStreamTimeout(controller, options.timeout);
   const inbound = receiveChunks(port, CHANNEL_OUT, controller, clock.touch);
-  const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal, clock.touch);
+  let sent = false;
+  const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal, clock.touch, () => {
+    sent = true;
+  });
   void pump.catch(() => {
     // The outbound half's failure surfaces to the peer, not to this consumer:
     // the consumer's contract is the inbound half.
   });
 
   const stream = (async function* () {
+    let received = false;
     try {
       yield* inbound.stream;
+      received = true;
     } finally {
+      // Both directions ended normally: the handler's end arrived without an
+      // error, and this side's left without one. Anything else is abandoned.
+      const ended = received && sent;
       // Abort BEFORE awaiting the pump. `callPort` runs with NO_TIMEOUT here,
       // so an un-aborted in-flight chunk call would never settle and this
       // `finally` would deadlock — which is exactly the defect found in the
@@ -269,15 +324,26 @@ function runCallerSide(
       if (!controller.signal.aborted) {
         controller.abort(new Error("webrun-rpc: the caller abandoned the stream"));
       }
-      notice.post();
+      // A normal finish ends this direction where `end` was agreed, rather
+      // than closing: the port is then freed on both ends once the handler's
+      // side ends too, and the peer never mistakes it for an abandonment.
+      if (!ended) notice.post();
       notice.stop();
       clock.stop();
       inbound.stop();
       await pump.catch(() => {});
-      try {
-        await port.close?.();
-      } catch {
-        /* the port may already be gone; nothing to unwind */
+      // By now `listenPort` has confirmed the handler's last chunk: this
+      // generator ends only after that chunk's delivery settled, and the
+      // confirmation leaves in the promise turns right after it. It must, as
+      // anything posted after the `end` is dropped.
+      if (!(ended && endPort(port))) {
+        // No `end`: the notice (if not posted above), then `close`.
+        notice.post();
+        try {
+          await port.close?.();
+        } catch {
+          /* the port may already be gone; nothing to unwind */
+        }
       }
     }
   })();
@@ -405,7 +471,12 @@ function receiveChunks(
   channelName: string,
   controller: AbortController,
   touch: () => void,
-): { stream: AsyncGenerator<Uint8Array>; stop(): void; ended: Promise<void> } {
+): {
+  stream: AsyncGenerator<Uint8Array>;
+  stop(): void;
+  ended: Promise<void>;
+  completed: Promise<void>;
+} {
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
   let finished = false;
@@ -418,6 +489,12 @@ function receiveChunks(
   let resolveEnded: () => void = () => {};
   const ended = new Promise<void>((resolve) => {
     resolveEnded = resolve;
+  });
+  // Resolves only once the peer's end of input, without an error, has been
+  // handed to the consumer: the normal finish of this direction.
+  let resolveCompleted: () => void = () => {};
+  const completed = new Promise<void>((resolve) => {
+    resolveCompleted = resolve;
   });
   // Set by `onAbort` the instant the signal fires, independent of whether a
   // consumer has started iterating yet. `recieveIterator`'s installer below
@@ -497,6 +574,7 @@ function receiveChunks(
           value,
           error: error ? deserializeError(error) : undefined,
         });
+        if (done && !error) resolveCompleted();
       } finally {
         outstanding = false;
       }
@@ -549,6 +627,7 @@ function receiveChunks(
         await ready();
         if (finished) return;
         await deliver?.({ done, value, error: error ? deserializeError(error) : undefined });
+        if (done && !error) resolveCompleted();
         if (done) resolveEnded();
       } finally {
         held -= size;
@@ -610,6 +689,7 @@ function receiveChunks(
     stream,
     stop: detach,
     ended,
+    completed,
   };
 }
 
@@ -617,6 +697,8 @@ function receiveChunks(
  * The sending half of one direction: one `callPort` per chunk, one call
  * outstanding at a time (spec D11/D12), with no per-chunk deadline (spec D8) —
  * or, once pipelining is agreed, plain chunk messages held back by the window.
+ * `onSent` runs once the end of the output has left without an error: posted
+ * when pipelined, confirmed when not.
  */
 async function sendChunks(
   port: MessageTarget,
@@ -625,6 +707,7 @@ async function sendChunks(
   { maxMessageSize, log }: DuplexOverPortOptions,
   signal: AbortSignal,
   touch: () => void,
+  onSent: () => void,
 ): Promise<void> {
   const framed = maxMessageSize ? toChunks(maxMessageSize)(output) : output;
   const stream = throughAbort(framed, signal);
@@ -655,6 +738,7 @@ async function sendChunks(
       if (mayPipeline(port)) {
         port.postMessage({ type: CHUNK, channelName, chunk });
         touch();
+        if (done && !error) onSent();
         if (portBufferedAmount(port) > 0) await Promise.race([whenPortReady(port), aborted]);
         return;
       }
@@ -664,6 +748,7 @@ async function sendChunks(
         signal,
       });
       touch();
+      if (done && !error) onSent();
     }, stream);
   } catch (err) {
     // An abort is the expected way this ends when the local side walks away;

@@ -3,10 +3,12 @@ import { collectBytes } from "@statewalker/webrun-streams";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   duplexOverPort,
+  getPortCloseSignal,
   multiplexPort,
   serveDuplexOverPort,
   structuredCodec,
 } from "../src/index.js";
+import { STREAM_WINDOW, streamPorts } from "./stream-ports.js";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -28,11 +30,14 @@ const echo: Duplex = async function* echo(input) {
   for await (const chunk of input) yield chunk;
 };
 
-describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () => {
+// Each case runs on a plain port and on a windowed one where both ends agreed
+// `pipeline` and `end`: confirmed chunks are policed alike in both.
+describe.each([
+  { windowed: false, mode: "no window" },
+  { windowed: true, mode: "a window, pipeline and end agreed" },
+])("duplexOverPort — a peer that ignores the protocol (spec D15, $mode)", ({ windowed }) => {
   it("refuses a second unconfirmed chunk and closes that port", async () => {
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     // A handler that never drains its input, so the first chunk stays
     // unconfirmed for as long as the test needs.
     const off = serveDuplexOverPort(channel.port2, async function* stalled() {
@@ -71,6 +76,11 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     await waitFor("a refusal came back", () => replies.some((r) => r.type === "response:error"));
     const refusal = replies.find((r) => r.type === "response:error");
     expect(refusal?.error?.message).toMatch(/second unconfirmed chunk/);
+    if (windowed) {
+      // The offender hears the close.
+      const closed = getPortCloseSignal(channel.port1);
+      await waitFor("the offender's port closed", () => closed?.aborted === true);
+    }
   }, 20_000);
 
   it("a cooperative sender is never refused, however many chunks it sends", async () => {
@@ -79,9 +89,7 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     const size = 200 * 512;
     const body = new Uint8Array(size);
     for (let i = 0; i < size; i++) body[i] = i & 0xff;
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const off = serveDuplexOverPort(channel.port2, echo, { maxMessageSize: 512 });
     open.push(() => {
       off();
@@ -97,9 +105,11 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     const channel = new MessageChannel();
     channel.port1.start();
     channel.port2.start();
+    const window = windowed ? STREAM_WINDOW : undefined;
     const serverMux = multiplexPort(channel.port2, {
       codec: structuredCodec,
       side: "responder",
+      window,
       onPort: (p, meta) => {
         if ((meta as { kind?: string } | undefined)?.kind === "stalled") {
           serveDuplexOverPort(p, async function* () {
@@ -113,6 +123,7 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     const clientMux = multiplexPort(channel.port1, {
       codec: structuredCodec,
       side: "initiator",
+      window,
     });
     open.push(() => {
       void clientMux.close();
@@ -163,9 +174,7 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     // no-op. Routing the poison through `controller.abort()` is what makes
     // `recieveIterator`'s installer replay the error once the handler does
     // start pulling, instead of leaving it to wait forever.
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const seen: Uint8Array[] = [];
     let caught: unknown;
     const off = serveDuplexOverPort(channel.port2, async function* lateDrain(input) {
@@ -217,9 +226,7 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
     // trivially runs once its own consumer eventually walks away — the
     // assertion below is on the *offending server's* handler, which only
     // gets torn down by this task's enforcement).
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     let finallyRan = false;
     // A handler that keeps producing output (so its outbound pump has an
     // in-flight `callPort` call at the moment poison fires) while never
@@ -273,9 +280,7 @@ describe("duplexOverPort — a peer that ignores the protocol (spec D15)", () =>
   }, 10_000);
 
   it("garbage on a stream port is ignored and the stream still works", async () => {
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const off = serveDuplexOverPort(channel.port2, echo);
     open.push(() => {
       off();
