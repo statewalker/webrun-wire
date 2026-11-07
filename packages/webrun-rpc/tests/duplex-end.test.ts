@@ -1,13 +1,17 @@
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import type { Duplex } from "@statewalker/webrun-streams";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   connect,
   multiplexPort,
   type PortEnvelope,
+  type PortInfo,
   STREAM_ABORT,
   serve,
   structuredCodec,
 } from "../src/index.js";
+import { endPort } from "../src/port-credit.js";
 
 // Where both ends agree `end`, a stream that ends normally in both directions
 // ends each direction with `end` instead of a `close`, and the id is freed on
@@ -32,16 +36,23 @@ async function waitFor(label: string, cond: () => boolean, ms = 3000): Promise<v
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+
 /** An envelope as it crossed the pipe; `from` says which end posted it. */
 type Seen = { from: "caller" | "server"; envelope: PortEnvelope };
 
 /**
  * `connect` / `serve` over one `MessageChannel`, with `window` on both ends
- * (`0`: none).
+ * (`0`: none), reporting dropped ports to `leaks`.
  * Every envelope is logged as it arrives, and both muxes are kept for
  * `ports()`.
  */
-async function link(handler: Duplex, window = WINDOW) {
+async function link(handler: Duplex, { window = WINDOW }: { window?: number } = {}) {
+  const leaks: PortInfo[] = [];
+  const onLeak = (info: PortInfo) => {
+    leaks.push(info);
+  };
   const ch = new MessageChannel();
   const wire: Seen[] = [];
   ch.port1.addEventListener("message", (e) => {
@@ -62,6 +73,7 @@ async function link(handler: Duplex, window = WINDOW) {
           side: "responder",
           window,
           onPort,
+          onLeak,
         });
         return server;
       },
@@ -75,6 +87,7 @@ async function link(handler: Duplex, window = WINDOW) {
         side: "initiator",
         window,
         onPort,
+        onLeak,
       });
       return client;
     },
@@ -104,7 +117,7 @@ async function link(handler: Duplex, window = WINDOW) {
         (s.envelope.payload as { type?: unknown } | undefined)?.type === "response:result",
     ).length;
   const freed = () => muxes.client.ports().length === 0 && muxes.server.ports().length === 0;
-  return { call, wire, types, notices, replies, freed, muxes };
+  return { call, wire, types, notices, replies, freed, muxes, leaks };
 }
 
 /** Reads a stream to its end: the chunks' bytes, and the error it ended with. */
@@ -208,6 +221,50 @@ describe("duplexOverPort — a stream that ends normally ends its port", () => {
     expect(error).toBeUndefined();
     expect(seen).toEqual([1]);
     await waitFor("both ends freed the port", s.freed);
+    expect(s.types("caller")).not.toContain("close");
+    expect(s.types("server")).not.toContain("close");
+    expect(s.types("server").at(-1)).toBe("end");
+  });
+
+  it("waits for the caller's end held by its own stream, through a collection", async () => {
+    // A handler that did not read all its input waits for the caller's end
+    // with nothing of its own pending. That wait must keep the served port, or
+    // the port is collected (reported by `onLeak`) and never ends.
+    const CHUNKS = 40;
+    const s = await link(async function* (input) {
+      for await (const _ of input) break;
+      for (let i = 0; i < CHUNKS; i++) yield new Uint8Array(4 * KiB).fill(i);
+    });
+    const wire = s.wire;
+    async function* input() {
+      await waitFor("the ack", () =>
+        wire.some((w) => w.from === "server" && w.envelope.type === "credit" && w.envelope.caps),
+      );
+      yield new Uint8Array([1]);
+      yield new Uint8Array([2]);
+    }
+    let n = 0;
+    for await (const _ of s.call(input())) {
+      if (++n === CHUNKS - 1) {
+        // The handler's last chunk and its end are out: it only waits now.
+        await waitFor("the handler's last chunk", () =>
+          wire.some(
+            (w) =>
+              w.from === "server" &&
+              w.envelope.type === "message" &&
+              (w.envelope.payload as { chunk?: { done?: boolean } }).chunk?.done === true,
+          ),
+        );
+        const until = Date.now() + 300;
+        while (Date.now() < until) {
+          gc();
+          await sleep(10);
+        }
+      }
+    }
+    expect(n).toBe(CHUNKS);
+    await waitFor("both ends freed the port", s.freed);
+    expect(s.leaks).toEqual([]);
     expect(s.types("caller")).not.toContain("close");
     expect(s.types("server")).not.toContain("close");
     expect(s.types("server").at(-1)).toBe("end");
@@ -320,10 +377,82 @@ describe("duplexOverPort — a stream that does not end normally posts its notic
     expect(s.types("caller")).not.toContain("end");
   });
 
-  it("without a window, a normal stream posts its notice and closes", async () => {
+  it("a caller's input that fails at once, confirmed: nobody sends end", async () => {
+    // Before the ack the caller's end of input is a confirmed call, here
+    // carrying the error; the handler swallows it and finishes normally.
     const s = await link(async function* (input) {
-      for await (const chunk of input) yield chunk;
-    }, 0);
+      try {
+        for await (const chunk of input) yield chunk;
+      } catch {}
+    });
+    async function* failing() {
+      yield* [];
+      throw new Error("input broke at once");
+    }
+    const { error } = await drain(s.call(failing()));
+    expect(error).toBeUndefined();
+    await waitFor("both ends freed the port", s.freed);
+    expect(s.replies("server")).toBe(1);
+    expect(s.types("caller")).toContain("close");
+    expect(s.notices("caller")).toBe(1);
+    expect(s.types("caller")).not.toContain("end");
+    expect(s.types("server")).not.toContain("end");
+  });
+
+  it("a peer that ends its direction without its last chunk fails the input, notifies and closes", async () => {
+    let handlerError: unknown;
+    const s = await link(async function* (input) {
+      try {
+        for await (const _ of input) {
+        }
+      } catch (err) {
+        handlerError = err;
+      }
+      yield* [];
+    });
+    // A hostile caller: a port of the same mux, ended with no stream on it.
+    const port = await s.muxes.client.openPort({ kind: "stream" });
+    await waitFor("the window agreed", () => s.muxes.client.ports()[0]?.window != null);
+    expect(endPort(port)).toBe(true);
+    await waitFor("the handler's input failed", () => handlerError !== undefined);
+    expect((handlerError as Error).message).toBe(
+      "webrun-rpc: the peer ended its direction without finishing it; the stream port is closed",
+    );
+    await waitFor("both ends freed the port", s.freed);
+    expect(s.notices("server")).toBe(1);
+    expect(s.types("server")).toContain("close");
+    expect(s.types("server")).not.toContain("end");
+  });
+
+  it("a peer that ends its direction behind a failed last chunk: nobody ends, the port closes", async () => {
+    const s = await link(async function* (input) {
+      try {
+        for await (const _ of input) {
+        }
+      } catch {}
+      yield* [];
+    });
+    const port = await s.muxes.client.openPort({ kind: "stream" });
+    await waitFor("the window agreed", () => s.muxes.client.ports()[0]?.window != null);
+    // A hostile caller: its last chunk carries an error, and it ends anyway.
+    port.postMessage({
+      type: "webrun-rpc:chunk",
+      channelName: "in",
+      chunk: { done: true, error: { message: "input broke" } },
+    });
+    expect(endPort(port)).toBe(true);
+    await waitFor("both ends freed the port", s.freed);
+    expect(s.types("server")).toContain("close");
+    expect(s.types("server")).not.toContain("end");
+  });
+
+  it("without a window, a normal stream posts its notice and closes", async () => {
+    const s = await link(
+      async function* (input) {
+        for await (const chunk of input) yield chunk;
+      },
+      { window: 0 },
+    );
     const { seen } = await drain(s.call([new Uint8Array([3])]));
     expect(seen).toEqual([3]);
     await waitFor("both ends freed the port", s.freed);

@@ -53,7 +53,9 @@ export interface PortCodec {
    * Optional: this codec's `read` (and `decode`) accept the `end` envelope.
    * Only then does a windowed port offer the `end` capability. A codec that
    * dropped `end` would leave a port that ended normally in the peer's table
-   * (`ports()`) until the mux closes, with no error anywhere.
+   * (`ports()`) until the mux closes, with no error anywhere. A codec spread
+   * from a built-in (`{ ...structuredCodec, read }`) inherits the flag: its
+   * own `read` must then accept `end` too, or it must drop the flag.
    */
   halfClose?: true;
 }

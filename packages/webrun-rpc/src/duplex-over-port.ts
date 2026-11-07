@@ -172,7 +172,7 @@ export function serveDuplexOverPort(
   const notice = installAbortNotice(port, controller);
   abortOnPortClose(port, controller);
   const clock = installStreamTimeout(controller, options.timeout);
-  const inbound = receiveChunks(port, CHANNEL_IN, controller, clock.touch);
+  const inbound = receiveChunks(port, CHANNEL_IN, controller, clock.touch, notice);
   let output: AsyncGenerator<Uint8Array>;
   try {
     output = handler(inbound.stream);
@@ -209,21 +209,21 @@ export function serveDuplexOverPort(
     // Reported to the peer inside sendChunks; nothing to surface locally.
   });
   disarmClockWhenBothSidesSettle(clock, pump, inbound.ended);
-  void endServedStream(port, sent, inbound.completed);
+  void endServedStream(port, sent, inbound.over);
   return teardownOnce(controller, notice, clock, inbound, output);
 }
 
 /**
  * The serving side's normal finish. Once the handler's last chunk has gone
- * without an error, and no more input is coming — the caller's end of input
- * arrived without an error, or the caller ended its direction (a handler that
- * did not read all its input) — this side ends its direction too, where `end`
- * was agreed. Without `end` nothing happens here: the caller closes the port.
- * A stream that never gets that far was abandoned, and the caller's
- * notice and `close` free the port; this then never resumes. It does not race
- * the port's close signal: a listener there would let the mux reach the port,
- * and `onLeak` could never report it, while a wait nobody can settle is
- * collected with the port.
+ * without an error, and no more input is coming (`over`: the caller's last
+ * chunk arrived without an error and was read, or the caller ended its
+ * direction behind it, for a handler that did not read all its input), this
+ * side ends its direction too, where `end` was agreed. Without `end` nothing
+ * happens here: the caller closes the port. A stream that never gets that far
+ * was abandoned, and the caller's notice and `close` free the port; this then
+ * never resumes. It needs no race against the port's close signal: nothing
+ * awaits it, and what keeps it waiting is the input's watcher, a listener of
+ * the port that a close drops, after which the wait is collected.
  *
  * Nothing this side still posts is lost behind its `end`. The caller ends only
  * once its own last chunk was confirmed, so no confirmation is owed to it
@@ -233,10 +233,10 @@ export function serveDuplexOverPort(
 async function endServedStream(
   port: MessageTarget,
   sent: Promise<void>,
-  completed: Promise<void>,
+  over: Promise<void>,
 ): Promise<void> {
   await sent;
-  await Promise.race([completed, whenPortEnded(port)]);
+  await over;
   endPort(port);
 }
 
@@ -298,7 +298,7 @@ function runCallerSide(
   const notice = installAbortNotice(port, controller);
   abortOnPortClose(port, controller);
   const clock = installStreamTimeout(controller, options.timeout);
-  const inbound = receiveChunks(port, CHANNEL_OUT, controller, clock.touch);
+  const inbound = receiveChunks(port, CHANNEL_OUT, controller, clock.touch, notice);
   let sent = false;
   const pump = sendChunks(port, CHANNEL_IN, input, options, controller.signal, clock.touch, () => {
     sent = true;
@@ -471,11 +471,12 @@ function receiveChunks(
   channelName: string,
   controller: AbortController,
   touch: () => void,
+  notice: { post(): void },
 ): {
   stream: AsyncGenerator<Uint8Array>;
   stop(): void;
   ended: Promise<void>;
-  completed: Promise<void>;
+  over: Promise<void>;
 } {
   let deliver: ChunkReceiver<Uint8Array> | undefined;
   const waiting: Array<() => void> = [];
@@ -490,11 +491,12 @@ function receiveChunks(
   const ended = new Promise<void>((resolve) => {
     resolveEnded = resolve;
   });
-  // Resolves only once the peer's end of input, without an error, has been
-  // handed to the consumer: the normal finish of this direction.
-  let resolveCompleted: () => void = () => {};
-  const completed = new Promise<void>((resolve) => {
-    resolveCompleted = resolve;
+  // Resolves once this direction finished normally: the peer's last chunk,
+  // without an error, was handed to the consumer, or arrived and the peer
+  // then ended its direction (see the watcher below).
+  let resolveOver: () => void = () => {};
+  const over = new Promise<void>((resolve) => {
+    resolveOver = resolve;
   });
   // Set by `onAbort` the instant the signal fires, independent of whether a
   // consumer has started iterating yet. `recieveIterator`'s installer below
@@ -543,6 +545,53 @@ function receiveChunks(
     return poison;
   };
 
+  // Where `end` is agreed, the peer's `end` is the other way this direction
+  // can be over. This watcher sees the peer's last chunk even once the
+  // consumer stopped reading (and the listeners below are gone): an `end`
+  // behind a last chunk without an error finishes the input, and one without
+  // it is a violation, or the consumer would wait forever for a chunk that
+  // cannot come. It stays on the port until that `end`, and it refers to
+  // `port` on purpose: the mux holds a port's listeners, so a stream that
+  // only waits for the peer's `end` keeps its port, which nothing else of
+  // its own may still hold. A close drops it with the other listeners.
+  let lastChunkArrived = false;
+  let watching = false;
+  const watchPeerEnd = (): boolean => {
+    if (watching) return true;
+    if (!portAgreement(port)?.caps.has("end")) return false;
+    watching = true;
+    void whenPortEnded(port).then(() => {
+      port.removeEventListener("message", watcher);
+      if (lastChunkArrived) {
+        resolveOver();
+        return;
+      }
+      notice.post();
+      violate(
+        "webrun-rpc: the peer ended its direction without finishing it; the stream port is closed",
+      );
+    });
+    return true;
+  };
+  const watcher = (event: MessageEvent): void => {
+    const data = event.data as
+      | { type?: unknown; channelName?: unknown; chunk?: WireChunk; params?: WireChunk }
+      | undefined;
+    if (data?.channelName !== channelName) return;
+    const chunk =
+      data.type === CHUNK ? data.chunk : data.type === "request" ? data.params : undefined;
+    if (!chunk) return;
+    // The opener learns the agreement from the ack, which comes before any
+    // chunk: decided at the first one, and without `end` nothing is watched.
+    if (!watchPeerEnd()) {
+      port.removeEventListener("message", watcher);
+      return;
+    }
+    if (chunk.done && !chunk.error) lastChunkArrived = true;
+  };
+  port.addEventListener("message", watcher);
+  watchPeerEnd();
+
   // Bytes of pipelined chunks delivered and not yet consumed (see `onChunk`).
   let held = 0;
   const off = listenPort<WireChunk, void>(
@@ -574,7 +623,7 @@ function receiveChunks(
           value,
           error: error ? deserializeError(error) : undefined,
         });
-        if (done && !error) resolveCompleted();
+        if (done && !error) resolveOver();
       } finally {
         outstanding = false;
       }
@@ -627,7 +676,7 @@ function receiveChunks(
         await ready();
         if (finished) return;
         await deliver?.({ done, value, error: error ? deserializeError(error) : undefined });
-        if (done && !error) resolveCompleted();
+        if (done && !error) resolveOver();
         if (done) resolveEnded();
       } finally {
         held -= size;
@@ -689,7 +738,7 @@ function receiveChunks(
     stream,
     stop: detach,
     ended,
-    completed,
+    over,
   };
 }
 

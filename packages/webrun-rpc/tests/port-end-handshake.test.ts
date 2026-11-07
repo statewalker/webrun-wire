@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  duplexOverPort,
   getPortCloseSignal,
   type MessageTarget,
   multiplexPort,
   type PortCodec,
   type PortEnvelope,
+  serveDuplexOverPort,
   structuredCodec,
 } from "../src/index.js";
 import { endPort } from "../src/port-credit.js";
@@ -239,11 +241,20 @@ describe("end needs a codec that declares it reads end (halfClose)", () => {
       });
       expect(ack).toMatchObject({ caps: ["pipeline"] });
 
-      // The fallback: neither end may end, so each closes as before.
+      // The fallback: neither end may end, so a stream run on the port ends
+      // with its last chunks and the caller's close.
       expect(endPort(portA)).toBe(false);
       expect(endPort(portB)).toBe(false);
-      portA.close?.();
+      serveDuplexOverPort(portB, async function* (input) {
+        for await (const chunk of input) yield chunk;
+      });
+      const out: number[] = [];
+      for await (const chunk of duplexOverPort(portA)([new Uint8Array([1]), new Uint8Array([2])])) {
+        out.push(...chunk);
+      }
+      expect(out).toEqual([1, 2]);
       await waitFor("B reads the close", () => seenB.some((e) => e.type === "close"));
+      await waitFor("both ends freed the port", () => a.ports().length + b.ports().length === 0);
       expect([...seenA, ...seenB].some((e) => e.type === "end")).toBe(false);
     },
   );
