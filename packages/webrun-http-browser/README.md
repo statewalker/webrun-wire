@@ -264,13 +264,36 @@ worker's default scope covers them:
 importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
 ```
 
+A module worker imports the dispatcher instead (a module worker cannot
+`importScripts`), and the adapter registers it with `type: "module"`. A
+ServiceWorker resolves no bare specifiers (it has no import map): bundle it, or
+import the built `dist/sw.js` by url.
+
+```js
+// sw.js, registered with { type: "module" }
+import { startHttpDispatcher } from "@statewalker/webrun-http-browser/sw";
+startHttpDispatcher({ self });
+```
+
+A page that registers its worker itself (its own script, scope or type) passes
+the registration instead, and the adapter registers nothing (`type` is then
+not used). The worker routes under the registration's scope, whichever folder
+its script is in:
+
+```ts
+const registration = await navigator.serviceWorker.register("/sw.js", { type: "module" });
+const adapter = new SwHttpAdapter({ key: KEY, registration });
+```
+
 `SwHttpAdapter` options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `key` | required | First URL segment under the scope that the worker routes to this page. |
 | `serviceWorkerUrl` | `sw-worker.js` at the scope | Resolved against `location.href`. An unresolvable value throws `Invalid serviceWorkerUrl: "<value>" (relative to <href>)`. |
-| `scope` | directory of `serviceWorkerUrl` | Registration scope. |
+| `scope` | directory of `serviceWorkerUrl`, or `registration`'s scope | Registration scope. |
+| `type` | `"classic"` | How the worker script loads: `"module"` for an ES-module worker. It must match how the script is registered elsewhere, or the update fails. |
+| `registration` | none | A registration the page made itself. The adapter registers nothing, and `stop()` leaves it registered. |
 | `timeout` | `30_000` | Upper bound, in ms, for activation, control and the adapter's handshake. Past it `start()` rejects with a `ServiceWorkerControlError`. |
 | `reloadIfUncontrolled` | `false` | Reload the page once instead of rejecting when it stays uncontrolled. |
 | `streamTimeout` | none | Per-stream inactivity timeout of the links, in ms. Unset, a slow reader is throttled, never failed. |

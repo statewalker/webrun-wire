@@ -79,6 +79,7 @@ interface Outcome {
   status?: number;
   body?: string;
   controlled?: boolean;
+  stillRegistered?: boolean;
   relayControlled?: boolean;
   name?: string;
   reason?: string;
@@ -188,6 +189,55 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expectServed(await outcome(page));
         await page.reload();
         expectServed(await outcome(page));
+      });
+
+      it("a module worker (type: module): installs, takes control, serves", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&stop`);
+        const result = await outcome(page);
+        expectServed(result);
+        // The adapter registered it, so it removes it.
+        expect(result.stillRegistered).toBe(false);
+      });
+
+      it("a module worker the page registered itself: served, and left registered on stop()", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&own&stop`);
+        const result = await outcome(page);
+        expectServed(result);
+        expect(result.stillRegistered).toBe(true);
+      });
+
+      it("the page's own module worker, reloaded: served again", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&type=module&own`);
+        expectServed(await outcome(page));
+        await page.reload();
+        expectServed(await outcome(page));
+      });
+
+      it("a module worker registered as a classic one: rejects (why `type` is needed)", async () => {
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&timeout=3000`);
+        // The registration itself fails (its `import` does not evaluate in a classic script),
+        // not a later step such as control or the handshake.
+        const result = await outcome(page);
+        expect(result).toMatchObject({ ok: false, name: "TypeError" });
+        expect(result.reason).toBeUndefined();
+      });
+
+      it("the page's own registration, scoped to another folder than the script's: served", async () => {
+        const page = await freshPage();
+        await page.goto(
+          `${origin}${SAME_ORIGIN.replace("index.html", "app/index.html")}?sw=../module-sw.js&type=module&own&scope=./`,
+        );
+        // The key is read under the registration's scope (…/app/), not the script's folder.
+        expect(await outcome(page)).toMatchObject({
+          ok: true,
+          status: 200,
+          body: "hello /tests/fixtures/browser/same-origin/app/t/x",
+          controlled: true,
+        });
       });
 
       it("hard reload: the page starts uncontrolled and is taken over", async () => {

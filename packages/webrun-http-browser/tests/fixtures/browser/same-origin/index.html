@@ -4,7 +4,11 @@
   <body>
     <script type="module">
       // Browser-test fixture for SwHttpAdapter (see tests/browser/).
-      // Query: sw=<worker script, default ./sw-worker.js>, timeout=<ms>, reload (flag).
+      // Query: sw=<worker script, default ./sw-worker.js>, timeout=<ms>, reload (flag),
+      // type=<module|classic>, scope=<the own registration's scope>,
+      // own (the page registers the worker itself, with `type`, and passes
+      // its registration), stop (stops the adapter after the request and reports whether the
+      // worker is still registered).
       import { SwHttpAdapter } from "/dist/sw.js";
 
       const params = new URLSearchParams(location.search);
@@ -19,19 +23,34 @@
             reloadIfUncontrolled: params.has("reload"),
           };
           if (params.has("timeout")) options.timeout = Number(params.get("timeout"));
+          const type = params.get("type") ?? undefined;
+          if (params.has("own")) {
+            options.registration = await navigator.serviceWorker.register(options.serviceWorkerUrl, {
+              type,
+              scope: params.get("scope") ?? undefined,
+            });
+            delete options.serviceWorkerUrl;
+          } else if (type) {
+            options.type = type;
+          }
           const adapter = new SwHttpAdapter(options);
           await adapter.start();
           await adapter.register("t/", async (request) => {
             return new Response(`hello ${new URL(request.url).pathname}`);
           });
           const response = await fetch("./t/x");
-          return {
+          const out = {
             ok: true,
             status: response.status,
             body: await response.text(),
             controlled: !!navigator.serviceWorker.controller,
             ms: elapsed(),
           };
+          if (params.has("stop")) {
+            await adapter.stop();
+            out.stillRegistered = !!(await navigator.serviceWorker.getRegistration("./"));
+          }
+          return out;
         } catch (error) {
           return { ok: false, name: error.name, reason: error.reason, message: error.message, ms: elapsed() };
         }
