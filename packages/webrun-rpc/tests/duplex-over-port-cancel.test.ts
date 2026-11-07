@@ -2,11 +2,13 @@ import type { Duplex } from "@statewalker/webrun-streams";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   duplexOverPort,
+  getPortCloseSignal,
   multiplexPort,
   STREAM_ABORT,
   serveDuplexOverPort,
   structuredCodec,
 } from "../src/index.js";
+import { STREAM_WINDOW, streamPorts } from "./stream-ports.js";
 
 const enc = new TextEncoder();
 
@@ -24,20 +26,19 @@ afterEach(() => {
   for (const c of open.splice(0)) c();
 });
 
-function streamPair(handler: Duplex) {
-  const channel = new MessageChannel();
-  channel.port1.start();
-  channel.port2.start();
+async function streamPair(windowed: boolean, handler: Duplex) {
+  const channel = await streamPorts(windowed, open);
   const off = serveDuplexOverPort(channel.port2, handler);
-  open.push(() => {
-    off();
-    channel.port1.close();
-    channel.port2.close();
-  });
+  open.push(off);
   return { call: duplexOverPort(channel.port1), channel };
 }
 
-describe("duplexOverPort — cancellation", () => {
+// Each case runs on a plain port and on a windowed one where both ends agreed
+// `pipeline` and `end`: an abandoned stream aborts, notifies and closes alike.
+describe.each([
+  { windowed: false, mode: "no window" },
+  { windowed: true, mode: "a window, pipeline and end agreed" },
+])("duplexOverPort — cancellation ($mode)", ({ windowed }) => {
   it("a caller that stops iterating runs the handler's finally", async () => {
     let cleanupRan = false;
     const unbounded: Duplex = async function* unbounded() {
@@ -50,7 +51,7 @@ describe("duplexOverPort — cancellation", () => {
         cleanupRan = true;
       }
     };
-    const { call } = streamPair(unbounded);
+    const { call, channel } = await streamPair(windowed, unbounded);
     let count = 0;
     for await (const _ of call([new Uint8Array(0)])) {
       count++;
@@ -59,15 +60,20 @@ describe("duplexOverPort — cancellation", () => {
     await waitFor("handler cleanup after caller break", () => cleanupRan);
     expect(count).toBe(3);
     expect(cleanupRan).toBe(true);
+    if (windowed) {
+      // Closed, not ended: the serving side learns of a close, never of a
+      // normal finish.
+      const closed = getPortCloseSignal(channel.port2);
+      await waitFor("the serving side's port closed", () => closed?.aborted === true);
+      expect(String(closed?.reason)).not.toMatch(/ended in both directions/);
+    }
   });
 
   it("posts the abort notice on the port rather than relying on close", async () => {
     // The ceiling: the notice is observable on the wire. Its floor is the test
     // above — the handler's finally actually ran because of it.
     const seen: unknown[] = [];
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     channel.port2.addEventListener("message", (event) => {
       const data = (event as MessageEvent).data as { type?: unknown } | undefined;
       if (data?.type === STREAM_ABORT) seen.push(data);
@@ -92,9 +98,7 @@ describe("duplexOverPort — cancellation", () => {
   });
 
   it("a handler teardown wakes a caller that is still reading", async () => {
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const off = serveDuplexOverPort(channel.port2, async function* () {
       while (true) {
         yield enc.encode("tick");
@@ -135,9 +139,7 @@ describe("duplexOverPort — cancellation", () => {
     // idempotent, so `.not.toThrow()` alone would pass even for a gutted
     // `off`. The floor is the peer-visible effect a caller actually depends
     // on: repeated teardown is safe *and* does not re-notify the peer.
-    const channel = new MessageChannel();
-    channel.port1.start();
-    channel.port2.start();
+    const channel = await streamPorts(windowed, open);
     const seen: unknown[] = [];
     channel.port1.addEventListener("message", (event) => {
       const data = (event as MessageEvent).data as { type?: unknown } | undefined;
@@ -164,9 +166,11 @@ describe("duplexOverPort — cancellation", () => {
     const channel = new MessageChannel();
     channel.port1.start();
     channel.port2.start();
+    const window = windowed ? STREAM_WINDOW : undefined;
     const serverMux = multiplexPort(channel.port2, {
       codec: structuredCodec,
       side: "responder",
+      window,
       onPort: (p) => {
         serveDuplexOverPort(p, async function* echoOrTick(input) {
           for await (const chunk of input) yield chunk;
@@ -180,6 +184,7 @@ describe("duplexOverPort — cancellation", () => {
     const clientMux = multiplexPort(channel.port1, {
       codec: structuredCodec,
       side: "initiator",
+      window,
     });
     open.push(() => {
       void clientMux.close();

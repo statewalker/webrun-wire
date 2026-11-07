@@ -1,8 +1,15 @@
 import { getPortCloseSignal } from "./close-signal.js";
 import type { MessageTarget } from "./message-target.js";
-import { nextTask, type PortCap, setPortAgreement, setPortSendState } from "./port-credit.js";
+import {
+  nextTask,
+  type PortCap,
+  setPortAgreement,
+  setPortEndState,
+  setPortSendState,
+} from "./port-credit.js";
 import type {
   OpenPortOptions,
+  PortCodec,
   PortEnvelope,
   PortInfo,
   PortMux,
@@ -26,16 +33,21 @@ const KEEPALIVE_ID = Number.MAX_SAFE_INTEGER;
 /** The longest delay a timer holds; past it `setInterval` fires at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
-/** What a windowed port offers in its `open`: every capability this end speaks. */
-const OWN_CAPS: readonly PortCap[] = ["pipeline"];
+/**
+ * What a windowed port offers in its `open`: every capability this end
+ * speaks. `end` only over a codec that reads it (`PortCodec.halfClose`).
+ */
+function ownCaps(codec: PortCodec): readonly PortCap[] {
+  return codec.halfClose ? ["pipeline", "end"] : ["pipeline"];
+}
 
 /**
  * The capabilities in a peer's `caps` that this end speaks too, or
  * `undefined` when the peer listed none (it is then treated as an older peer).
  */
-function sharedCaps(listed: unknown): Set<PortCap> | undefined {
+function sharedCaps(own: readonly PortCap[], listed: unknown): Set<PortCap> | undefined {
   if (!Array.isArray(listed)) return undefined;
-  return new Set(OWN_CAPS.filter((cap) => listed.includes(cap)));
+  return new Set(own.filter((cap) => listed.includes(cap)));
 }
 
 /** Ceiling on concurrently open virtual ports. Bounds the id table only. */
@@ -146,6 +158,18 @@ export function multiplexPort(
     waiters: { below: number; resolve: () => void }[];
     toGrant: number;
     grantScheduled: boolean;
+    /** This side's `end` is queued: anything posted afterwards is dropped. */
+    ending: boolean;
+    /** This side's `end` has left, behind the port's frames. */
+    endSent: boolean;
+    /** The peer's `end` has arrived. */
+    peerEnded: boolean;
+    /**
+     * Resolves `whenPortEnded`, once someone waits for it. Held weakly: the
+     * waiter's continuations would otherwise keep a dropped port reachable
+     * from the mux, and `onLeak` would never see it.
+     */
+    onPeerEnd?: WeakRef<() => void>;
   }
   /**
    * What the mux keeps of a port: never the consumer's `port` object itself,
@@ -216,6 +240,8 @@ export function multiplexPort(
   let muxClosed = false;
   /** This end counts encoded bytes and reassembles frames. */
   const exactCodec = codec.encode != null && codec.decode != null;
+  /** What this end offers on a windowed port. */
+  const caps = ownCaps(codec);
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
@@ -291,6 +317,29 @@ export function multiplexPort(
     }
   };
 
+  /**
+   * Both directions have ended: free the id as a close would, with no `close`
+   * on the wire (each end frees it on its own once it has seen both ends).
+   * Aborting the close signal is how the port's consumer learns it is gone.
+   */
+  const freeIfEnded = (id: number, c: Credit): void => {
+    const entry = open.get(id);
+    if (!c.endSent || !c.peerEnded || entry?.credit !== c) return;
+    freePartial(entry);
+    open.delete(id);
+    leaks?.unregister(entry.handle);
+    entry.handle.markClosed(new Error("webrun-rpc: the port ended in both directions"));
+  };
+  /** A peer that broke the port's protocol: hold none of its traffic, and close. */
+  const failPort = (id: number, entry: Entry, error: Error, reason: string): void => {
+    freePartial(entry);
+    dropOutgoing(id);
+    open.delete(id);
+    releaseWaiters(entry.credit);
+    entry.handle.markClosed(error);
+    post({ type: "close", id, reason });
+  };
+
   const releaseWaiters = (c: Credit | undefined): void => {
     for (const w of c?.waiters.splice(0) ?? []) w.resolve();
   };
@@ -299,8 +348,10 @@ export function multiplexPort(
     while (c.queue.length) {
       // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the queue is not empty.
       const next = c.queue[0]!;
-      // A message larger than the window goes out once nothing else is outstanding.
-      if (c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window) break;
+      // A message larger than the window goes out once nothing else is
+      // outstanding. An `end` (size 0) costs no window and never waits for credit.
+      if (next.size > 0 && c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window)
+        break;
       c.queue.shift();
       c.queued -= next.size;
       c.outstanding += next.size;
@@ -361,10 +412,15 @@ export function multiplexPort(
             waiters: [],
             toGrant: 0,
             grantScheduled: false,
+            ending: false,
+            endSent: false,
+            peerEnded: false,
           }
         : undefined;
     const self = newVirtualPort(
       (payload, transfer) => {
+        // This side's direction has ended: nothing more goes out on it.
+        if (c?.ending) return;
         touch(id);
         const envelope: PortEnvelope = { type: "message", id, payload };
         // Without a window nothing frames or waits: post at once, so the
@@ -462,6 +518,35 @@ export function multiplexPort(
             else c.waiters.push({ below, resolve: () => nextTask(resolve) });
           }),
       });
+      setPortEndState(self.port, {
+        end: () => {
+          if (isClosed() || !c.caps.has("end")) return false;
+          if (c.ending) return true;
+          c.ending = true;
+          // Behind what this side already posted: first in the window queue
+          // (a size-0 item), then in the fair-framing ring behind its frames.
+          c.queue.push({
+            size: 0,
+            send: () =>
+              sendOnPort(id, () => {
+                // A port closed meanwhile was abandoned, not ended: its peer
+                // hears the close alone, never an end that looks like a normal finish.
+                if (open.get(id)?.credit !== c) return;
+                post({ type: "end", id });
+                c.endSent = true;
+                freeIfEnded(id, c);
+              }),
+          });
+          flush(c);
+          return true;
+        },
+        watchPeerEnd: (resolve) => {
+          if (!c.caps.has("end")) return false;
+          if (c.peerEnded) resolve();
+          else c.onPeerEnd = new WeakRef(resolve);
+          return true;
+        },
+      });
       setPortAgreement(self.port, () => ({
         window: c.window,
         caps: c.caps,
@@ -519,7 +604,7 @@ export function multiplexPort(
       // the opener's answer to the ack before the window holds them: that
       // answer is what shows this end's codec reads credit at all.
       const credit = open.get(envelope.id)?.credit;
-      const listed = sharedCaps(envelope.caps);
+      const listed = sharedCaps(caps, envelope.caps);
       if (credit) {
         const ack: PortEnvelope = credit.exact
           ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
@@ -558,13 +643,26 @@ export function multiplexPort(
           c.exact = false;
           c.outstanding = 0;
         }
-        c.caps = sharedCaps(envelope.caps) ?? new Set();
+        c.caps = sharedCaps(caps, envelope.caps) ?? new Set();
         // Show the responder its codec reads credit, so it may hold back too.
         post({ type: "credit", id: envelope.id, bytes: 0 });
       }
       c.enforced = true;
       c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
       flush(c);
+      return;
+    }
+
+    // Nothing follows a peer's `end` on its direction but credit: an honest
+    // sender drops what is posted after it. Delivering more would hand the
+    // consumer data after it was told the input is over.
+    if ((envelope.type === "message" || envelope.type === "frame") && entry?.credit?.peerEnded) {
+      failPort(
+        envelope.id,
+        entry,
+        new Error("webrun-rpc: the peer sent on a port after its end"),
+        "protocol",
+      );
       return;
     }
 
@@ -613,12 +711,12 @@ export function multiplexPort(
             : undefined;
       if (overrun) {
         // A peer that frames past what it may send: hold none of it.
-        freePartial(entry);
-        dropOutgoing(envelope.id);
-        open.delete(envelope.id);
-        releaseWaiters(c);
-        entry.handle.markClosed(new RangeError(`webrun-rpc: a framed message passed ${overrun}`));
-        post({ type: "close", id: envelope.id, reason: "max-reassembled-bytes" });
+        failPort(
+          envelope.id,
+          entry,
+          new RangeError(`webrun-rpc: a framed message passed ${overrun}`),
+          "max-reassembled-bytes",
+        );
         return;
       }
       partial.bytes += size;
@@ -636,6 +734,27 @@ export function multiplexPort(
       const inner = codec.decode(whole);
       if (inner?.type !== "message" || inner.id !== envelope.id) return;
       entry.handle.deliver(inner.payload, whole.byteLength);
+      return;
+    }
+
+    if (envelope.type === "end") {
+      if (!entry) return;
+      const c = entry.credit;
+      // Only where `end` was agreed. Anywhere else the peer broke the protocol,
+      // as with a pipelined chunk where pipelining was not agreed.
+      if (!c?.caps.has("end")) {
+        failPort(
+          envelope.id,
+          entry,
+          new Error("webrun-rpc: the peer ended a port where end was not agreed"),
+          "protocol",
+        );
+        return;
+      }
+      touch(envelope.id);
+      c.peerEnded = true;
+      c.onPeerEnd?.deref()?.();
+      freeIfEnded(envelope.id, c);
       return;
     }
 
@@ -750,8 +869,8 @@ export function multiplexPort(
       post(
         window
           ? exactCodec
-            ? { type: "open", id, meta, window, exact: true, caps: [...OWN_CAPS] }
-            : { type: "open", id, meta, window, caps: [...OWN_CAPS] }
+            ? { type: "open", id, meta, window, exact: true, caps: [...caps] }
+            : { type: "open", id, meta, window, caps: [...caps] }
           : { type: "open", id, meta },
       );
       if (portSignal) {

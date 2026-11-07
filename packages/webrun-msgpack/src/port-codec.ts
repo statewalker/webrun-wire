@@ -18,7 +18,8 @@ function isEnvelope(value: unknown): value is PortEnvelope {
     candidate.type === "credit" ||
     candidate.type === "frame" ||
     candidate.type === "ping" ||
-    candidate.type === "pong"
+    candidate.type === "pong" ||
+    candidate.type === "end"
   );
 }
 
@@ -68,6 +69,9 @@ function decodeEnvelope(data: unknown): PortEnvelope | undefined {
  * not come to — see spec D16.
  */
 export const msgpackCodec: PortCodec = {
+  // `read` accepts `end`, so windowed ports over this codec offer it.
+  halfClose: true,
+
   post(port, envelope) {
     port.postMessage(serialize(envelope));
   },

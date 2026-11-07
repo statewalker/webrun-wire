@@ -78,7 +78,7 @@ Port multiplexing:
 | `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
 | `portBufferedAmount(port)`, `whenPortReady(port, below?)` | A windowed port's queued bytes, and a promise for room. See below. |
 | `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
-| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames). |
+| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames) and `halfClose: true` for a codec that reads `end`. |
 | `structuredCodec` | Envelopes passed through unencoded. |
 | `DEFAULT_MAX_PORTS` | `1024`. |
 | `PORT_TRANSFER` | `"webrun-rpc:port-transfer"`, the `type` of the message that carries a port. |
@@ -345,13 +345,42 @@ keeps running without flow control, as it always did; `ports()` reports `window`
 in force. A peer's `window` that is not a positive integer is ignored.
 
 **A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
-`caps: ["pipeline"]`, what this mux speaks on the port, and the responder's ack answers with the
+`caps: ["pipeline", "end"]` (`end` only over a codec that declares it, below), what this mux
+speaks on the port, and the responder's ack answers with the
 subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
 could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
 control is one chunk, or the window where both ends pipeline" below); nothing else changes
 meaning. The responder still holds its own sends back only once the opener has answered its ack,
 as above: a responder over a codec that drops credit envelopes would otherwise wedge its own port
 after one window.
+
+**Where `end` is agreed, each direction of a port can end on its own.** An `end` envelope leaves
+behind everything already posted on that port: it is a size-0 item in the port's window queue, so
+it needs no credit, and with `frameSize` it takes its turn in the port's queue behind the frames of
+the last message. So the peer has every byte before it sees the end, even of a last message larger
+than the window. Anything posted on that side afterwards is dropped. A port closed while its `end`
+still waits in the queue sends its `close` alone: an abandoned port never looks finished. The other
+direction keeps sending, and both keep returning credit, until it ends too. Once both directions have ended, each
+end frees the id on its own, with no `close` on the wire, and the port's close signal aborts with
+`webrun-rpc: the port ended in both directions`. `duplexOverPort` sends it when a stream ends
+normally (see "A stream that ends normally ends its port" below); no exported function sends it
+directly. An `end` from a peer where it was not agreed (no window, or not in the handshake) is a
+protocol violation: the port closes, with `close` reason `"protocol"`, and its close signal aborts
+with `webrun-rpc: the peer ended a port where end was not agreed`. So is a `message` or `frame`
+from a peer after its own `end` (`webrun-rpc: the peer sent on a port after its end`): an honest
+sender drops whatever it posts after ending, and delivering it would hand the consumer data after
+it was told its input was over.
+
+**A codec must declare that it reads `end`, or `end` is never offered.** `PortCodec.halfClose:
+true` says the codec's `read` (and `decode`) accept the `end` envelope; `structuredCodec` and
+`msgpackCodec` set it. A mux over a codec without it offers only `pipeline` and agrees `end` with
+nobody, so its ports close. The flag exists because the failure it prevents is silent: a codec
+whose `read` accepts a fixed list of envelope types, without `end`, would let both muxes agree
+`end` and then lose it on the way in. The sender frees the id; the receiver never sees the end,
+and the port stays in its `ports()` after a normal finish until the mux closes, with no error,
+until a full table refuses new ports with `maxPorts (<n>) reached`. A codec spread from a
+built-in, `{ ...structuredCodec, read: myRead }`, inherits `halfClose: true`: `myRead` must then
+accept `end`, or the codec must leave the flag out.
 
 **Closing does not wait for credit.** A port closed with messages still queued sends them at once,
 then its close, regardless of the window: a peer that stopped returning credit (a listener that
@@ -426,17 +455,18 @@ already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta?, window?, exact?, caps? }`,
 `{ type: "message", id, payload }`, `{ type: "close", id, reason? }`, with a window
-`{ type: "credit", id, bytes, exact?, caps? }`, with
+`{ type: "credit", id, bytes, exact?, caps? }` and, where agreed, `{ type: "end", id }`, with
 `frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id }` /
 `{ type: "pong", id }` (on `Number.MAX_SAFE_INTEGER`). The codecs' `read` accept only objects with a non-negative integer `id`
-and one of those seven types, so other traffic on a shared port is
+and one of those eight types, so other traffic on a shared port is
 ignored.
 `structuredCodec` passes envelopes through unencoded, so `ArrayBuffer`s move zero-copy through the
 transfer list; it omits an empty transfer list because some implementations reject one.
 
 ### A port lives until its transport or its user lets go
 
-A port leaves the table only when one side closes it or the mux closes. Nothing else frees it, and
+A port leaves the table only when one side closes it, both directions end (`end`, above) or the mux
+closes. Nothing else frees it, and
 a full table refuses every new port. So both lifetimes are wired in explicitly:
 
 - **The transport.** A `MessagePort`, a terminated worker or a dead libp2p stream gives no close
@@ -658,6 +688,55 @@ Know what you buy if you set it. The clock resets only when a chunk call returns
 is withheld until the consumer has pulled past the value (a pipelined chunk resets it when sent
 and when received, and the window holds the next one back the same way). The clock cannot tell
 "slow" from "dead": a consumer slower than the timeout **is** failed.
+
+### A stream that ends normally ends its port
+
+Where both ends agreed `end`, a stream that ends normally in both directions frees its port on
+both ends with no `close` on the wire, and `ports()` no longer lists it. So the port's life
+follows the stream's own end, not a `close()` someone has to remember: a side that forgets it, or
+a relay that sees the stream end and still holds the port, no longer keeps an id until the mux
+closes. Each side posts its last chunk (`done`), then ends its direction:
+
+- **The caller** ends once the handler's last chunk arrived without an error and its own last
+  chunk left without one: posted when pipelined, confirmed when not.
+- **The serving side** ends once the handler's last chunk left without an error and no more input
+  is coming: the caller's last chunk arrived without an error, or the caller ended its direction.
+  The second is a handler that returned without reading all its pipelined input; that input is
+  dropped, as a close would drop it. A confirmed chunk the handler never read is never confirmed,
+  so the caller's own end never left: that stream is closed (below). It happens to input sent
+  before the handshake settled, so a short request whose handler ignores its body closes.
+
+Nothing either side still owes the other is lost behind its `end`, after which anything it posts
+is dropped: each side's last confirmation leaves before its `end`, and the caller ends only once
+its own last chunk was confirmed, so the serving side owes it nothing more. Freeing the port
+aborts its close signal with `webrun-rpc: the port ended in both directions` once both sides have
+finished, so no result or chunk in flight fails, and neither the caller nor the handler sees an
+error.
+
+A side that only waits for its peer's `end` (a handler that returned without reading all its
+input, its last chunk already out) keeps its port by itself: the watcher that waits for that `end`
+is a listener of the port, and so reachable from the mux. Nothing else of the stream may still
+hold the port then, and a port nobody holds is collected and reported by `onLeak` instead of
+ending (`tests/duplex-end.test.ts` forces a collection there). A close drops the watcher with the
+port's other listeners, so an abandoned stream leaves nothing waiting.
+
+A peer that ends its direction without its last chunk, or behind a last chunk that carries an
+error, is breaking the stream: its consumer would wait for a chunk that cannot come, or take an
+input that failed for one that finished. The input fails with `webrun-rpc: the peer ended its
+direction without finishing it; the stream port is closed`, and this side posts its notice and
+closes the port. The caller's side learns of the agreement from the ack, so it watches for this
+from the handler's first chunk on: a handler that ends having sent no chunk at all leaves the
+caller waiting, as any silent peer does, until its `timeout`.
+
+Anything else is an abandonment, closed with the notice first (below): the caller returning
+early, a timeout, a teardown, and a last chunk that carries an error, from the handler or from the
+caller's input. Without `end` (no window, a peer or a codec that does not offer it) the caller
+closes a normally finished stream too, notice and then `close()`, and the serving side waits for
+that close.
+
+A peer that stops before it ends its own direction keeps the port in both ends' `ports()` until
+the port or a mux closes. A stream's `timeout` has stopped on the side that already ended, so it
+takes the transport's `signal` or `keepalive` to notice, as for any peer that goes silent.
 
 ### How an abandoned stream is reported
 

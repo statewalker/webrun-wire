@@ -253,9 +253,10 @@ circular reference makes `serialize` throw.
 It accepts a `Uint8Array`, an `ArrayBuffer`, or any `ArrayBufferView` (a `DataView` included,
 offset and length honoured). Everything else returns `undefined`, which the multiplexer treats as
 "not ours": a non-byte value, empty bytes, malformed MessagePack, and valid MessagePack that is not
-a `PortEnvelope` (`id` must be a non-negative integer, `type` one of `open` / `message` / `close`).
+a `PortEnvelope` (`id` must be a non-negative integer, `type` one of `open` / `message` / `close` / `credit` / `end` / `frame` / `ping` / `pong`).
 A shared transport may carry other traffic, and the multiplexer must not mistake it for an
-envelope.
+envelope. Because `end` is on that list, the codec declares `halfClose: true`, and a windowed port
+over it offers half-close; a codec without the flag never does.
 
 Refusal is a dropped message, never a throw. A throw here would escape inside the raw port's own
 listener, outside any consumer's reach, and one hostile frame could take the multiplexer down.

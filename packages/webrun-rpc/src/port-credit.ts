@@ -61,7 +61,7 @@ export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
 }
 
 /** A capability two ends agree on for one windowed port, in its `open` and the ack. */
-export type PortCap = "pipeline";
+export type PortCap = "pipeline" | "end";
 
 /**
  * What two ends have agreed for one windowed port so far. `caps`: what both
@@ -90,3 +90,58 @@ export function setPortAgreement(port: MessageTarget, agreement: () => PortAgree
 export function portAgreement(port: MessageTarget): PortAgreement | undefined {
   return agreements.get(port)?.();
 }
+
+/** @internal The half-close of one windowed port (capability `"end"`). */
+export interface PortEndState {
+  /** Queue this side's `end`; `false` when `end` was not agreed. */
+  end(): boolean;
+  /**
+   * Calls `resolve` once the peer has ended its direction (at once if it has
+   * already); `false`, and `resolve` is never called, when `end` was not
+   * agreed. The mux holds `resolve` weakly, so a port dropped while someone
+   * waits on it can still be collected (`onLeak`).
+   */
+  watchPeerEnd(resolve: () => void): boolean;
+}
+
+const ends = new WeakMap<MessageTarget, PortEndState>();
+
+/** @internal Registered by the multiplexer for each port with a window. */
+export function setPortEndState(port: MessageTarget, state: PortEndState): void {
+  ends.set(port, state);
+}
+
+/**
+ * @internal End this side's direction of `port`: an `end` is queued behind
+ * everything already posted on it, and anything posted afterwards is dropped.
+ * `false`, and nothing changes, when `end` was not agreed (no window, the
+ * handshake not answered yet, or a peer that does not speak it): the caller
+ * then closes the port. Never waits on the peer. Not exported from the package.
+ */
+export function endPort(port: MessageTarget): boolean {
+  return ends.get(port)?.end() ?? false;
+}
+
+/**
+ * @internal Resolves once the peer has ended its direction of `port`. It never
+ * settles otherwise: not on a port where `end` is not agreed when it is asked
+ * (no window, the handshake not answered yet, a peer or codec without it), and
+ * not when the port closes first, so a caller races it against the port's
+ * close signal. Not exported from the package.
+ */
+export function whenPortEnded(port: MessageTarget): Promise<void> {
+  let waiting = peerEnds.get(port);
+  if (!waiting) {
+    let resolve: () => void = () => {};
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    if (!ends.get(port)?.watchPeerEnd(resolve)) return promise;
+    // Held from the port only: what waits on it lives as long as the port.
+    waiting = { promise, resolve };
+    peerEnds.set(port, waiting);
+  }
+  return waiting.promise;
+}
+
+const peerEnds = new WeakMap<MessageTarget, { promise: Promise<void>; resolve: () => void }>();

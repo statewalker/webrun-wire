@@ -19,6 +19,8 @@ export type PortEnvelope =
    * opener listed some.
    */
   | { type: "credit"; id: number; bytes: number; exact?: boolean; caps?: string[] }
+  /** Half-close (capability `"end"`): the sender's direction of the port has ended. */
+  | { type: "end"; id: number }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
   | { type: "frame"; id: number; data: Uint8Array; last?: boolean }
   /** Keepalive (`keepalive`): the mux's own liveness probe and its answer, on an id no port takes. */
@@ -47,6 +49,15 @@ export interface PortCodec {
   encode?(envelope: PortEnvelope): Uint8Array;
   /** Optional, with `encode`: an envelope back from its bytes, or `undefined`. */
   decode?(data: unknown): PortEnvelope | undefined;
+  /**
+   * Optional: this codec's `read` (and `decode`) accept the `end` envelope.
+   * Only then does a windowed port offer the `end` capability. A codec that
+   * dropped `end` would leave a port that ended normally in the peer's table
+   * (`ports()`) until the mux closes, with no error anywhere. A codec spread
+   * from a built-in (`{ ...structuredCodec, read }`) inherits the flag: its
+   * own `read` must then accept `end` too, or it must drop the flag.
+   */
+  halfClose?: true;
 }
 
 export interface PortMuxOptions {
