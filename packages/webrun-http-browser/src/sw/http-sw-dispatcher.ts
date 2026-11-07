@@ -72,14 +72,15 @@ export interface SwHttpDispatcherOptions {
    * projects under a base path. It decides for `dispatch()` (and so a handler's `service.fetch`),
    * for sockets, and for `fetch` events of this origin's urls.
    *
-   * A key it gives a url of another origin is for calls between handlers only (`service.fetch`,
-   * sockets): `fetch` events for other origins stay the browser's, so a page's request to that
-   * origin goes to the network as it would without the worker.
+   * A key it gives a url of another origin serves handlers' `service.fetch` (through
+   * `dispatch()`) and sockets, which this worker brokers whoever opens them (pages of this origin
+   * included). A page's own `fetch` to that origin stays the browser's: `fetch` events for other
+   * origins are left alone, so it goes to the network as it would without the worker.
    *
    * It runs synchronously, in the `fetch` listener; it must not throw. A handler registered in a
-   * page (`SwHttpAdapter.register`) serves only urls under its own `baseUrl`: a url the function
-   * maps to its key from elsewhere reaches the page and gets a 404 there, where a handler in a
-   * worker (`serveHttpInWorker`) takes any url.
+   * page (`SwHttpAdapter.register`) serves only urls under its own `baseUrl` (prefix `""` makes
+   * that the scope): a url the function maps to its key from elsewhere reaches the page and gets
+   * a 404 there, where a handler in a worker (`serveHttpInWorker`) takes any url.
    */
   key?: KeyFunction;
   /**
