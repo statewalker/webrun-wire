@@ -124,6 +124,18 @@ export function upgradeWebSocket(
   const protocol = options.protocol ?? "";
   const channel = new MessageChannel();
   const socket = new ServerWebSocket(channel.port1, { ...options, url: request.url, protocol });
+  const response = webSocketUpgradeResponse(channel.port2, protocol);
+  Object.defineProperty(response, "webSocket", { value: socket, configurable: true });
+  return { socket, response };
+}
+
+/**
+ * A 101 for a socket whose server end the handler runs itself, on the other end of `port`
+ * (a server of its own over this package's frames, say): what `upgradeWebSocket` returns, minus
+ * the `ServerWebSocket`. The host hands `port` to the caller as it would for `upgradeWebSocket`
+ * (`takePort`), and `protocol` (`""` for none) is the subprotocol picked.
+ */
+export function webSocketUpgradeResponse(port: MessagePort, protocol = ""): Response {
   const response = new Response(null, {
     status: 200,
     headers: protocol ? { "sec-websocket-protocol": protocol } : {},
@@ -131,10 +143,9 @@ export function upgradeWebSocket(
   Object.defineProperties(response, {
     status: { value: 101, configurable: true },
     statusText: { value: "Switching Protocols", configurable: true },
-    webSocket: { value: socket, configurable: true },
-    [UPGRADE]: { value: { port: channel.port2, protocol }, configurable: true, writable: true },
+    [UPGRADE]: { value: { port, protocol }, configurable: true, writable: true },
   });
-  return { socket, response };
+  return response;
 }
 
 /**

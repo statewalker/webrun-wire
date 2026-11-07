@@ -506,6 +506,72 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(names).toEqual(["B", "A", "B"]);
       });
 
+      it("a request route waits for: served by that handler, not timed out by another's attach", async () => {
+        const page = await open("?sw=route%3Dslot");
+        await run(page, `await window.attach("A", { id: "a" });`);
+        const text = await run<string>(
+          page,
+          `
+      // route waits for slot "c": another handler attaching first must not end the wait.
+      const answer = fetch("./app/who", { headers: { "x-slot": "c" } }).then((r) => r.text());
+      await new Promise((r) => setTimeout(r, 200));
+      await window.attach("D", { id: "d" });
+      await new Promise((r) => setTimeout(r, 300));
+      await window.attach("C", { id: "c" });
+      return await answer;
+    `,
+        );
+        expect(text).toBe("C");
+      });
+
+      it("socketHeaders: a page's socket loses the headers a handler's keeps", async () => {
+        const page = await open("?sw=route%3Dslot%26pagesocketheaders");
+        await run(
+          page,
+          `await window.attach("A", { id: "a" }); await window.attach("B", { id: "b" });`,
+        );
+        const replies = await run<string[]>(
+          page,
+          `
+      const fromPage = async (slot) => {
+        const WS = lib.createWebSocketClass((u, protocols) =>
+          window.adapter.connectWebSocket(u, protocols, { "x-slot": slot }),
+        );
+        const ws = new WS(new URL("./app/chat", location.href));
+        const reply = await new Promise((resolve, reject) => {
+          ws.onopen = () => ws.send("hi");
+          ws.onmessage = (event) => resolve(event.data);
+          ws.onerror = () => reject(new Error("socket failed"));
+        });
+        ws.close();
+        return reply;
+      };
+      const fromHandler = (slot) =>
+        fetch("./app/ws-up?slot=" + slot + "&url=" + encodeURIComponent(new URL("./app/chat", location.href)), {
+          headers: { "x-slot": "a" },
+        }).then((r) => r.text());
+      return [await fromPage("b"), await fromHandler("b")];
+    `,
+        );
+        // The page's header is dropped (route falls back to the first handler); A's is kept.
+        expect(replies).toEqual(["A:hi", "A got B:hello"]);
+      });
+
+      it("the failure option answers the dispatcher's own failures", async () => {
+        const page = await open("?sw=route%3Dslot%26failure%26attach%3D500");
+        await run(page, `await window.attach("A", { id: "a" });`);
+        const timedOut = await run<string>(
+          page,
+          `const r = await fetch("./app/who", { headers: { "x-slot": "nobody" } }); return r.status + " " + await r.text();`,
+        );
+        expect(timedOut).toBe("503 failure:timeout");
+        const gone = await run<string>(
+          page,
+          `await window.workers.A.link.detach(); const r = await fetch("./app/who"); return r.status + " " + await r.text();`,
+        );
+        expect(gone).toBe("404 failure:gone");
+      });
+
       it("drain: the request in flight finishes, a later one waits for the next owner", async () => {
         const page = await open();
         await run(page, `await window.attach("A", { id: "slot" });`);

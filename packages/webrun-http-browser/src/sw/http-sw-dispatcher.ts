@@ -63,6 +63,18 @@ export function scopeKey(url: URL, scope: string): string | undefined {
   }
 }
 
+/** What went wrong with a request the dispatcher took, for the `failure` option. */
+export interface DispatchFailure {
+  /**
+   * - `"timeout"`: no handler `route` accepts attached within `attachTimeoutMs` (a hand-over,
+   *   or `route` waiting for one handler in particular);
+   * - `"gone"`: the key was served before, and no handler is left (its tab closed);
+   * - `"lost"`: the handler was lost while the request was in flight.
+   */
+  kind: "timeout" | "gone" | "lost";
+  error?: unknown;
+}
+
 export interface SwHttpDispatcherOptions {
   self: ServiceWorkerGlobalScope;
   log?: (...args: unknown[]) => void;
@@ -91,6 +103,24 @@ export interface SwHttpDispatcherOptions {
    * then. The `install`/`activate` handlers (`skipWaiting`, `clients.claim`) stay on either way.
    */
   handleFetch?: boolean;
+  /**
+   * The answer to a request the dispatcher took and could not deliver (`DispatchFailure`).
+   * Default: 503 for `"timeout"`, 404 for `"gone"`, a plain-text 502 with the error for
+   * `"lost"`. A host whose callers expect another shape (an error its RPC layer rethrows, say)
+   * answers in it here.
+   */
+  failure?: (request: Request, failure: DispatchFailure) => Response | Promise<Response>;
+  /**
+   * The headers a socket's upgrade carries to `route` and to its handler, by who asked for it:
+   * `"page"` (a page's `connectWebSocket`, `serviceWorkerWebSocketClass`) or `"handler"` (a
+   * handler's `service.connectWebSocket`). Default: as given. A host whose handlers trust some
+   * headers (routing between its own workers) drops them from pages' sockets here, as it would
+   * from pages' fetches.
+   */
+  socketHeaders?: (
+    headers: [string, string][] | undefined,
+    from: "page" | "handler",
+  ) => [string, string][] | undefined;
   /**
    * The answer to a navigation under the scope whose key nobody serves (also one taken before
    * the stored keys are read, after a restart). Default `fetch(request)`, the network. A host
@@ -281,7 +311,11 @@ export class SwHttpDispatcher {
           protocols?: string[];
           headers?: [string, string][];
         };
-        const connection = await this.connectWebSocket(url, protocols ?? [], headers);
+        const connection = await this.connectWebSocket(
+          url,
+          protocols ?? [],
+          this._socketHeaders(headers, "page"),
+        );
         return withTransfer(connection, [connection.port]);
       }),
     );
@@ -338,30 +372,57 @@ export class SwHttpDispatcher {
     if (key === undefined) return await fetch(request);
     await this._restored.catch(() => {});
     const entry = await this._acquire(request, key);
-    if (entry === TIMED_OUT) {
-      return new Response(null, {
-        status: 503,
-        statusText: "Service Unavailable (no handler attached in time)",
-      });
-    }
+    if (entry === TIMED_OUT) return await this._failed(request, { kind: "timeout" });
     if (!entry) {
       if (!this.serves(key)) return await fetch(request);
       // Key was served at some point but has no live handler now (its tab
       // closed). 404 rather than the network: a dev server's SPA fallback
       // would serve the app shell for every site url and stale tabs would
       // keep resurrecting registrations.
-      return new Response(null, { status: 404, statusText: "Not Found (no active handler)" });
+      return await this._failed(request, { kind: "gone" });
     }
     try {
       return await entry.link.send(request);
     } catch (error) {
       this.log("[dispatch] failed", key, error);
-      return new Response(errorMessage(error), {
-        status: 502,
-        statusText: "Bad Gateway",
-        headers: { "content-type": "text/plain; charset=utf-8" },
+      return await this._failed(request, { kind: "lost", error });
+    }
+  }
+
+  /**
+   * Settles once the keys this worker served before a restart are read back (whatever the
+   * outcome). Until then `serves()` may answer `false` for a key it will serve.
+   */
+  get ready(): Promise<void> {
+    return this._restored.then(
+      () => {},
+      () => {},
+    );
+  }
+
+  private _socketHeaders(
+    headers: [string, string][] | undefined,
+    from: "page" | "handler",
+  ): [string, string][] | undefined {
+    return this.options.socketHeaders ? this.options.socketHeaders(headers, from) : headers;
+  }
+
+  private async _failed(request: Request, failure: DispatchFailure): Promise<Response> {
+    if (this.options.failure) return await this.options.failure(request, failure);
+    if (failure.kind === "timeout") {
+      return new Response(null, {
+        status: 503,
+        statusText: "Service Unavailable (no handler attached in time)",
       });
     }
+    if (failure.kind === "gone") {
+      return new Response(null, { status: 404, statusText: "Not Found (no active handler)" });
+    }
+    return new Response(errorMessage(failure.error), {
+      status: 502,
+      statusText: "Bad Gateway",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
   }
 
   /**
@@ -602,29 +663,43 @@ export class SwHttpDispatcher {
     request: Request,
     key: string,
   ): Promise<HandlerEntry | typeof TIMED_OUT | undefined> {
+    const deadline = Date.now() + (this.options.attachTimeoutMs ?? 15_000);
     const picked = await this._pick(request, key);
     if (picked) return picked;
-    if (this.table.all(key).length > 0) {
-      // A hand-over: every handler of the key drains, or `route` declined
-      // them all. Wait for the next owner.
-      const attached = await this.table.waitFor(
-        key,
-        this.options.attachTimeoutMs ?? 15_000,
-        this.table.live(key).length > 0,
-      );
-      return attached ? ((await this._pick(request, key)) ?? TIMED_OUT) : TIMED_OUT;
-    }
-    const vacantUntil = this._vacant.get(key) ?? 0;
-    if (vacantUntil > Date.now()) {
+    if (this.table.all(key).length === 0) {
+      const vacantUntil = this._vacant.get(key) ?? 0;
       // The last handler was drained: wait for the next owner.
-      const attached = await this.table.waitFor(key, vacantUntil - Date.now());
-      return attached ? ((await this._pick(request, key)) ?? TIMED_OUT) : TIMED_OUT;
+      if (vacantUntil > Date.now()) return await this._waitToPick(request, key, vacantUntil);
+      if (!this.serves(key)) return undefined;
+      // Nothing attached for a key this worker served: it may have restarted
+      // and lost its links. Ask the pages for them.
+      await this._askForLinks(key);
+      const relinked = await this._pick(request, key);
+      if (relinked) return relinked;
+      // Nobody came back: the key's handlers are gone.
+      if (this.table.all(key).length === 0) return undefined;
     }
-    if (!this.serves(key)) return undefined;
-    // Nothing attached for a key this worker served: it may have restarted
-    // and lost its links. Ask the pages for them.
-    await this._askForLinks(key);
-    return await this._pick(request, key);
+    // A hand-over (every handler of the key drains), or `route` declined the
+    // ones there are (it waits for one in particular): wait until a handler
+    // it accepts attaches, not just the next one.
+    return await this._waitToPick(request, key, deadline);
+  }
+
+  /** Waits for attaches until `route` accepts a handler, or `until` passes. */
+  private async _waitToPick(
+    request: Request,
+    key: string,
+    until: number,
+  ): Promise<HandlerEntry | typeof TIMED_OUT> {
+    for (;;) {
+      const left = until - Date.now();
+      if (left <= 0) return TIMED_OUT;
+      // In steps of at most a second: an attach between the last pick and
+      // this wait is then noticed at the next step rather than missed.
+      await this.table.waitFor(key, Math.min(left, 1_000), true);
+      const picked = await this._pick(request, key);
+      if (picked) return picked;
+    }
   }
 
   private async _pick(request: Request, key: string): Promise<HandlerEntry | undefined> {
@@ -724,7 +799,11 @@ export class SwHttpDispatcher {
         return;
       case "ws-open":
         // A handler opens a socket to another handler, through this router.
-        this.connectWebSocket(message.url, message.protocols, message.headers).then(
+        this.connectWebSocket(
+          message.url,
+          message.protocols,
+          this._socketHeaders(message.headers, "handler"),
+        ).then(
           ({ port, protocol }) =>
             entry.ctl?.postMessage(
               { t: "ws-opened", id: message.id, protocol, port } satisfies ControlMessage,
