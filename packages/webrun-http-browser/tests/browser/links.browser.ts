@@ -777,6 +777,32 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(fromPage).toEqual(["B:hi", "A:hi"]);
       });
 
+      it("the handler sees the socket's headers, in the same page and through the router", async () => {
+        const page = await open();
+        await run(page, `await window.attach("A");`);
+        const replies = await run<string[]>(
+          page,
+          `
+      const ask = async (path, slot) => {
+        const WS = lib.createWebSocketClass((u, protocols) =>
+          window.adapter.connectWebSocket(u, protocols, { "x-slot": slot }),
+        );
+        const ws = new WS(new URL(path, location.href));
+        const reply = await new Promise((resolve, reject) => {
+          ws.onopen = () => ws.send("?");
+          ws.onmessage = (event) => resolve(event.data);
+          ws.onerror = () => reject(new Error("socket failed"));
+        });
+        ws.close();
+        return reply;
+      };
+      return [await ask("./page/ws-header", "p"), await ask("./app/ws-header", "w")];
+    `,
+        );
+        // The page's own handler (no ServiceWorker) and a worker's, through it.
+        expect(replies).toEqual(["page:p", "A:w"]);
+      });
+
       it("from a page with no adapter: serviceWorkerWebSocketClass", async () => {
         const page = await open();
         await run(page, `await window.attach("A");`);

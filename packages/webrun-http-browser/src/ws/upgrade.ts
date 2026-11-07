@@ -23,7 +23,11 @@ export const WS_VERSION_HEADER = "x-webrun-ws-version";
 export interface WebSocketUpgradeInit {
   /** Requested subprotocols, in order of preference. */
   protocols?: string[];
-  /** More headers for the handler to see (cookies, origin, authorization...). */
+  /**
+   * More headers for the handler to see (what a `route` function picks by, origin...). They are
+   * the caller's word: nothing checks them, so a handler trusts a `cookie` or an `authorization`
+   * here no more than its caller. `sec-websocket-protocol` comes from `protocols` only.
+   */
   headers?: HeadersInit;
 }
 
@@ -43,6 +47,9 @@ export function newWebSocketUpgradeRequest(
   all.set("connection", "Upgrade");
   all.set("sec-websocket-version", "13");
   if (!all.has("sec-websocket-key")) all.set("sec-websocket-key", randomKey());
+  // `protocols` alone says which subprotocols are asked for: a header of the caller's could
+  // name one the handler then picks, and the upgrade refuses as "not requested".
+  all.delete("sec-websocket-protocol");
   if (protocols.length > 0) all.set("sec-websocket-protocol", protocols.join(", "));
   if (!all.has(WS_VERSION_HEADER)) all.set(WS_VERSION_HEADER, `${WS_PORT_PROTOCOL_VERSION}`);
   return withHeaders(new Request(httpUrl, { method: "GET", headers: all }), all);

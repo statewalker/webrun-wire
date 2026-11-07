@@ -12,6 +12,14 @@ export function newHandler(name, extra = {}) {
     const [, route = ""] = url.pathname.match(/\/(?:links\/[^/]+|~[^/]+|svc)\/(.*)$/) ?? [];
     if (isWebSocketUpgrade(request)) {
       if (route === "ws-refuse") return new Response(null, { status: 404 });
+      if (route === "ws-header") {
+        // Answers every message with the `x-slot` header its upgrade request carried.
+        const { socket, response } = upgradeWebSocket(request);
+        socket.accept();
+        const slot = request.headers.get("x-slot");
+        socket.addEventListener("message", () => socket.send(`${name}:${slot}`));
+        return response;
+      }
       const protocol = requestedProtocols(request)[0] ?? "";
       const { socket, response } = upgradeWebSocket(request, { protocol });
       socket.accept();

@@ -438,10 +438,13 @@ const WS = serviceWorkerWebSocketClass();                     // any controlled 
 const WS2 = service.WebSocket;                                // in a worker, via the router
 ```
 
-A socket that needs headers (cookies, or what a `route` function picks the
-handler by) opens through `connectWebSocket(url, protocols, headers)`, from a
-page's adapter or a worker's service; the handler sees them on the upgrade
-request:
+A socket that needs headers (what a `route` function picks the handler by, a
+shard, an origin) opens through `connectWebSocket(url, protocols, headers)`,
+from a page's adapter or a worker's service; the handler sees them on the
+upgrade request. They are the caller's word: nothing checks them, so a handler
+trusts a `cookie` or an `authorization` there no more than its caller. An
+older ServiceWorker (still active while a newer one waits) drops them, so a
+handler that needs one should refuse an upgrade without it:
 
 ```ts
 const WS3 = createWebSocketClass((url, protocols) =>
