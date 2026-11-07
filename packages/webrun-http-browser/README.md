@@ -359,6 +359,8 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | Option | Default | What it does |
 | --- | --- | --- |
 | `key` | `scopeKey` | `(url, scope) => key \| undefined`: which key a url belongs to, for `dispatch()` (a handler's `service.fetch`), sockets, and `fetch` events of this origin. By default the first path segment under the scope; give your own for another layout (a site at the origin's root, projects under a base path). A key for another origin's url serves handlers' `service.fetch` and sockets (whoever opens them); a page's own `fetch` to that origin stays the browser's. Synchronous; must not throw. A handler registered in a page serves only urls under its own `baseUrl`. |
+| `handleFetch` | `true` | `false` leaves `fetch` events to the host's own listener, which passes what it does not answer itself to `dispatcher.handleFetch(event, request?)` (see below). Only for a dispatcher you construct: `startHttpDispatcher` refuses it. |
+| `unserved` | `fetch(request)` | The answer to a navigation under the scope whose key nobody serves (also one taken before the stored keys are read, after a restart). A host page for such urls goes here. Other requests nobody serves go to the network. |
 | `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait for another to attach. |
 | `attachTimeoutMs` | `15_000` | How long a request waits for a handler during a hand-over. Past it, `503`. |
 | `relinkTimeoutMs` | `3_000` | How long a request waits for the pages to attach again after a restart. |
@@ -366,6 +368,35 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | `wsConnectTimeoutMs` | `15_000` | How long a socket waits for its handler's answer. |
 | `streamTimeout` | none | Per-stream inactivity timeout of the links. |
 | `livenessCheckMs` | `5_000` | Period of the backup liveness check (`navigator.locks.query()`); `0` turns it off. |
+
+A host whose worker has its own `fetch` handling (routes of its own, cookies
+it adds before dispatching, a page for urls no tab serves) constructs the
+dispatcher with `handleFetch: false`. Its own listener answers its routes and
+passes the rest to `handleFetch(event, request?)`, which returns whether it
+called `respondWith`:
+
+```js
+// a module ServiceWorker of your own
+import { SwHttpDispatcher } from "@statewalker/webrun-http-browser/sw";
+const dispatcher = new SwHttpDispatcher({
+  self,
+  handleFetch: false,
+  unserved: (request) => hostPage(request), // what no handler serves
+});
+dispatcher.start();
+self.addEventListener("fetch", (event) => {
+  if (isMine(event.request)) return event.respondWith(answer(event.request));
+  if (!dispatcher.handleFetch(event, withCookies(event.request))) {
+    // not the dispatcher's: answer it, or leave it to the network
+  }
+});
+```
+
+`handleFetch` takes every request with a key before the worker has read which
+keys it serves (the first requests after a restart), and every navigation
+under the scope, so whether a url is served cannot be decided before calling
+it: a page for urls nobody serves belongs in `unserved`. The `install` and
+`activate` handlers (`skipWaiting`, `clients.claim`) stay on.
 
 `link.drain({ ms })` hands a slot over: no new requests reach the handler (they
 wait for the next owner of the key, up to `attachTimeoutMs`), and those in

@@ -4,19 +4,24 @@
   <body>
     <script type="module">
       // Browser-test fixture for handler links (see tests/browser/links.browser.ts).
-      // Query: sw=<worker script query>, e.g. ?sw=route%3Dslot
+      // Query: sw=<worker script query>, e.g. ?sw=route%3Dslot; module=<a module worker script
+      // of this folder to register instead of sw-worker.js>, e.g. ?module=host-sw.js
       import * as lib from "/dist/sw.js";
       import { newHandler } from "./handler.js";
       import { readPaced } from "./paced.js";
 
       const params = new URLSearchParams(location.search);
       const swQuery = params.get("sw");
+      const moduleWorker = params.get("module");
       window.lib = lib;
       window.readPaced = readPaced;
       window.ready = (async () => {
         const adapter = new lib.SwHttpAdapter({
           key: "page",
-          serviceWorkerUrl: `./sw-worker.js${swQuery ? `?${swQuery}` : ""}`,
+          serviceWorkerUrl: moduleWorker
+            ? `./${moduleWorker}`
+            : `./sw-worker.js${swQuery ? `?${swQuery}` : ""}`,
+          ...(moduleWorker ? { type: "module" } : {}),
           timeout: 10_000,
         });
         await adapter.start();

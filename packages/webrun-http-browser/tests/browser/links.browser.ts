@@ -411,6 +411,83 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         ).toBe("network: TypeError");
       });
 
+      it("a host that listens to fetch itself: its routes first, the rest through handleFetch", async () => {
+        const page = await open("?module=host-sw.js");
+        await run(page, `await window.attach("A");`);
+        const texts = await run<string[]>(
+          page,
+          `
+      const text = (path, init) => fetch(path, init).then((r) => r.text());
+      return [
+        await text("./app/who"),
+        await text("./host/hello"),
+        await text("./app/who", { headers: { "x-host": "take" } }),
+        await text("./page/who"),
+        await text("./app/hdr?tunnel"),
+        await fetch("./nobody/x").then((r) => r.status),
+      ];
+    `,
+        );
+        // The host's route, a handler's url it takes, worker and page handlers, a request it
+        // rewrote (the handler sees its header), and a key nobody serves left to the network.
+        expect(texts).toEqual([
+          "A",
+          "from the host",
+          "the host took it",
+          "page",
+          "A:from-host",
+          404,
+        ]);
+        const returned = await run<Array<{ path: string; handled: boolean }>>(
+          page,
+          `return await (await fetch("./host/returned")).json();`,
+        );
+        const handled = Object.fromEntries(
+          returned.map(({ path, handled }) => [path.replace(/.*\/links\//, ""), handled]),
+        );
+        expect(handled).toMatchObject({ "app/who": true, "page/who": true, "nobody/x": false });
+      });
+
+      it("a navigation no handler serves gets the host's page (unserved), rewritten or not", async () => {
+        const page = await open("?module=host-sw.js");
+        await page.goto(new URL("./nobody/x", page.url()).href);
+        expect(await page.textContent("body")).toBe(
+          "host page for /tests/fixtures/browser/links/nobody/x",
+        );
+        // The host rewrites it (?tunnel): still a navigation for the dispatcher.
+        await page.goto(new URL(`${BASE}nobody/z?tunnel`, page.url()).href);
+        expect(await page.textContent("body")).toBe(
+          "host page for /tests/fixtures/browser/links/nobody/z",
+        );
+      });
+
+      chromiumOnly(
+        "after a ServiceWorker restart, before its stored keys are read: served, or the host's page",
+        async () => {
+          const page = await open("?module=host-sw.js");
+          await run(page, `await window.attach("A");`);
+          await stopServiceWorkers(page);
+          expect(await run<string>(page, `return await (await fetch("./app/who")).text();`)).toBe(
+            "A",
+          );
+          await stopServiceWorkers(page);
+          // Restarted again: the navigation comes before the stored keys are read, so the
+          // dispatcher takes it, reads them, finds the key nobody's, and gives the host's page.
+          await page.goto(new URL("./nobody/y", page.url()).href);
+          expect(await page.textContent("body")).toBe(
+            "host page for /tests/fixtures/browser/links/nobody/y",
+          );
+          const returned = await run<Array<{ path: string; settled: boolean; handled: boolean }>>(
+            page,
+            `return await (await fetch("./host/returned")).json();`,
+          );
+          expect(returned.find((r) => r.path.endsWith("/nobody/y"))).toMatchObject({
+            settled: false, // the pre-restore branch, not the navigation one
+            handled: true,
+          });
+        },
+      );
+
       it("a custom route picks the handler by a header", async () => {
         const page = await open("?sw=route%3Dslot");
         await run(

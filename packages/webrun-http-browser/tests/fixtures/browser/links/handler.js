@@ -31,6 +31,8 @@ export function newHandler(name, extra = {}) {
     switch (route) {
       case "who":
         return new Response(name);
+      case "hdr":
+        return new Response(`${name}:${request.headers.get("x-tunnel")}`);
       case "slow": {
         await sleep(Number(url.searchParams.get("ms") ?? 1500));
         return new Response(`${name}:slow`);

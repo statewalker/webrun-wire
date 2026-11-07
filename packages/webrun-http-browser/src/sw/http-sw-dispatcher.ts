@@ -84,6 +84,21 @@ export interface SwHttpDispatcherOptions {
    */
   key?: KeyFunction;
   /**
+   * Whether the dispatcher listens to `fetch` events itself. Default `true`. With `false` the
+   * host's own `fetch` listener runs instead: it answers its own routes and hands the rest to
+   * `dispatcher.handleFetch(event)`. For a dispatcher the host constructs (`new
+   * SwHttpDispatcher`): `startHttpDispatcher` refuses it, as nothing could call `handleFetch`
+   * then. The `install`/`activate` handlers (`skipWaiting`, `clients.claim`) stay on either way.
+   */
+  handleFetch?: boolean;
+  /**
+   * The answer to a navigation under the scope whose key nobody serves (also one taken before
+   * the stored keys are read, after a restart). Default `fetch(request)`, the network. A host
+   * with a page of its own for such urls answers with it here. Other requests nobody serves
+   * always go to the network.
+   */
+  unserved?: (request: Request) => Response | Promise<Response>;
+  /**
    * Picks the handler of a request among the live handlers of its key.
    * Default `leastInflightRoute`: the fewest requests in flight, the oldest on
    * a tie — with one tab per key, the first live handler, as before.
@@ -288,10 +303,10 @@ export class SwHttpDispatcher {
       this.log("Claim control over all clients.");
       event.waitUntil(self.clients.claim());
     };
-    const onFetch = (event: FetchEvent) => this._onFetch(event);
+    const onFetch = (event: FetchEvent) => void this.handleFetch(event);
     self.addEventListener("install", onInstall);
     self.addEventListener("activate", onActivate);
-    self.addEventListener("fetch", onFetch);
+    if (this.options.handleFetch !== false) self.addEventListener("fetch", onFetch);
     this._cleanup.push(() => {
       self.removeEventListener("install", onInstall);
       self.removeEventListener("activate", onActivate);
@@ -378,26 +393,46 @@ export class SwHttpDispatcher {
     return await answer;
   }
 
-  private _onFetch(event: FetchEvent): void {
-    const request = event.request;
+  /**
+   * Answers `event` if it is the dispatcher's, with `request` (default `event.request`; a host
+   * may pass a rewritten one, with headers it adds). Returns whether it called `respondWith`;
+   * when it did not, the event is the caller's to answer or to leave to the network. For a host
+   * that listens to `fetch` itself (`handleFetch: false`); call it synchronously in the event's
+   * listener, as `respondWith` must be.
+   *
+   * It takes a same-origin request whose key (the `key` option) a handler serves, and also:
+   * - a navigation under the scope whose key nobody serves (answered by `unserved`);
+   * - before the stored keys are read (the first requests after a restart), every request with
+   *   a key, since only then is it known whose it is: one nobody serves gets what it would have
+   *   got after, `unserved` for a navigation and the network for anything else.
+   * So a host with a page of its own for urls nobody serves gives it as `unserved`, rather than
+   * deciding before calling this.
+   */
+  handleFetch(event: FetchEvent, request: Request = event.request): boolean {
+    // A navigation is told by the event's own request: a rewritten copy is no longer one (`new
+    // Request(navigation, init)` makes its mode "same-origin").
+    const navigation = event.request.mode === "navigate";
     // Another origin's url (a page's request to a CDN, an API) stays the
-    // browser's even when the key function maps it: such keys are for calls
-    // between handlers. No key: not ours either. No `respondWith` for those,
+    // browser's even when the key function maps it: such keys serve handlers'
+    // calls and sockets. No key: not ours either. No `respondWith` for those,
     // so the browser does the request exactly as it would without a worker.
-    if (new URL(request.url).origin !== this.self.location.origin) return;
+    if (new URL(request.url).origin !== this.self.location.origin) return false;
     const key = this.keyOf(request.url);
-    if (key === undefined) return;
+    if (key === undefined) return false;
     if (this._restoreSettled) {
       if (this.serves(key)) {
         event.respondWith(this.dispatch(request));
-      } else if (request.mode === "navigate") {
+        return true;
+      }
+      if (navigation) {
         // A navigation under the scope is answered even when it is nobody's,
         // by passing it through: Firefox can leave a page uncontrolled when
         // its worker did not answer the navigation, and an uncontrolled page's
         // `fetch()` never reaches this worker. Everything else is left alone.
-        event.respondWith(fetch(request));
+        event.respondWith(this._unserved(request));
+        return true;
       }
-      return;
+      return false;
     }
     // Before the stored keys are read there is nothing to decide on, and
     // `respondWith` cannot be called after an await: claim the request, and
@@ -405,10 +440,18 @@ export class SwHttpDispatcher {
     event.respondWith(
       (async () => {
         await this._restored.catch(() => {});
-        if (!this.serves(key)) return await fetch(request);
-        return await this.dispatch(request);
+        if (this.serves(key)) return await this.dispatch(request);
+        // Nobody's: what it would have got once the keys were read, a navigation the
+        // `unserved` answer, anything else the network.
+        return navigation ? await this._unserved(request) : await fetch(request);
       })(),
     );
+    return true;
+  }
+
+  /** What a request the dispatcher took, and no handler serves, gets: `unserved`, or the network. */
+  private async _unserved(request: Request): Promise<Response> {
+    return await (this.options.unserved ?? fetch)(request);
   }
 
   private async _attach(
@@ -724,6 +767,12 @@ export class SwHttpDispatcher {
  * that stops it.
  */
 export function startHttpDispatcher(options: SwHttpDispatcherOptions): () => void {
+  if (options.handleFetch === false) {
+    throw new Error(
+      "startHttpDispatcher: handleFetch: false needs a dispatcher to call handleFetch on; " +
+        "construct it instead: new SwHttpDispatcher({ self, handleFetch: false }).start()",
+    );
+  }
   const dispatcher = new SwHttpDispatcher(options);
   dispatcher.start();
   return () => {
