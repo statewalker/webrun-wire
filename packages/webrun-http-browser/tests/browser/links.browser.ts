@@ -243,7 +243,7 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         },
       );
 
-      it("pace: a 128 MiB stream read by a worker through the router follows its pace, about two windows ahead", async () => {
+      it("pace: a 128 MiB stream read by a worker through the router follows its pace, never more than 2 MiB ahead", async () => {
         // page handler → ServiceWorker → worker: no browser buffer on the way,
         // so the producer is never more than the links' windows ahead.
         const MiB = 1048576;

@@ -723,18 +723,27 @@ The calling end of every link asks each request's port for a flow-control
 window of 256 KiB (`HttpLinkOptions.window`, webrun-rpc's `window`). Under it,
 request and response bodies are pipelined: chunks leave without waiting for a
 confirmation each, and only the window holds the sender back. On a
-`MessageChannel` a body in 256 B chunks moved 1.9-2.7x as fast as one
-confirmed chunk at a time over 13 runs (each a median of 3), and one in 4 KiB
-chunks 1.45-2.1x.
+`MessageChannel` a body in 256 B chunks moved 2.0-2.6x as fast as one
+confirmed chunk at a time over 9 runs of `pnpm bench` on an idle machine (each
+the median ratio of 7 pairs), and one in 4 KiB chunks 1.8-2.3x. On a loaded
+machine, where both modes ran slower, runs gave as little as 1.83x at 256 B
+and 1.56x at 4 KiB.
 The larger the chunk, the more of its time goes to the link's own cost per
 chunk (`ReadableStream`, request framing, the copy on receipt), which no
 window removes. The answering end needs no option: it applies whatever window
 each port asks for.
 
-The size is a trade. A reader that stops holds about one window per link of
-the body in flight, so a larger window costs memory per stalled reader. 64 KiB
-gave the same throughput on a `MessageChannel`, and 1 MiB gained at most 5%
-for four times the memory.
+The size is a trade. The window belongs to each request's port, not to the
+link: a reader that stops holds about one window of its body in flight, per
+direction, on each link (each hop) the body crosses. N stalled requests on one
+link hold about N × the window per direction, up to the link's `maxPorts`
+ceiling on requests in flight (by default 1024 × 256 KiB, 256 MiB per
+direction). On page → ServiceWorker → worker, each of the two hops holds its
+own. What that looks like: ServiceWorker or page memory that grows with the
+number of stalled downloads: bodies a page or worker stopped reading without
+cancelling them. Lower `window` (or `maxPorts`) where many readers can stall at
+once. 64 KiB gave the same throughput on a `MessageChannel`, and 1 MiB gained
+at most 5% for four times the memory.
 
 `window: 0` turns it off: the link then puts exactly the envelopes of a link
 with no window on the wire, one confirmed chunk at a time. Every link that
@@ -753,8 +762,9 @@ is never waited on. Nothing changes in `HTTP_LINK_PROTOCOL`.
 ### Backpressure, and where the browser buffers
 
 Both modes move requests over webrun-rpc links: a handler producing a body is
-never more than about one window (256 KiB) per link ahead of whoever reads it
-through this package's links, and a reader that stops (an aborted `fetch`, a cancelled body) releases
+never more than about one window (256 KiB) per hop ahead of whoever reads it
+through this package's links (one window per stalled request, per direction,
+per hop: see above), and a reader that stops (an aborted `fetch`, a cancelled body) releases
 the producer. Between a ServiceWorker's `respondWith` and the page, though,
 Chromium buffers by itself, tens of megabytes of a fast stream: a page reading
 slowly sees the handler run that far ahead before backpressure reaches it
@@ -763,8 +773,9 @@ sets no such bound: it keeps reading a ServiceWorker's response while the page
 does not, so there a handler streaming to a page that stopped reading keeps
 producing (this package still holds only about one window of it). A worker
 reading through `service.fetch` has no such buffer. `links.browser.ts` pins
-the split: once a page stops reading, the handler is never more than a few
-chunks ahead of what the ServiceWorker handed to Chromium, and stops.
+the split: once a page stops reading, the handler is never more than about one
+window (plus a few chunks: 256 KiB + 3 × 64 KiB) ahead of what the ServiceWorker
+handed to Chromium, and stops.
 
 `sendStream` / `handleStreams`, and the `sendHttpRequest` /
 `handleHttpRequests` pair built on them, are version 1's transport, kept for
@@ -879,10 +890,13 @@ All four runtime dependencies are bundled into `dist/`:
   loaded machine cannot fail the suite. It compares the default window with
   `window: 0` in one run (median of 7 pairs after a warm-up pair) and fails
   below 2x at 256 B chunks and below 1.5x at 4 KiB chunks. The 4 KiB bar is the lower one
-  because the link's own cost per chunk caps the gain there. Both bars sit
-  inside the run-to-run spread (above), so a busy machine can fail a run of
-  a sound build: rerun on an idle one before reading a failure as a
-  regression.
+  because the link's own cost per chunk caps the gain there. Each pair runs
+  both modes back to back, alternating which goes first, and the bar is held
+  against the median of the pairs' ratios. The 256 B bar sits at the bottom of
+  the run-to-run spread (above), so a busy machine can fail a run of a sound
+  build (`AssertionError: expected <ratio> to be greater than or equal to 2`): rerun on an idle
+  one before reading a failure as a regression. The 4 KiB bar sits below
+  every run measured, but a loaded machine came within 5% of it.
 - `pnpm run test:browser`: builds, then runs `tests/browser/` in Chromium and
   Firefox through Playwright against the built bundles, plus
   `tests/packaging/`, which checks the published exports map. Needs the

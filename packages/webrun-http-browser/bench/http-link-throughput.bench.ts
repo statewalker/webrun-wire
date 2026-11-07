@@ -5,7 +5,7 @@ import { connectHttpLink, type HttpLinkOptions, serveHttpLink } from "../src/lin
 // several times the throughput of the same link with `window: 0`: at least 2x
 // in 256 B chunks, 1.5x in 4 KiB chunks. Both are measured in this run, so the
 // bar moves with the machine: one warm-up pair (not recorded), then the median
-// of 7 pairs, each a `window: 0` run followed by a default one.
+// of the ratios of 7 pairs, the two modes alternating which runs first.
 
 const KiB = 1024;
 const MiB = 1024 * KiB;
@@ -71,16 +71,27 @@ describe("HTTP link throughput, default window against window: 0", () => {
     it(`a body of ${count} x ${size} B gets at least ${bar}x the throughput`, async () => {
       const plain: number[] = [];
       const windowed: number[] = [];
+      const ratios: number[] = [];
       // A warm-up pair, discarded: the first runs pay for the JIT and the heap.
       await throughput({ window: 0 }, size, count);
       await throughput({}, size, count);
       for (let r = 0; r < RUNS; r++) {
-        plain.push(await throughput({ window: 0 }, size, count));
-        windowed.push(await throughput({}, size, count));
+        let p: number;
+        let w: number;
+        if (r % 2 === 0) {
+          p = await throughput({ window: 0 }, size, count);
+          w = await throughput({}, size, count);
+        } else {
+          w = await throughput({}, size, count);
+          p = await throughput({ window: 0 }, size, count);
+        }
+        plain.push(p);
+        windowed.push(w);
+        ratios.push(w / p);
       }
-      const ratio = median(windowed) / median(plain);
+      const ratio = median(ratios);
       console.log(
-        `[bench] ${count} x ${size} B (median of ${RUNS}): window: 0 ${median(plain).toFixed(1)} MB/s, ` +
+        `[bench] ${count} x ${size} B (median of ${RUNS} pairs): window: 0 ${median(plain).toFixed(1)} MB/s, ` +
           `default window ${median(windowed).toFixed(1)} MB/s, ratio ${ratio.toFixed(2)}x`,
       );
       expect(ratio).toBeGreaterThanOrEqual(bar);

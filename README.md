@@ -147,6 +147,7 @@ Published consumers only ever see `dist`.
 | `pnpm build` | `pnpm -r run build`: rolldown (tsdown for `webrun-http-events`) and declarations per package |
 | `pnpm test` | `pnpm -r run test` (Vitest), including `tools/consumer-install` |
 | `pnpm typecheck` | `pnpm -r run typecheck` in the packages that define it |
+| `pnpm bench` | `pnpm -r run bench`: the throughput and latency benchmarks of `webrun-rpc` and `webrun-http-browser`, kept out of `pnpm test` |
 | `pnpm lint` / `pnpm lint:check` | `biome check --write .` / `biome check .` |
 | `pnpm lint:fix`, `pnpm format:fix` | `biome check --write --unsafe .` |
 | `pnpm format` / `pnpm format:check` | `biome format --write .` / `biome format .` |
