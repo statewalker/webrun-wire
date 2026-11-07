@@ -90,7 +90,7 @@ describe("layer 1 lifecycle and limits", () => {
     let acceptedCount = 0;
     let lastAccepted: unknown;
     let lastDelivered: unknown;
-    track(
+    const server = track(
       multiplexPort(b, {
         codec: structuredCodec,
         side: "responder",
@@ -119,6 +119,13 @@ describe("layer 1 lifecycle and limits", () => {
     // addressed, not just counted.
     expect(lastAccepted).toBe(cycles - 1);
     await waitFor(() => lastDelivered === cycles - 1, "the last cycle's message was delivered");
+
+    // #39: the open table returns to its baseline on both ends once the churn
+    // settles, not merely stays under maxPorts.
+    await waitFor(
+      () => client.ports().length === 0 && server.ports().length === 0,
+      "both ends' open tables are empty after the churn",
+    );
   });
 
   it("rejects an inbound OPEN once the responder's own maxPorts is reached", async () => {
