@@ -156,7 +156,9 @@ export class SwHttpDispatcher {
   }
 
   get scope(): string {
-    return `${new URL("./", this.self.location.href)}`;
+    // The registration's scope, which the page may have set to another folder than the script's
+    // (`register(url, { scope })`); the script's folder where there is no registration to ask.
+    return this.self.registration?.scope ?? `${new URL("./", this.self.location.href)}`;
   }
 
   /** The key `url` belongs to: its first path segment under the scope. */

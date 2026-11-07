@@ -265,7 +265,9 @@ importScripts("/path/to/@statewalker/webrun-http-browser/dist/sw-worker.js");
 ```
 
 A module worker imports the dispatcher instead (a module worker cannot
-`importScripts`), and the adapter registers it with `type: "module"`:
+`importScripts`), and the adapter registers it with `type: "module"`. A
+ServiceWorker resolves no bare specifiers (it has no import map): bundle it, or
+import the built `dist/sw.js` by url.
 
 ```js
 // sw.js, registered with { type: "module" }
@@ -274,7 +276,9 @@ startHttpDispatcher({ self });
 ```
 
 A page that registers its worker itself (its own script, scope or type) passes
-the registration instead, and the adapter registers nothing:
+the registration instead, and the adapter registers nothing (`type` is then
+not used). The worker routes under the registration's scope, whichever folder
+its script is in:
 
 ```ts
 const registration = await navigator.serviceWorker.register("/sw.js", { type: "module" });

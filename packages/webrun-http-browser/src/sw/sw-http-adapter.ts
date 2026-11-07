@@ -48,7 +48,8 @@ export interface SwHttpAdapterOptions {
   /**
    * A registration the page made itself, for a worker it registers its own way (its own script,
    * scope or type). The adapter then registers nothing, and `stop()` leaves the registration in
-   * place: it is not the adapter's to remove. `scope` defaults to the registration's.
+   * place: it is not the adapter's to remove. `scope` defaults to the registration's, and
+   * `type` is not used.
    */
   registration?: ServiceWorkerRegistration;
   /**

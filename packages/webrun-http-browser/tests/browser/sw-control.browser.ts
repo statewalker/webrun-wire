@@ -219,7 +219,25 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
       it("a module worker registered as a classic one: rejects (why `type` is needed)", async () => {
         const page = await freshPage();
         await page.goto(`${origin}${SAME_ORIGIN}?sw=./module-sw.js&timeout=3000`);
-        expect(await outcome(page)).toMatchObject({ ok: false });
+        // The registration itself fails (its `import` does not evaluate in a classic script),
+        // not a later step such as control or the handshake.
+        const result = await outcome(page);
+        expect(result).toMatchObject({ ok: false, name: "TypeError" });
+        expect(result.reason).toBeUndefined();
+      });
+
+      it("the page's own registration, scoped to another folder than the script's: served", async () => {
+        const page = await freshPage();
+        await page.goto(
+          `${origin}${SAME_ORIGIN.replace("index.html", "app/index.html")}?sw=../module-sw.js&type=module&own&scope=./`,
+        );
+        // The key is read under the registration's scope (…/app/), not the script's folder.
+        expect(await outcome(page)).toMatchObject({
+          ok: true,
+          status: 200,
+          body: "hello /tests/fixtures/browser/same-origin/app/t/x",
+          controlled: true,
+        });
       });
 
       it("hard reload: the page starts uncontrolled and is taken over", async () => {

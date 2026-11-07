@@ -5,7 +5,8 @@
     <script type="module">
       // Browser-test fixture for SwHttpAdapter (see tests/browser/).
       // Query: sw=<worker script, default ./sw-worker.js>, timeout=<ms>, reload (flag),
-      // type=<module|classic>, own (the page registers the worker itself, with `type`, and passes
+      // type=<module|classic>, scope=<the own registration's scope>,
+      // own (the page registers the worker itself, with `type`, and passes
       // its registration), stop (stops the adapter after the request and reports whether the
       // worker is still registered).
       import { SwHttpAdapter } from "/dist/sw.js";
@@ -26,6 +27,7 @@
           if (params.has("own")) {
             options.registration = await navigator.serviceWorker.register(options.serviceWorkerUrl, {
               type,
+              scope: params.get("scope") ?? undefined,
             });
             delete options.serviceWorkerUrl;
           } else if (type) {
