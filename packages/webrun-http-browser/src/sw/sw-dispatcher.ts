@@ -8,6 +8,7 @@ import {
   handleClaimRequests,
   ServiceWorkerControlError,
 } from "../core/service-worker-control.js";
+import type { ServiceWorkerScope } from "../core/sw-scope.js";
 import { resolveWorkerUrl } from "./worker-url.js";
 
 export interface SwPortHandlerOptions {
@@ -194,7 +195,7 @@ export class SwPortHandler {
 }
 
 export interface SwPortDispatcherOptions {
-  self: ServiceWorkerGlobalScope;
+  self: ServiceWorkerScope;
   log?: (...args: unknown[]) => void;
 }
 
@@ -203,7 +204,9 @@ export interface SwPortDispatcherOptions {
  * clientId, persisted in IndexedDB so it can reclaim ports across SW restarts.
  */
 export class SwPortDispatcher {
-  readonly self: ServiceWorkerGlobalScope;
+  readonly self: ServiceWorkerScope;
+  /** `self`, with the WebWorker lib's types this module compiles with. */
+  private readonly _sw: ServiceWorkerGlobalScope;
   readonly log: (...args: unknown[]) => void;
   readonly handlersIndex = new Map<string, ChannelInfo>();
   /**
@@ -218,13 +221,14 @@ export class SwPortDispatcher {
 
   constructor({ self, log = () => {} }: SwPortDispatcherOptions) {
     this.self = self;
+    this._sw = self as unknown as ServiceWorkerGlobalScope;
     this.log = log;
   }
 
   get scope(): string {
     // The registration's scope, which the page may have set to another folder than the script's
     // (`register(url, { scope })`); the script's folder where there is no registration to ask.
-    return this.self.registration?.scope ?? `${new URL("./", this.self.location.href)}`;
+    return this._sw.registration?.scope ?? `${new URL("./", this._sw.location.href)}`;
   }
 
   /**
@@ -238,7 +242,7 @@ export class SwPortDispatcher {
       if (channelInfo.key !== key) continue;
       const clientId = channelInfo.clientId;
       if (!clientId) continue;
-      const client = await this.self.clients.get(clientId);
+      const client = await this._sw.clients.get(clientId);
       if (!client) {
         // Owner tab closed: drop the stale entry and keep scanning for
         // another client that still claims this key.
@@ -256,9 +260,9 @@ export class SwPortDispatcher {
   }
 
   start(): void {
-    const stopClaims = handleClaimRequests(this.self);
+    const stopClaims = handleClaimRequests(this._sw);
     const stopPortUpdates = handleChannelCalls(
-      this.self,
+      this._sw,
       "UPDATE_COMMUNICATION_PORT",
       async (event, channelInfo, port: MessagePort) => {
         const client = event.source as Client | null;
@@ -273,16 +277,16 @@ export class SwPortDispatcher {
       stopPortUpdates();
     };
 
-    this.self.addEventListener("install", (event) => {
+    this._sw.addEventListener("install", (event) => {
       this.log("Skip waiting on install.", event);
-      this.self.skipWaiting();
+      this._sw.skipWaiting();
     });
 
-    this.self.addEventListener("activate", (event) => {
+    this._sw.addEventListener("activate", (event) => {
       this.log("Claim control over all clients.", event);
       event.waitUntil(
         (async () => {
-          await this.self.clients.claim();
+          await this._sw.clients.claim();
           await this._checkActivation();
         })(),
       );
@@ -342,7 +346,7 @@ export class SwPortDispatcher {
     for (const clientId of this.handlersIndex.keys()) ids.add(clientId);
     const index = new Map<string, Client>();
     for (const clientId of ids) {
-      const client = await this.self.clients.get(clientId);
+      const client = await this._sw.clients.get(clientId);
       if (client) index.set(clientId, client);
       else this.handlersIndex.delete(clientId);
     }

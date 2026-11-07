@@ -3,6 +3,7 @@
 import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls, withTransfer } from "../core/data-calls.js";
 import { handleClaimRequests } from "../core/service-worker-control.js";
+import type { FetchEventLike, ServiceWorkerScope } from "../core/sw-scope.js";
 import { sendHttpRequest } from "../http/http-send-recieve.js";
 import { errorMessage } from "../link/errors.js";
 import {
@@ -79,7 +80,7 @@ export interface DispatchFailure {
 }
 
 export interface SwHttpDispatcherOptions {
-  self: ServiceWorkerGlobalScope;
+  self: ServiceWorkerScope;
   log?: (...args: unknown[]) => void;
   /**
    * Which key a url belongs to. Default `scopeKey`: the first path segment under the scope, and
@@ -224,7 +225,9 @@ const TIMED_OUT = Symbol("timed-out");
  * This worker holds a router lock that handlers watch the same way.
  */
 export class SwHttpDispatcher {
-  readonly self: ServiceWorkerGlobalScope;
+  readonly self: ServiceWorkerScope;
+  /** `self`, with the WebWorker lib's types this module compiles with. */
+  private readonly _sw: ServiceWorkerGlobalScope;
   readonly log: (...args: unknown[]) => void;
   readonly options: SwHttpDispatcherOptions;
   readonly table = new HandlerTable<HandlerEntry>();
@@ -248,6 +251,7 @@ export class SwHttpDispatcher {
   constructor(options: SwHttpDispatcherOptions) {
     this.options = options;
     this.self = options.self;
+    this._sw = options.self as unknown as ServiceWorkerGlobalScope;
     this.log = options.log ?? (() => {});
     if (locksAvailable()) this.routerLock = newLockName("webrun-http-router");
   }
@@ -255,7 +259,7 @@ export class SwHttpDispatcher {
   get scope(): string {
     // The registration's scope, which the page may have set to another folder than the script's
     // (`register(url, { scope })`); the script's folder where there is no registration to ask.
-    return this.self.registration?.scope ?? `${new URL("./", this.self.location.href)}`;
+    return this._sw.registration?.scope ?? `${new URL("./", this._sw.location.href)}`;
   }
 
   /** The key `url` belongs to (the `key` option; by default its first path segment under the scope). */
@@ -280,7 +284,7 @@ export class SwHttpDispatcher {
   }
 
   start(): void {
-    const self = this.self;
+    const self = this._sw;
     if (this.routerLock) this._routerHeld = holdLock(this.routerLock).then(() => {});
     this._restored = this._restoreClaimedKeys();
     const latch = () => {
@@ -484,7 +488,7 @@ export class SwHttpDispatcher {
    * So a host with a page of its own for urls nobody serves gives it as `unserved`, rather than
    * deciding before calling this.
    */
-  handleFetch(event: FetchEvent, request: Request = event.request): boolean {
+  handleFetch(event: FetchEventLike, request: Request = event.request): boolean {
     // A navigation is told by the event's own request: a rewritten copy is no longer one (`new
     // Request(navigation, init)` makes its mode "same-origin").
     const navigation = event.request.mode === "navigate";
@@ -492,7 +496,7 @@ export class SwHttpDispatcher {
     // browser's even when the key function maps it: such keys serve handlers'
     // calls and sockets. No key: not ours either. No `respondWith` for those,
     // so the browser does the request exactly as it would without a worker.
-    if (new URL(request.url).origin !== this.self.location.origin) return false;
+    if (new URL(request.url).origin !== this._sw.location.origin) return false;
     const key = this.keyOf(request.url);
     if (key === undefined) return false;
     if (this._restoreSettled) {
@@ -719,7 +723,7 @@ export class SwHttpDispatcher {
     // Without Web Locks there is no owner lock: check the page is still there.
     for (const entry of live) {
       if (entry.ownerLock || !entry.clientId) continue;
-      if (!(await this.self.clients.get(entry.clientId))) {
+      if (!(await this._sw.clients.get(entry.clientId))) {
         this._close(entry, new LinkLostError(HANDLER_LOST_MESSAGE));
       }
     }
@@ -747,7 +751,7 @@ export class SwHttpDispatcher {
 
   private async _linkRound(key: string): Promise<void> {
     const timeout = this.options.relinkTimeoutMs ?? 3_000;
-    const windows = await this.self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const windows = await this._sw.clients.matchAll({ type: "window", includeUncontrolled: true });
     this.log("[need-links]", key, windows.length);
     const params: NeedLinksParams = { routerLock: this.routerLock };
     const pending = new Set(windows);
@@ -836,7 +840,7 @@ export class SwHttpDispatcher {
     const source = event.source as Client | null;
     if (!source?.url) return false;
     try {
-      return new URL(source.url).origin === this.self.location.origin;
+      return new URL(source.url).origin === this._sw.location.origin;
     } catch {
       return false;
     }

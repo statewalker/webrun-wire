@@ -8,3 +8,4 @@ export * from "./data-channels.js";
 export * from "./message-target.js";
 export * from "./registry.js";
 export * from "./service-worker-control.js";
+export type { FetchEventLike, ServiceWorkerScope } from "./sw-scope.js";
