@@ -330,9 +330,11 @@ describe("heartbeat watch from the first ping", () => {
     const client = await port(response);
     // A first ping long after the socket opened (over three of its periods): the watch counts
     // from the ping, so the socket is still open a period later.
-    await sleep(100);
-    client.postMessage({ t: "p", hb: 20 });
-    await sleep(30);
+    // (hb 50: the earliest close is the tick ~200 ms after the ping, so the check at 60 ms has
+    // ~140 ms of slack on a loaded runner.)
+    await sleep(200);
+    client.postMessage({ t: "p", hb: 50 });
+    await sleep(60);
     expect(socket.readyState).toBe(1);
     // Then silence.
     const close = await next<CloseEvent>(socket, "close");
