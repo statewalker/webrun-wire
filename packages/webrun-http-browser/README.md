@@ -722,9 +722,13 @@ answered by the worker and can load uncontrolled in Firefox; call
 The calling end of every link asks each request's port for a flow-control
 window of 256 KiB (`HttpLinkOptions.window`, webrun-rpc's `window`). Under it,
 request and response bodies are pipelined: chunks leave without waiting for a
-confirmation each, and only the window holds the sender back. Bodies of many
-small chunks move at least twice as fast as one confirmed chunk at a time
-(`pnpm bench`). The answering end needs no option: it applies whatever window
+confirmation each, and only the window holds the sender back. On a
+`MessageChannel` a body in 256 B chunks moved 1.9-2.7x as fast as one
+confirmed chunk at a time over 13 runs, and one in 4 KiB chunks 1.45-2.1x
+(`pnpm bench`, median of 3 per run).
+The larger the chunk, the more of its time goes to the link's own cost per
+chunk (`ReadableStream`, request framing, the copy on receipt), which no
+window removes. The answering end needs no option: it applies whatever window
 each port asks for.
 
 The size is a trade. A reader that stops holds about one window per link of
@@ -873,10 +877,12 @@ All four runtime dependencies are bundled into `dist/`:
 - `pnpm test`: unit tests under Node, against the source.
 - `pnpm bench`: the throughput benchmark, kept out of `pnpm test` so that a
   loaded machine cannot fail the suite. It compares the default window with
-  `window: 0` in one run (median of 3 each) and fails below 2x, at 256 B and
-  4 KiB chunks. The 4 KiB margin is the thin one (about 2.1-2.6x): what is left
-  there is the link's own cost per chunk (`ReadableStream` and request
-  framing), which no window removes.
+  `window: 0` in one run (median of 3 each) and fails below 2x at 256 B
+  chunks and below 1.5x at 4 KiB chunks. The 4 KiB bar is the lower one
+  because the link's own cost per chunk caps the gain there. Both bars sit
+  inside the run-to-run spread (above), so a busy machine can fail a run of
+  a sound build: rerun on an idle one before reading a failure as a
+  regression.
 - `pnpm run test:browser`: builds, then runs `tests/browser/` in Chromium and
   Firefox through Playwright against the built bundles, plus
   `tests/packaging/`, which checks the published exports map. Needs the
