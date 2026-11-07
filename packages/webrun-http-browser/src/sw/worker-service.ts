@@ -30,8 +30,15 @@ export interface WorkerHttpService {
    * with `LinkLostError` rather than hanging, and the next waits for a link.
    */
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-  /** Opens the transport of a socket to the handler `url` routes to. */
-  connectWebSocket(url: string | URL, protocols?: string[]): Promise<WebSocketConnection>;
+  /**
+   * Opens the transport of a socket to the handler `url` routes to. The handler sees `headers`
+   * on the upgrade request (cookies, origin, the routing a host needs), as with `ws-connect`.
+   */
+  connectWebSocket(
+    url: string | URL,
+    protocols?: string[],
+    headers?: HeadersInit,
+  ): Promise<WebSocketConnection>;
   /** A WHATWG `WebSocket` class over `connectWebSocket`. */
   readonly WebSocket: PortWebSocketClass;
   /** Whether the worker has a live link. */
@@ -110,11 +117,11 @@ export function serveHttpInWorker(
   scope.addEventListener("message", onMessage);
 
   const baseUrl = () => (globalThis as { location?: { href: string } }).location?.href;
-  const connectWebSocket = (url: string | URL, protocols: string[] = []) => {
+  const connectWebSocket = (url: string | URL, protocols: string[] = [], headers?: HeadersInit) => {
     const httpUrl = new URL(`${url}`, baseUrl());
     if (httpUrl.protocol === "ws:") httpUrl.protocol = "http:";
     else if (httpUrl.protocol === "wss:") httpUrl.protocol = "https:";
-    return endpoint.connectWebSocket(`${httpUrl}`, protocols);
+    return endpoint.connectWebSocket(`${httpUrl}`, protocols, headers);
   };
   let WebSocketClass: PortWebSocketClass | undefined;
 

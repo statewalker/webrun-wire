@@ -438,6 +438,17 @@ const WS = serviceWorkerWebSocketClass();                     // any controlled 
 const WS2 = service.WebSocket;                                // in a worker, via the router
 ```
 
+A socket that needs headers (cookies, or what a `route` function picks the
+handler by) opens through `connectWebSocket(url, protocols, headers)`, from a
+page's adapter or a worker's service; the handler sees them on the upgrade
+request:
+
+```ts
+const WS3 = createWebSocketClass((url, protocols) =>
+  service.connectWebSocket(url, protocols, { "x-shard": "7" }),
+);
+```
+
 The ServiceWorker only brokers the port: it routes the url like a fetch, asks
 the handler, and hands the accepted port to the caller. The socket then runs
 between the two directly, so it survives a ServiceWorker restart. A socket to

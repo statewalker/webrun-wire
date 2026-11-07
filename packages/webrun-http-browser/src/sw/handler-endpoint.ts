@@ -10,7 +10,7 @@ import { watchLock } from "../link/locks.js";
 import { PortRendezvous } from "../link/rendezvous.js";
 import type { WebSocketConnection } from "../ws/client.js";
 import { serveWebSocketUpgrade } from "../ws/upgrade.js";
-import type { ControlMessage } from "./protocol.js";
+import { type ControlMessage, headerPairs } from "./protocol.js";
 
 export type FetchHandler = (request: Request) => Response | Promise<Response>;
 
@@ -142,8 +142,15 @@ export class HandlerEndpoint {
     return await (link.up as HttpLink).send(request);
   }
 
-  /** Opens a socket to the handler `url` routes to, through the ServiceWorker. */
-  async connectWebSocket(url: string, protocols: string[] = []): Promise<WebSocketConnection> {
+  /**
+   * Opens a socket to the handler `url` routes to, through the ServiceWorker. The handler sees
+   * `headers` on the upgrade request, and so does a `route` function choosing it.
+   */
+  async connectWebSocket(
+    url: string,
+    protocols: string[] = [],
+    headers?: HeadersInit,
+  ): Promise<WebSocketConnection> {
     const link = await this._linkWith("ctl");
     const id = this._sockets.newId();
     const answer = this._sockets.wait(
@@ -151,7 +158,13 @@ export class HandlerEndpoint {
       this.options.wsConnectTimeoutMs ?? 15_000,
       `the socket request for ${url}`,
     );
-    link.ctl?.postMessage({ t: "ws-open", id, url, protocols } satisfies ControlMessage);
+    link.ctl?.postMessage({
+      t: "ws-open",
+      id,
+      url,
+      protocols,
+      headers: headerPairs(headers),
+    } satisfies ControlMessage);
     return await answer;
   }
 

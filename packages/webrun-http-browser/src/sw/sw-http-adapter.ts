@@ -22,6 +22,7 @@ import {
   type AttachReply,
   DETACH_CALL,
   DRAIN_CALL,
+  headerPairs,
   KEEPALIVE_MESSAGE,
   NEED_LINKS_CALL,
   type NeedLinksParams,
@@ -367,12 +368,13 @@ export class SwHttpAdapter {
   /**
    * Opens the transport of a socket to the handler `url` routes to: a handler
    * of this page directly, any other through the ServiceWorker. Resolves once
-   * the handler accepted. An arrow function, so it can be handed around:
-   * `createWebSocketClass(adapter.connectWebSocket)`.
+   * the handler accepted. The handler sees `headers` on the upgrade request. An arrow function,
+   * so it can be handed around: `createWebSocketClass(adapter.connectWebSocket)`.
    */
   connectWebSocket = async (
     url: string | URL,
     protocols: string[] = [],
+    headers?: HeadersInit,
   ): Promise<WebSocketConnection> => {
     const httpUrl = new URL(`${url}`, globalThis.location?.href);
     if (httpUrl.protocol === "ws:") httpUrl.protocol = "http:";
@@ -380,7 +382,7 @@ export class SwHttpAdapter {
     const local = this._findHandler(`${httpUrl}`);
     if (local) {
       // A handler in this very page needs no ServiceWorker.
-      const result = await serveWebSocketUpgrade(local, { url: `${httpUrl}`, protocols });
+      const result = await serveWebSocketUpgrade(local, { url: `${httpUrl}`, protocols, headers });
       if (!result.ok) throw new Error(result.message);
       return { port: result.port, protocol: result.protocol };
     }
@@ -389,7 +391,7 @@ export class SwHttpAdapter {
       this._callTimeout(),
       this._worker(),
       WS_CONNECT_CALL,
-      { url: `${httpUrl}`, protocols },
+      { url: `${httpUrl}`, protocols, headers: headerPairs(headers) },
     );
   };
 

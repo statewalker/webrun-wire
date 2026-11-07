@@ -83,7 +83,7 @@ export type ControlMessage =
   | { t: "ws-accept"; id: string; protocol: string; port: MessagePort }
   | { t: "ws-refuse"; id: string; status: number; message: string }
   // handler → ServiceWorker: the handler itself asks for a socket to another handler.
-  | { t: "ws-open"; id: string; url: string; protocols: string[] }
+  | { t: "ws-open"; id: string; url: string; protocols: string[]; headers?: [string, string][] }
   | { t: "ws-opened"; id: string; protocol: string; port: MessagePort }
   | { t: "ws-failed"; id: string; message: string };
 
@@ -102,3 +102,13 @@ export type WorkerControlMessage =
   | { type: "relink"; seen?: number }
   // worker → page: a call is in flight; keep the ServiceWorker awake.
   | { type: "keepalive" };
+
+/** `headers` as pairs a `postMessage` can carry (a `Headers` object cannot be cloned). */
+export function headerPairs(headers: HeadersInit | undefined): [string, string][] | undefined {
+  if (headers === undefined) return undefined;
+  const pairs: [string, string][] = [];
+  new Headers(headers).forEach((value, name) => {
+    pairs.push([name, value]);
+  });
+  return pairs;
+}
