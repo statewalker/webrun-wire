@@ -724,8 +724,8 @@ window of 256 KiB (`HttpLinkOptions.window`, webrun-rpc's `window`). Under it,
 request and response bodies are pipelined: chunks leave without waiting for a
 confirmation each, and only the window holds the sender back. On a
 `MessageChannel` a body in 256 B chunks moved 1.9-2.7x as fast as one
-confirmed chunk at a time over 13 runs, and one in 4 KiB chunks 1.45-2.1x
-(`pnpm bench`, median of 3 per run).
+confirmed chunk at a time over 13 runs (each a median of 3), and one in 4 KiB
+chunks 1.45-2.1x.
 The larger the chunk, the more of its time goes to the link's own cost per
 chunk (`ReadableStream`, request framing, the copy on receipt), which no
 window removes. The answering end needs no option: it applies whatever window
@@ -877,8 +877,8 @@ All four runtime dependencies are bundled into `dist/`:
 - `pnpm test`: unit tests under Node, against the source.
 - `pnpm bench`: the throughput benchmark, kept out of `pnpm test` so that a
   loaded machine cannot fail the suite. It compares the default window with
-  `window: 0` in one run (median of 3 each) and fails below 2x at 256 B
-  chunks and below 1.5x at 4 KiB chunks. The 4 KiB bar is the lower one
+  `window: 0` in one run (median of 7 pairs after a warm-up pair) and fails
+  below 2x at 256 B chunks and below 1.5x at 4 KiB chunks. The 4 KiB bar is the lower one
   because the link's own cost per chunk caps the gain there. Both bars sit
   inside the run-to-run spread (above), so a busy machine can fail a run of
   a sound build: rerun on an idle one before reading a failure as a

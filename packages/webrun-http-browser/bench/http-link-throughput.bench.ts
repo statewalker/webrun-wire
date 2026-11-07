@@ -3,12 +3,13 @@ import { connectHttpLink, type HttpLinkOptions, serveHttpLink } from "../src/lin
 
 // Over the HTTP link with its default window, a streamed response body gets
 // several times the throughput of the same link with `window: 0`: at least 2x
-// in 256 B chunks, 1.5x in 4 KiB chunks. Both are measured in this run, median
-// of 3, so the bar moves with the machine.
+// in 256 B chunks, 1.5x in 4 KiB chunks. Both are measured in this run, so the
+// bar moves with the machine: one warm-up pair (not recorded), then the median
+// of 7 pairs, each a `window: 0` run followed by a default one.
 
 const KiB = 1024;
 const MiB = 1024 * KiB;
-const RUNS = 3;
+const RUNS = 7;
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] as number;
 
@@ -70,6 +71,9 @@ describe("HTTP link throughput, default window against window: 0", () => {
     it(`a body of ${count} x ${size} B gets at least ${bar}x the throughput`, async () => {
       const plain: number[] = [];
       const windowed: number[] = [];
+      // A warm-up pair, discarded: the first runs pay for the JIT and the heap.
+      await throughput({ window: 0 }, size, count);
+      await throughput({}, size, count);
       for (let r = 0; r < RUNS; r++) {
         plain.push(await throughput({ window: 0 }, size, count));
         windowed.push(await throughput({}, size, count));
