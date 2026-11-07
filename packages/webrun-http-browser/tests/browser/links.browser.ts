@@ -389,6 +389,28 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(counts["B:slow"]).toBeGreaterThan(20);
       });
 
+      it("a key function: a worker's call to another origin reaches the handler of its key", async () => {
+        const page = await open("?sw=key%3Dinternal");
+        await run(page, `await window.attach("A"); await window.attach("B", { key: "other" });`);
+        const text = await run<string>(
+          page,
+          `return await (await fetch("./other/up?url=" + encodeURIComponent("http://svc.internal/app/svc/who"))).text();`,
+        );
+        expect(text).toBe("B via up: A");
+        // Urls under the scope still route as before.
+        expect(await run<string>(page, `return await (await fetch("./app/who")).text();`)).toBe(
+          "A",
+        );
+        // A page's own request to that origin is not the worker's to answer: it goes to the
+        // network (where svc.internal does not exist), not to a handler.
+        expect(
+          await run<string>(
+            page,
+            `try { await fetch("http://svc.internal/app/svc/who"); return "answered"; } catch (e) { return "network: " + e.name; }`,
+          ),
+        ).toBe("network: TypeError");
+      });
+
       it("a custom route picks the handler by a header", async () => {
         const page = await open("?sw=route%3Dslot");
         await run(
