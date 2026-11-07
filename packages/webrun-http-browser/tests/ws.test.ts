@@ -412,6 +412,38 @@ describe("server end: other platforms' semantics (workerd's WebSocketPair)", () 
     expect([armed, socket.readyState]).toEqual([0, 1]);
   });
 
+  it("a ping turning the heartbeat off stops the watch armed at open", async () => {
+    let armed = 0;
+    const timers = {
+      setInterval: (fn: () => void, ms: number) => {
+        armed++;
+        return setInterval(fn, ms);
+      },
+      clearInterval: (id: unknown) => {
+        armed--;
+        clearInterval(id as ReturnType<typeof setInterval>);
+      },
+    };
+    const { client } = end({ timers }); // watched from open
+    expect(armed).toBe(1);
+    client.postMessage({ t: "p", hb: 2 ** 31 - 1 });
+    await sleep(20);
+    expect(armed).toBe(0); // no watch left to close a client that will not ping again
+  });
+
+  it("deliverWhileClosing: messages in flight when close() is called still arrive", async () => {
+    const got: string[] = [];
+    for (const deliver of [true, false]) {
+      const { socket, client } = end({ deliverWhileClosing: deliver });
+      socket.accept();
+      socket.addEventListener("message", (e) => got.push(`${deliver}:${(e as MessageEvent).data}`));
+      socket.close(1000);
+      client.postMessage({ t: "m", d: "late" }); // sent before the client saw the close
+      await sleep(20);
+    }
+    expect(got).toEqual(["true:late"]);
+  });
+
   it('binaryType "blob": binary messages arrive as Blobs', async () => {
     const { socket, client } = end();
     socket.binaryType = "blob";
@@ -457,9 +489,52 @@ describe("server end: other platforms' semantics (workerd's WebSocketPair)", () 
       { t: "m", d: "before" },
       { t: "m", d: "after" },
     ]);
+    expect(() => socket.accept()).toThrow(/detached/);
+    expect(() => socket.send("x")).toThrow(/detached/);
     const accepted = end();
     accepted.socket.accept();
     expect(() => accepted.socket.detach()).toThrow(/detached/);
+    const closing = end();
+    closing.socket.close(1000);
+    expect(() => closing.socket.detach()).toThrow(/detached/);
+  });
+
+  it("detach: a queued close frame counts, so the relay ends with the handshake", async () => {
+    const { socket, client } = end();
+    client.postMessage({ t: "m", d: "hi" });
+    client.postMessage({ t: "c", code: 1000, reason: "" }); // the peer closed first
+    await sleep(10);
+    const port = socket.detach();
+    const atHolder: unknown[] = [];
+    port.onmessage = (e) => {
+      atHolder.push(e.data);
+      if ((e.data as { t: string }).t === "c") port.postMessage(e.data); // echo
+    };
+    await sleep(20);
+    client.postMessage({ t: "m", d: "after the handshake" });
+    await sleep(20);
+    // The relay ended after the echo: nothing more reaches the holder.
+    expect(atHolder).toEqual([
+      { t: "m", d: "hi" },
+      { t: "c", code: 1000, reason: "" },
+    ]);
+  });
+
+  it("detach: acks owed to the detached end are not the new holder's", async () => {
+    const { socket, client } = end({ sendBeforeAccept: true });
+    socket.send("12345"); // 5 bytes in flight, owed an ack
+    const drained = socket.whenDrained();
+    const port = socket.detach();
+    await drained; // detaching wakes the waiters
+    const atHolder: unknown[] = [];
+    port.onmessage = (e) => atHolder.push(e.data);
+    client.postMessage({ t: "a", n: 8 }); // 5 for the detached end, 3 for the holder
+    client.postMessage({ t: "m", d: "x" });
+    await sleep(20);
+    expect(atHolder).toEqual([
+      { t: "a", n: 3 },
+      { t: "m", d: "x" },
+    ]);
   });
 });
 

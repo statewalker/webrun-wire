@@ -1,7 +1,7 @@
 import {
   DEFAULT_HEARTBEAT_MS,
+  messageSize,
   postFrame,
-  readFrame,
   utf8Length,
   type WsFrame,
   type WsTimers,
@@ -42,6 +42,11 @@ export interface ServerWebSocketOptions {
   /** Lets `send()` before `accept()`; the frames wait in the port until the peer reads. */
   sendBeforeAccept?: boolean;
   /**
+   * Delivers the messages that arrive after `close()` until the peer's close frame does (they
+   * were in flight), as workerd does. By default they are dropped, as browsers do.
+   */
+  deliverWhileClosing?: boolean;
+  /**
    * The code `close()` sends when given none. Default 1000. 1005 ("no status code") is what a
    * close frame without a code reads as on the other end, as `close()` does on workerd.
    */
@@ -74,6 +79,7 @@ export class ServerWebSocket extends PortSocketCore {
   private _binaryType: "blob" | "arraybuffer" = "arraybuffer";
   private readonly _options: ServerWebSocketOptions;
   private _accepted = false;
+  private _detached = false;
   private _queue: Array<Extract<WsFrame, { t: "m" | "c" }>> = [];
   private _heartbeatMs = DEFAULT_HEARTBEAT_MS;
   private _lastPing = Date.now();
@@ -111,51 +117,78 @@ export class ServerWebSocket extends PortSocketCore {
    */
   detach(): MessagePort {
     const port = this._port;
-    if (!port || this._accepted || this._state === CLOSED) {
+    if (!port || this._accepted || this._state !== OPEN) {
       throw new DOMException(
         "Only an open end that was not accepted can be detached.",
         "InvalidStateError",
       );
     }
+    this._detached = true;
     this._port = undefined;
     port.onmessage = null;
+    // Acks the peer still owes this end (it sent before being detached) are not the new
+    // holder's to count: they are absorbed on the way.
+    let owed = this.bufferedAmount;
     this._state = CLOSED;
     this._onClosed();
+    this._wakeDrainWaiters();
     const queued = this._queue.splice(0);
-    if (queued.length === 0) return port;
-    // The queued frames first, then the rest, both ways, through a channel of its own.
+    if (queued.length === 0 && owed === 0) return port;
+    // The queued frames first, then the rest, both ways, through a channel of its own: frames
+    // pass as they are (kinds this version does not know included), and the relay ends once
+    // each way carried a close frame, or either port closes.
     const relay = new MessageChannel();
-    for (const frame of queued) postFrame(relay.port2, frame);
-    relay.port2.onmessage = (event) => {
-      const frame = readFrame(event.data);
-      if (frame) postFrame(port, frame);
-      if (frame?.t === "c" && closing.has("in")) end();
-      else if (frame?.t === "c") closing.add("out");
-    };
-    port.onmessage = (event) => {
-      const frame = readFrame(event.data);
-      if (frame) postFrame(relay.port2, frame);
-      if (frame?.t === "c" && closing.has("out")) end();
-      else if (frame?.t === "c") closing.add("in");
-    };
+    const holder = relay.port2;
     const closing = new Set<"in" | "out">();
     const end = () => {
       port.onmessage = null;
-      relay.port2.onmessage = null;
+      holder.onmessage = null;
       port.close();
-      relay.port2.close();
+      holder.close();
     };
+    const sawClose = (way: "in" | "out") => {
+      closing.add(way);
+      if (closing.size === 2) end();
+    };
+    for (const frame of queued) {
+      postFrame(holder, frame);
+      if (frame.t === "c") closing.add("in");
+    }
+    holder.onmessage = (event) => {
+      port.postMessage(event.data, transferables(event.data));
+      if ((event.data as { t?: unknown } | null)?.t === "c") sawClose("out");
+    };
+    port.onmessage = (event) => {
+      const data = event.data as { t?: unknown; n?: unknown } | null;
+      if (data?.t === "a" && typeof data.n === "number" && owed > 0) {
+        const absorbed = Math.min(owed, data.n);
+        owed -= absorbed;
+        if (data.n > absorbed) holder.postMessage({ t: "a", n: data.n - absorbed });
+        return;
+      }
+      holder.postMessage(event.data, transferables(event.data));
+      if (data?.t === "c") sawClose("in");
+    };
+    // A side that dies without a close frame: where the platform tells (MessagePort's "close").
+    port.addEventListener?.("close", end);
+    holder.addEventListener?.("close", end);
     return relay.port1;
   }
 
   /** Starts delivering events, the queued ones first. */
   accept(): void {
+    if (this._detached) {
+      throw new DOMException("This end was detached; it cannot be accepted.", "InvalidStateError");
+    }
     if (this._accepted) return;
     this._accepted = true;
     for (const frame of this._queue.splice(0)) super._deliver(frame);
   }
 
   send(data: string | ArrayBuffer | ArrayBufferView): void {
+    if (this._detached) {
+      throw new DOMException("This end was detached; it cannot send.", "InvalidStateError");
+    }
     if (!this._accepted && !this._options.sendBeforeAccept) {
       throw new DOMException("accept() the socket before sending on it.", "InvalidStateError");
     }
@@ -189,6 +222,11 @@ export class ServerWebSocket extends PortSocketCore {
       this._queue.push(frame);
       return;
     }
+    if (frame.t === "m" && this._state === CLOSING && this._options.deliverWhileClosing) {
+      this._dispatchMessage(frame.d);
+      this._consumed(messageSize(frame.d));
+      return;
+    }
     super._deliver(frame);
   }
 
@@ -202,10 +240,17 @@ export class ServerWebSocket extends PortSocketCore {
     this._post({ t: "q" });
     this._lastPing = Date.now();
     if (this._state === CLOSED) return; // defensive: a closed socket's port receives nothing
-    // A period no timer takes (2^31 - 1 ms and over: a client with `heartbeatMs: 0`) is no
-    // heartbeat at all.
-    if (!(hb > 0 && hb < 2 ** 31 - 1)) return;
     const keep = this._options.heartbeatPeriod === "first" && this._pinged;
+    // A period no timer takes (2^31 - 1 ms and over: a client that turned its heartbeat off,
+    // as cellb's does with `heartbeatMs: 0`) is no heartbeat at all: the watch stops, unless the
+    // first period is the one kept.
+    if (!(hb > 0 && hb < 2 ** 31 - 1)) {
+      if (!keep && this._watch !== undefined) {
+        this._timers.clearInterval(this._watch);
+        this._watch = undefined;
+      }
+      return;
+    }
     this._pinged = true;
     if (!keep && (this._watch === undefined || hb !== this._heartbeatMs)) {
       this._heartbeatMs = hb;
@@ -233,4 +278,10 @@ function isSendableCloseCode(code: number): boolean {
   if (!Number.isInteger(code)) return false;
   if (code >= 3000 && code <= 4999) return true;
   return code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006;
+}
+
+/** The buffers a relayed frame carries, to transfer rather than copy. */
+function transferables(data: unknown): Transferable[] {
+  const d = (data as { d?: unknown } | null)?.d;
+  return d instanceof ArrayBuffer ? [d] : [];
 }

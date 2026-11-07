@@ -223,7 +223,7 @@ export abstract class PortSocketCore extends EventTarget {
     this.dispatchEvent(newCloseEvent({ code, reason, wasClean }));
   }
 
-  private _wakeDrainWaiters(): void {
+  protected _wakeDrainWaiters(): void {
     if (this._drainWaiters.length === 0) return;
     const closed = this._state === CLOSED;
     this._drainWaiters = this._drainWaiters.filter(({ limit, resolve }) => {

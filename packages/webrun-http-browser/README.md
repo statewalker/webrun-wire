@@ -512,7 +512,8 @@ a handler in the same page needs no ServiceWorker at all.
   Other platforms' server ends (workerd's `WebSocketPair`) build on it with
   `heartbeatPeriod: "first"` (keep the first ping's period: a closing tab
   turns hidden, and announces a longer one, on its way out),
-  `sendBeforeAccept`, `defaultCloseCode: 1005`, `closeTimeoutMs: Infinity`, a
+  `sendBeforeAccept`, `deliverWhileClosing`, `defaultCloseCode: 1005`,
+  `closeTimeoutMs: Infinity`, a
   `binaryType` of `"blob"`, an overridden `checkClose(code, reason)`, and
   `detach()`, which hands an unaccepted end's port, with the frames that
   reached it, to another holder.
