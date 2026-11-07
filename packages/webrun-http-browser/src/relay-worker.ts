@@ -15,6 +15,7 @@
  * import.
  */
 
+export type { ServiceWorkerClientLike, ServiceWorkerScope } from "./core/sw-scope.js";
 export type { RelayServiceWorkerOptions } from "./relay/index-sw.js";
 export { startRelayServiceWorker } from "./relay/index-sw.js";
 export type { MountSpec } from "./relay/mount-table.js";

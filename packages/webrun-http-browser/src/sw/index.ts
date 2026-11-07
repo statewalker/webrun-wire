@@ -1,3 +1,8 @@
+export type {
+  FetchEventLike,
+  ServiceWorkerClientLike,
+  ServiceWorkerScope,
+} from "../core/sw-scope.js";
 export * from "./handler-endpoint.js";
 export * from "./handler-table.js";
 export * from "./http-sw-dispatcher.js";

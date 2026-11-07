@@ -3,6 +3,7 @@ import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls, withTransfer } from "../core/data-calls.js";
 import { newRegistry } from "../core/registry.js";
 import { handleClaimRequests } from "../core/service-worker-control.js";
+import type { ServiceWorkerClientLike, ServiceWorkerScope } from "../core/sw-scope.js";
 import { HTTP_LINK_PROTOCOL } from "../link/http-link.js";
 import { WS_CONNECT_CALL } from "../sw/protocol.js";
 import type { WebSocketConnection } from "../ws/client.js";
@@ -137,7 +138,11 @@ export interface RelayServiceWorkerOptions {
    * mount an allowed key at `/index.html` and outrank `/` on longest-prefix.
    * Also consulted for `UNREGISTER`, with the path the key is mounted at.
    */
-  canRegister?: (client: Client, key: string, path?: string) => boolean | Promise<boolean>;
+  canRegister?: (
+    client: ServiceWorkerClientLike,
+    key: string,
+    path?: string,
+  ) => boolean | Promise<boolean>;
   /** Per-stream inactivity timeout of the links to services, in ms. Default none. */
   streamTimeout?: number;
   /**
@@ -176,9 +181,11 @@ export function mayRegister(args: {
  * channel calls used by the page-side relay client.
  */
 export function startRelayServiceWorker(
-  self: ServiceWorkerGlobalScope,
+  scope: ServiceWorkerScope,
   options: RelayServiceWorkerOptions = {},
 ): () => void {
+  // Typed structurally in the signature so the declarations need no WebWorker lib.
+  const self = scope as unknown as ServiceWorkerGlobalScope;
   const [register, clear] = newRegistry();
   const mounts = newMountTable({ exclude: options.exclude });
   // The keys the HOST declared. Kept so a page's REGISTER/UNREGISTER cannot

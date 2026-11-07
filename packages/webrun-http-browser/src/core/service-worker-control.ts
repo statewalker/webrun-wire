@@ -2,6 +2,7 @@
 
 import { callChannel, handleChannelCalls } from "./data-calls.js";
 import { withDeadline } from "./deadline.js";
+import type { ServiceWorkerScope } from "./sw-scope.js";
 
 /**
  * How long, by default, the page waits for its ServiceWorker to activate and
@@ -167,9 +168,10 @@ export async function awaitServiceWorkerControl(
  * `clients.claim()`, which takes over every uncontrolled client in scope.
  * Returns a function that stops answering.
  */
-export function handleClaimRequests(self: ServiceWorkerGlobalScope): () => void {
-  return handleChannelCalls(self, CLAIM_CALL, (event) => {
-    const claimed = self.clients.claim().then(() => true);
+export function handleClaimRequests(self: ServiceWorkerScope): () => void {
+  const sw = self as unknown as ServiceWorkerGlobalScope;
+  return handleChannelCalls(sw, CLAIM_CALL, (event) => {
+    const claimed = sw.clients.claim().then(() => true);
     (event as unknown as Partial<ExtendableMessageEvent>).waitUntil?.(claimed);
     return claimed;
   });
