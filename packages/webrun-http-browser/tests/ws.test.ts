@@ -277,6 +277,78 @@ describe("heartbeat", () => {
   });
 });
 
+describe("heartbeat watch from the first ping", () => {
+  const port = async (response: Response) =>
+    (await import("../src/ws/upgrade.js")).takePort(response) as MessagePort;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /** Timers that count the watches armed and still armed. */
+  function counted() {
+    let armed = 0;
+    const timers = {
+      setInterval: (fn: () => void, ms: number) => {
+        armed++;
+        return setInterval(fn, ms);
+      },
+      clearInterval: (id: unknown) => {
+        armed--;
+        clearInterval(id as ReturnType<typeof setInterval>);
+      },
+    };
+    return { timers, armed: () => armed };
+  }
+
+  it("no watch until the peer pings; the default watches from open", async () => {
+    const def = counted();
+    const late = counted();
+    const watched = upgradeWebSocket(new Request("http://example.test/x"), { timers: def.timers });
+    const unwatched = upgradeWebSocket(new Request("http://example.test/x"), {
+      timers: late.timers,
+      watch: "first-ping",
+    });
+    servers.push(watched.socket, unwatched.socket);
+    expect([def.armed(), late.armed()]).toEqual([1, 0]);
+    const client = await port(unwatched.response);
+    await sleep(50);
+    expect([unwatched.socket.readyState, late.armed()]).toEqual([1, 0]);
+    client.postMessage({ t: "p", hb: 15_000 });
+    await sleep(20);
+    expect(late.armed()).toBe(1); // the first ping armed it
+    client.postMessage({ t: "p", hb: 15_000 });
+    await sleep(20);
+    expect(late.armed()).toBe(1); // the same period again: still one watch
+  });
+
+  it("once the peer pings, its pings stopping closes the socket with 1006", async () => {
+    const { socket, response } = upgradeWebSocket(new Request("http://example.test/x"), {
+      watch: "first-ping",
+    });
+    socket.accept();
+    const client = await port(response);
+    await sleep(50);
+    expect(socket.readyState).toBe(1);
+    client.postMessage({ t: "p", hb: 20 }); // one ping, then silence
+    const close = await next<CloseEvent>(socket, "close");
+    expect(close).toMatchObject({ code: 1006, wasClean: false });
+  });
+
+  it("a ping after close starts no watch", async () => {
+    const { socket, response } = upgradeWebSocket(new Request("http://example.test/x"), {
+      watch: "first-ping",
+    });
+    socket.accept();
+    const client = await port(response);
+    client.onmessage = (e) => {
+      if ((e.data as { t?: string }).t === "c") client.postMessage(e.data); // echo the close
+    };
+    socket.close();
+    await next(socket, "close");
+    client.postMessage({ t: "p", hb: 20 });
+    await sleep(100); // nothing to observe but the absence of a throw or a second close
+    expect(socket.readyState).toBe(3);
+  });
+});
+
 describe("server end", () => {
   it("queues frames until accept(), and refuses send before it", async () => {
     const WS = createWebSocketClass(connector(echo({ accept: false })));
