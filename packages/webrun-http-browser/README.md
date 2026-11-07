@@ -358,6 +358,7 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 
 | Option | Default | What it does |
 | --- | --- | --- |
+| `key` | `scopeKey` | `(url, scope) => key \| undefined`: which key a url belongs to, for `fetch` events, `dispatch()` and sockets. By default the first path segment under the scope; give your own for another layout (a site at the origin's root, projects under a base path) or for urls on another origin that only handlers call through `service.fetch`. A url with no key goes to the network. |
 | `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait for another to attach. |
 | `attachTimeoutMs` | `15_000` | How long a request waits for a handler during a hand-over. Past it, `503`. |
 | `relinkTimeoutMs` | `3_000` | How long a request waits for the pages to attach again after a restart. |

@@ -38,9 +38,34 @@ import {
   WS_CONNECT_CALL,
 } from "./protocol.js";
 
+/**
+ * The key a request's url belongs to, or `undefined` when it is none of this dispatcher's (the
+ * request then goes to the network). `scope` is the worker's scope, with its trailing slash.
+ */
+export type KeyFunction = (url: URL, scope: string) => string | undefined;
+
+/** The default key: the url's first path segment under `scope`; none outside it. */
+export function scopeKey(url: URL, scope: string): string | undefined {
+  const href = `${url}`;
+  if (!href.startsWith(scope)) return undefined;
+  const key = href
+    .substring(scope.length)
+    .replace(/[?#].*$/, "")
+    .split("/")[0];
+  return key ? decodeURIComponent(key) : undefined;
+}
+
 export interface SwHttpDispatcherOptions {
   self: ServiceWorkerGlobalScope;
   log?: (...args: unknown[]) => void;
+  /**
+   * Which key a url belongs to. Default `scopeKey`: the first path segment under the scope, and
+   * none outside it. A host with another layout gives its own: a project at the origin's root,
+   * projects under a base path, or urls on another origin that only its handlers call (calls
+   * between them through `service.fetch`, which never reach the network). It decides for
+   * `fetch` events, `dispatch()` and sockets alike.
+   */
+  key?: KeyFunction;
   /**
    * Picks the handler of a request among the live handlers of its key.
    * Default `leastInflightRoute`: the fewest requests in flight, the oldest on
@@ -161,16 +186,9 @@ export class SwHttpDispatcher {
     return this.self.registration?.scope ?? `${new URL("./", this.self.location.href)}`;
   }
 
-  /** The key `url` belongs to: its first path segment under the scope. */
+  /** The key `url` belongs to (the `key` option; by default its first path segment under the scope). */
   keyOf(url: string | URL): string | undefined {
-    const href = `${url}`;
-    const scope = this.scope;
-    if (!href.startsWith(scope)) return undefined;
-    const key = href
-      .substring(scope.length)
-      .replace(/[?#].*$/, "")
-      .split("/")[0];
-    return key ? decodeURIComponent(key) : undefined;
+    return (this.options.key ?? scopeKey)(new URL(`${url}`), this.scope);
   }
 
   /** Whether `key` has ever been served on this worker. */
@@ -268,8 +286,8 @@ export class SwHttpDispatcher {
 
   /**
    * Answers `request` as a fetch under the scope would be: through the
-   * handler its key routes to. A url outside the scope, or of a key this
-   * worker never served, goes to the network.
+   * handler its key routes to. A url with no key (by default, one outside the
+   * scope), or of a key this worker never served, goes to the network.
    */
   async dispatch(request: Request): Promise<Response> {
     const key = this.keyOf(request.url);
@@ -315,7 +333,7 @@ export class SwHttpDispatcher {
   ): Promise<WebSocketConnection> {
     const request = newWebSocketUpgradeRequest(url, { protocols, headers });
     const key = this.keyOf(request.url);
-    if (key === undefined) throw new Error(`${url} is outside this ServiceWorker's scope`);
+    if (key === undefined) throw new Error(`${url} belongs to no key of this ServiceWorker`);
     await this._restored.catch(() => {});
     const entry = await this._acquire(request, key);
     if (!entry || entry === TIMED_OUT) throw new Error(`No handler serves ${url}`);

@@ -6,6 +6,16 @@ self.HTTP_DISPATCHER_OPTIONS = {
   relinkTimeoutMs: 3000,
   handoverMs: 5000,
 };
+if (params.get("key") === "internal") {
+  // ?key=internal: urls on http://svc.internal/<key>/... belong to <key> too (calls between
+  // handlers that never reach the network); the rest as by default.
+  self.HTTP_DISPATCHER_OPTIONS.key = (url, scope) => {
+    if (url.host === "svc.internal") return url.pathname.split("/")[1] || undefined;
+    const href = `${url}`;
+    if (!href.startsWith(scope)) return undefined;
+    return href.substring(scope.length).replace(/[?#].*$/, "").split("/")[0] || undefined;
+  };
+}
 if (params.get("route") === "slot") {
   self.HTTP_DISPATCHER_OPTIONS.route = (request, _key, handlers) => {
     const slot = request.headers.get("x-slot");
