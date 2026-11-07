@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createWebSocketClass,
+  DEFAULT_HEARTBEAT_MS,
   isWebSocketUpgrade,
   newWebSocketUpgradeRequest,
   type PortWebSocket,
@@ -311,10 +312,12 @@ describe("heartbeat watch from the first ping", () => {
     const client = await port(unwatched.response);
     await sleep(50);
     expect([unwatched.socket.readyState, late.armed()]).toEqual([1, 0]);
-    client.postMessage({ t: "p", hb: 15_000 });
+    // The first ping with the default period, as the package's client sends it: the period does
+    // not change, and still the first ping arms the watch.
+    client.postMessage({ t: "p", hb: DEFAULT_HEARTBEAT_MS });
     await sleep(20);
-    expect(late.armed()).toBe(1); // the first ping armed it
-    client.postMessage({ t: "p", hb: 15_000 });
+    expect(late.armed()).toBe(1);
+    client.postMessage({ t: "p", hb: DEFAULT_HEARTBEAT_MS });
     await sleep(20);
     expect(late.armed()).toBe(1); // the same period again: still one watch
   });
@@ -325,27 +328,15 @@ describe("heartbeat watch from the first ping", () => {
     });
     socket.accept();
     const client = await port(response);
-    await sleep(50);
+    // A first ping long after the socket opened (over three of its periods): the watch counts
+    // from the ping, so the socket is still open a period later.
+    await sleep(100);
+    client.postMessage({ t: "p", hb: 20 });
+    await sleep(30);
     expect(socket.readyState).toBe(1);
-    client.postMessage({ t: "p", hb: 20 }); // one ping, then silence
+    // Then silence.
     const close = await next<CloseEvent>(socket, "close");
     expect(close).toMatchObject({ code: 1006, wasClean: false });
-  });
-
-  it("a ping after close starts no watch", async () => {
-    const { socket, response } = upgradeWebSocket(new Request("http://example.test/x"), {
-      watch: "first-ping",
-    });
-    socket.accept();
-    const client = await port(response);
-    client.onmessage = (e) => {
-      if ((e.data as { t?: string }).t === "c") client.postMessage(e.data); // echo the close
-    };
-    socket.close();
-    await next(socket, "close");
-    client.postMessage({ t: "p", hb: 20 });
-    await sleep(100); // nothing to observe but the absence of a throw or a second close
-    expect(socket.readyState).toBe(3);
   });
 });
 

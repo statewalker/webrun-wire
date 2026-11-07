@@ -22,7 +22,7 @@ export interface ServerWebSocketOptions {
    * pings is closed with 1006 after three default periods; `"first-ping"` with the client's
    * first ping, so a peer that does not ping at all (the other end of a pair kept in the same
    * realm, say) is never closed for it. Once pings have started, both close a socket whose
-   * pings stop.
+   * pings stop. Under `"first-ping"` a peer that never pings is never found dead.
    */
   watch?: "open" | "first-ping";
 }
@@ -112,7 +112,7 @@ export class ServerWebSocket extends PortSocketCore {
   protected override _onPing(hb: number): void {
     this._post({ t: "q" });
     this._lastPing = Date.now();
-    if (this._state === CLOSED) return;
+    if (this._state === CLOSED) return; // defensive: a closed socket's port receives nothing
     if (this._watch === undefined || hb !== this._heartbeatMs) {
       this._heartbeatMs = hb;
       this._watchHeartbeat();
