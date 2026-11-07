@@ -463,7 +463,9 @@ a handler in the same page needs no ServiceWorker at all.
 - **Server end.** `ServerWebSocket` delivers events only after `accept()`
   (frames that arrive earlier are queued), answers pings before it, and has
   `send`, `close`, `bufferedAmount` and `whenDrained(limit)` for
-  backpressure.
+  backpressure. It closes with 1006 once the client's pings stop; with
+  `upgradeWebSocket(request, { watch: "first-ping" })` it starts watching only
+  at the first ping, for a peer that never pings (two ends kept in one realm).
 - **Client.** `createWebSocketClass(connect, options)` validates as the
   standard does (url, scheme, fragment, subprotocol tokens, close codes and
   reasons), has `binaryType`, the `on*` handlers and the close handshake.

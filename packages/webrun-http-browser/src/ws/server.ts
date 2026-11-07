@@ -17,6 +17,14 @@ export interface ServerWebSocketOptions {
   timers?: WsTimers;
   /** How long `close()` waits for the client's echo, in ms. Default 5 s. */
   closeTimeoutMs?: number;
+  /**
+   * When the heartbeat watch starts: `"open"` (the default) at once, so a client that never
+   * pings is closed with 1006 after three default periods; `"first-ping"` with the client's
+   * first ping, so a peer that does not ping at all (the other end of a pair kept in the same
+   * realm, say) is never closed for it. Once pings have started, both close a socket whose
+   * pings stop. Under `"first-ping"` a peer that never pings is never found dead.
+   */
+  watch?: "open" | "first-ping";
 }
 
 /**
@@ -31,7 +39,8 @@ export interface ServerWebSocketOptions {
  *   `whenDrained(limit)` waits for it to fall: the backpressure a producer
  *   applies.
  * - When the client's pings stop for three heartbeat periods (a closed tab, a
- *   terminated worker), the socket closes with 1006.
+ *   terminated worker), the socket closes with 1006. With `watch: "first-ping"`
+ *   the watch starts only once the client pings.
  */
 export class ServerWebSocket extends PortSocketCore {
   static readonly CONNECTING = CONNECTING;
@@ -53,7 +62,7 @@ export class ServerWebSocket extends PortSocketCore {
     this.protocol = options.protocol ?? "";
     this._attach(port);
     this._state = OPEN;
-    this._watchHeartbeat();
+    if (options.watch !== "first-ping") this._watchHeartbeat();
   }
 
   /** Whether `accept()` was called. */
@@ -103,7 +112,8 @@ export class ServerWebSocket extends PortSocketCore {
   protected override _onPing(hb: number): void {
     this._post({ t: "q" });
     this._lastPing = Date.now();
-    if (hb !== this._heartbeatMs) {
+    if (this._state === CLOSED) return; // defensive: a closed socket's port receives nothing
+    if (this._watch === undefined || hb !== this._heartbeatMs) {
       this._heartbeatMs = hb;
       this._watchHeartbeat();
     }

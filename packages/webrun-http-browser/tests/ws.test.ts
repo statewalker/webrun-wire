@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createWebSocketClass,
+  DEFAULT_HEARTBEAT_MS,
   isWebSocketUpgrade,
   newWebSocketUpgradeRequest,
   type PortWebSocket,
@@ -272,6 +273,70 @@ describe("heartbeat", () => {
     // A client that pings once, with a short period, then dies.
     const port = (await import("../src/ws/upgrade.js")).takePort(response);
     port?.postMessage({ t: "p", hb: 20 });
+    const close = await next<CloseEvent>(socket, "close");
+    expect(close).toMatchObject({ code: 1006, wasClean: false });
+  });
+});
+
+describe("heartbeat watch from the first ping", () => {
+  const port = async (response: Response) =>
+    (await import("../src/ws/upgrade.js")).takePort(response) as MessagePort;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /** Timers that count the watches armed and still armed. */
+  function counted() {
+    let armed = 0;
+    const timers = {
+      setInterval: (fn: () => void, ms: number) => {
+        armed++;
+        return setInterval(fn, ms);
+      },
+      clearInterval: (id: unknown) => {
+        armed--;
+        clearInterval(id as ReturnType<typeof setInterval>);
+      },
+    };
+    return { timers, armed: () => armed };
+  }
+
+  it("no watch until the peer pings; the default watches from open", async () => {
+    const def = counted();
+    const late = counted();
+    const watched = upgradeWebSocket(new Request("http://example.test/x"), { timers: def.timers });
+    const unwatched = upgradeWebSocket(new Request("http://example.test/x"), {
+      timers: late.timers,
+      watch: "first-ping",
+    });
+    servers.push(watched.socket, unwatched.socket);
+    expect([def.armed(), late.armed()]).toEqual([1, 0]);
+    const client = await port(unwatched.response);
+    await sleep(50);
+    expect([unwatched.socket.readyState, late.armed()]).toEqual([1, 0]);
+    // The first ping with the default period, as the package's client sends it: the period does
+    // not change, and still the first ping arms the watch.
+    client.postMessage({ t: "p", hb: DEFAULT_HEARTBEAT_MS });
+    await sleep(20);
+    expect(late.armed()).toBe(1);
+    client.postMessage({ t: "p", hb: DEFAULT_HEARTBEAT_MS });
+    await sleep(20);
+    expect(late.armed()).toBe(1); // the same period again: still one watch
+  });
+
+  it("once the peer pings, its pings stopping closes the socket with 1006", async () => {
+    const { socket, response } = upgradeWebSocket(new Request("http://example.test/x"), {
+      watch: "first-ping",
+    });
+    socket.accept();
+    const client = await port(response);
+    // A first ping long after the socket opened (over three of its periods): the watch counts
+    // from the ping, so the socket is still open a period later.
+    // (hb 50: the earliest close is the tick ~200 ms after the ping, so the check at 60 ms has
+    // ~140 ms of slack on a loaded runner.)
+    await sleep(200);
+    client.postMessage({ t: "p", hb: 50 });
+    await sleep(60);
+    expect(socket.readyState).toBe(1);
+    // Then silence.
     const close = await next<CloseEvent>(socket, "close");
     expect(close).toMatchObject({ code: 1006, wasClean: false });
   });
