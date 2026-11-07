@@ -509,6 +509,13 @@ a handler in the same page needs no ServiceWorker at all.
   backpressure. It closes with 1006 once the client's pings stop; with
   `upgradeWebSocket(request, { watch: "first-ping" })` it starts watching only
   at the first ping, for a peer that never pings (two ends kept in one realm).
+  Other platforms' server ends (workerd's `WebSocketPair`) build on it with
+  `heartbeatPeriod: "first"` (keep the first ping's period: a closing tab
+  turns hidden, and announces a longer one, on its way out),
+  `sendBeforeAccept`, `defaultCloseCode: 1005`, `closeTimeoutMs: Infinity`, a
+  `binaryType` of `"blob"`, an overridden `checkClose(code, reason)`, and
+  `detach()`, which hands an unaccepted end's port, with the frames that
+  reached it, to another holder.
 - **Client.** `createWebSocketClass(connect, options)` validates as the
   standard does (url, scheme, fragment, subprotocol tokens, close codes and
   reasons), has `binaryType`, the `on*` handlers and the close handshake.

@@ -7,7 +7,9 @@ import {
   type PortWebSocket,
   requestedProtocols,
   type ServerWebSocket,
+  ServerWebSocket as ServerWebSocketClass,
   serveWebSocketUpgrade,
+  takePort,
   upgradeWebSocket,
   type WebSocketConnector,
   webSocketUpgradeResponse,
@@ -340,6 +342,124 @@ describe("heartbeat watch from the first ping", () => {
     // Then silence.
     const close = await next<CloseEvent>(socket, "close");
     expect(close).toMatchObject({ code: 1006, wasClean: false });
+  });
+});
+
+describe("server end: other platforms' semantics (workerd's WebSocketPair)", () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** A server end and the raw port of its client, which posts and reads frames. */
+  function end(options: Parameters<typeof upgradeWebSocket>[1] = {}) {
+    const { socket, response } = upgradeWebSocket(new Request("http://example.test/x"), options);
+    servers.push(socket);
+    const client = takePort(response) as MessagePort;
+    const frames: Array<{ t: string; [k: string]: unknown }> = [];
+    client.onmessage = (e) => frames.push(e.data);
+    return { socket, client, frames };
+  }
+
+  it("sendBeforeAccept: send() works before accept(); by default it throws", async () => {
+    const strict = end();
+    expect(() => strict.socket.send("x")).toThrow(/accept/);
+    const loose = end({ sendBeforeAccept: true });
+    loose.socket.send("early");
+    await sleep(10);
+    expect(loose.frames).toContainEqual({ t: "m", d: "early" });
+  });
+
+  it("defaultCloseCode: close() with no code sends it (1005); the default stays 1000", async () => {
+    const workerd = end({ defaultCloseCode: 1005 });
+    workerd.socket.close();
+    const plain = end();
+    plain.socket.close();
+    await sleep(10);
+    expect(workerd.frames).toContainEqual({ t: "c", code: 1005, reason: "" });
+    expect(plain.frames).toContainEqual({ t: "c", code: 1000, reason: "" });
+  });
+
+  it("closeTimeoutMs Infinity: close() waits for the echo however long", async () => {
+    const { socket } = end({ closeTimeoutMs: Infinity });
+    socket.close(1000);
+    await sleep(50); // a timer given Infinity would have fired at once
+    expect(socket.readyState).toBe(2);
+  });
+
+  it('heartbeatPeriod "first": a later, longer period does not stretch the watch', async () => {
+    const first = end({ heartbeatPeriod: "first" });
+    const follow = end();
+    for (const { client } of [first, follow]) {
+      client.postMessage({ t: "p", hb: 20 });
+      client.postMessage({ t: "p", hb: 60_000 }); // the page turned hidden, then went silent
+    }
+    const close = await next<CloseEvent>(first.socket, "close");
+    expect(close.code).toBe(1006);
+    expect(follow.socket.readyState).toBe(1);
+  });
+
+  it("a ping announcing a period past what a timer takes (no heartbeat) arms no watch", async () => {
+    let armed = 0;
+    const timers = {
+      setInterval: (fn: () => void, ms: number) => {
+        armed++;
+        return setInterval(fn, ms);
+      },
+      clearInterval: (id: unknown) => clearInterval(id as ReturnType<typeof setInterval>),
+    };
+    const { client, socket } = end({ watch: "first-ping", timers });
+    // A client with `heartbeatMs: 0` announces 2^31 - 1 (a frame's 0 reads as the default).
+    client.postMessage({ t: "p", hb: 2 ** 31 - 1 });
+    client.postMessage({ t: "p", hb: 2 ** 40 });
+    await sleep(20);
+    expect([armed, socket.readyState]).toEqual([0, 1]);
+  });
+
+  it('binaryType "blob": binary messages arrive as Blobs', async () => {
+    const { socket, client } = end();
+    socket.binaryType = "blob";
+    socket.binaryType = "nonsense" as "blob"; // ignored, as in browsers
+    socket.accept();
+    const got = next<MessageEvent>(socket, "message");
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    client.postMessage({ t: "m", d: bytes }, [bytes]);
+    const data = (await got).data;
+    expect(data).toBeInstanceOf(Blob);
+    expect(new Uint8Array(await (data as Blob).arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("checkClose: a subclass applies its platform's close rules", () => {
+    class Strict extends ServerWebSocketClass {
+      protected override checkClose(code: number | undefined, reason: string): void {
+        if (code === 1001) throw new TypeError("1001 is not for Worker code");
+        super.checkClose(code, reason);
+      }
+    }
+    const { port1, port2 } = new MessageChannel();
+    const socket = new Strict(port1);
+    expect(() => socket.close(1001)).toThrow(/Worker code/);
+    socket.close(1000);
+    port1.close();
+    port2.close();
+  });
+
+  it("detach: the frames that reached the unaccepted end come first, then the rest, both ways", async () => {
+    const { socket, client } = end();
+    client.postMessage({ t: "m", d: "before" });
+    await sleep(10); // queued at the unaccepted end
+    const port = socket.detach();
+    expect(socket.readyState).toBe(3);
+    const atNewHolder: unknown[] = [];
+    port.onmessage = (e) => atNewHolder.push(e.data);
+    client.postMessage({ t: "m", d: "after" });
+    const fromHolder = new Promise((r) => (client.onmessage = (e) => r(e.data)));
+    port.postMessage({ t: "m", d: "reply" });
+    expect(await fromHolder).toEqual({ t: "m", d: "reply" });
+    await sleep(10);
+    expect(atNewHolder).toEqual([
+      { t: "m", d: "before" },
+      { t: "m", d: "after" },
+    ]);
+    const accepted = end();
+    accepted.socket.accept();
+    expect(() => accepted.socket.detach()).toThrow(/detached/);
   });
 });
 

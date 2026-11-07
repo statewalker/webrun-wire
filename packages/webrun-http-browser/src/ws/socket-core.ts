@@ -43,7 +43,10 @@ export function newCloseEvent(init: WsCloseEventInit): Event {
 
 export interface PortSocketOptions {
   timers?: WsTimers;
-  /** How long to wait for the echo of a close frame before giving up with 1006. */
+  /**
+   * How long to wait for the echo of a close frame before giving up with 1006. `Infinity` waits
+   * for as long as it takes.
+   */
   closeTimeoutMs?: number;
 }
 
@@ -182,6 +185,8 @@ export abstract class PortSocketCore extends EventTarget {
     if (this._state === CLOSING || this._state === CLOSED) return;
     this._state = CLOSING;
     this._post({ t: "c", code, reason });
+    // A timer cannot take Infinity (it would fire at once): no timer is waiting forever.
+    if (!Number.isFinite(this._closeTimeoutMs)) return;
     this._closeTimer = this._timers.setTimeout(
       () => this._finish(1006, "", false),
       this._closeTimeoutMs,
