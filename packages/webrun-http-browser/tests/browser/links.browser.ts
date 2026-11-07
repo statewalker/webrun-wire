@@ -401,6 +401,14 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(await run<string>(page, `return await (await fetch("./app/who")).text();`)).toBe(
           "A",
         );
+        // A page's own request to that origin is not the worker's to answer: it goes to the
+        // network (where svc.internal does not exist), not to a handler.
+        expect(
+          await run<string>(
+            page,
+            `try { await fetch("http://svc.internal/app/svc/who"); return "answered"; } catch (e) { return "network: " + e.name; }`,
+          ),
+        ).toBe("network: TypeError");
       });
 
       it("a custom route picks the handler by a header", async () => {

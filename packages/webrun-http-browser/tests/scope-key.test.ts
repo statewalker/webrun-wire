@@ -16,4 +16,8 @@ describe("scopeKey: the dispatcher's default key", () => {
     expect(key("https://app.test/other/site/")).toBeUndefined();
     expect(key("https://elsewhere.test/base/site/")).toBeUndefined();
   });
+
+  it("is none for a segment that does not decode, rather than throwing", () => {
+    expect(key("https://app.test/base/%E0/x")).toBeUndefined();
+  });
 });

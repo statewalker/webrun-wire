@@ -44,7 +44,10 @@ import {
  */
 export type KeyFunction = (url: URL, scope: string) => string | undefined;
 
-/** The default key: the url's first path segment under `scope`; none outside it. */
+/**
+ * The default key: the url's first path segment under `scope`, decoded; none outside it, at the
+ * scope itself, or for a segment that does not decode.
+ */
 export function scopeKey(url: URL, scope: string): string | undefined {
   const href = `${url}`;
   if (!href.startsWith(scope)) return undefined;
@@ -52,7 +55,12 @@ export function scopeKey(url: URL, scope: string): string | undefined {
     .substring(scope.length)
     .replace(/[?#].*$/, "")
     .split("/")[0];
-  return key ? decodeURIComponent(key) : undefined;
+  if (!key) return undefined;
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return undefined; // a malformed escape (`%E0`): no key, so the request goes to the network
+  }
 }
 
 export interface SwHttpDispatcherOptions {
@@ -61,9 +69,17 @@ export interface SwHttpDispatcherOptions {
   /**
    * Which key a url belongs to. Default `scopeKey`: the first path segment under the scope, and
    * none outside it. A host with another layout gives its own: a project at the origin's root,
-   * projects under a base path, or urls on another origin that only its handlers call (calls
-   * between them through `service.fetch`, which never reach the network). It decides for
-   * `fetch` events, `dispatch()` and sockets alike.
+   * projects under a base path. It decides for `dispatch()` (and so a handler's `service.fetch`),
+   * for sockets, and for `fetch` events of this origin's urls.
+   *
+   * A key it gives a url of another origin is for calls between handlers only (`service.fetch`,
+   * sockets): `fetch` events for other origins stay the browser's, so a page's request to that
+   * origin goes to the network as it would without the worker.
+   *
+   * It runs synchronously, in the `fetch` listener; it must not throw. A handler registered in a
+   * page (`SwHttpAdapter.register`) serves only urls under its own `baseUrl`: a url the function
+   * maps to its key from elsewhere reaches the page and gets a 404 there, where a handler in a
+   * worker (`serveHttpInWorker`) takes any url.
    */
   key?: KeyFunction;
   /**
@@ -134,7 +150,8 @@ const TIMED_OUT = Symbol("timed-out");
  * (`SwHttpAdapter.register`) or in Dedicated Workers
  * (`SwHttpAdapter.attachWorker` + `serveHttpInWorker`).
  *
- * A url `<scope>/<key>/...` belongs to the handlers of `key`. Of those, the
+ * A url `<scope>/<key>/...` belongs to the handlers of `key` (the `key`
+ * option maps urls to keys some other way). Of those, the
  * `route` option picks one per request. Requests and responses stream with
  * backpressure in both directions, and an aborted fetch reaches the handler
  * as a cancellation (webrun-rpc + webrun-http-streams).
@@ -188,7 +205,13 @@ export class SwHttpDispatcher {
 
   /** The key `url` belongs to (the `key` option; by default its first path segment under the scope). */
   keyOf(url: string | URL): string | undefined {
-    return (this.options.key ?? scopeKey)(new URL(`${url}`), this.scope);
+    let parsed: URL;
+    try {
+      parsed = new URL(`${url}`);
+    } catch {
+      return undefined; // not an absolute url: nobody's
+    }
+    return (this.options.key ?? scopeKey)(parsed, this.scope);
   }
 
   /** Whether `key` has ever been served on this worker. */
@@ -356,9 +379,12 @@ export class SwHttpDispatcher {
 
   private _onFetch(event: FetchEvent): void {
     const request = event.request;
+    // Another origin's url (a page's request to a CDN, an API) stays the
+    // browser's even when the key function maps it: such keys are for calls
+    // between handlers. No key: not ours either. No `respondWith` for those,
+    // so the browser does the request exactly as it would without a worker.
+    if (new URL(request.url).origin !== this.self.location.origin) return;
     const key = this.keyOf(request.url);
-    // Outside the scope: not ours. No `respondWith`, so the browser does the
-    // request exactly as it would without a worker.
     if (key === undefined) return;
     if (this._restoreSettled) {
       if (this.serves(key)) {
