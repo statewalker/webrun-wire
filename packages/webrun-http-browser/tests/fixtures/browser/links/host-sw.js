@@ -40,5 +40,8 @@ self.addEventListener("fetch", (event) => {
     headers.set("x-tunnel", "from-host");
     request = new Request(request, { headers });
   }
-  returned.push({ path: url.pathname, handled: dispatcher.handleFetch(event, request) });
+  // `settled`: whether the stored keys were read already (`_restoreSettled` is private to the
+  // TypeScript API; read here so the test can tell the branch handleFetch took).
+  const settled = dispatcher._restoreSettled;
+  returned.push({ path: url.pathname, settled, handled: dispatcher.handleFetch(event, request) });
 });

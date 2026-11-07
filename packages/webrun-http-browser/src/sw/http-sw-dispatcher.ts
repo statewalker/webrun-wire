@@ -92,10 +92,10 @@ export interface SwHttpDispatcherOptions {
    */
   handleFetch?: boolean;
   /**
-   * The answer to a request the dispatcher took but that no handler serves: a navigation under
-   * the scope whose key nobody serves, or (before the stored keys are read, after a restart) a
-   * request whose key turns out to be nobody's. Default `fetch(request)`, the network. A host
-   * with a page of its own for such urls answers with it here.
+   * The answer to a navigation under the scope whose key nobody serves (also one taken before
+   * the stored keys are read, after a restart). Default `fetch(request)`, the network. A host
+   * with a page of its own for such urls answers with it here. Other requests nobody serves
+   * always go to the network.
    */
   unserved?: (request: Request) => Response | Promise<Response>;
   /**
@@ -403,12 +403,15 @@ export class SwHttpDispatcher {
    * It takes a same-origin request whose key (the `key` option) a handler serves, and also:
    * - a navigation under the scope whose key nobody serves (answered by `unserved`);
    * - before the stored keys are read (the first requests after a restart), every request with
-   *   a key, since only then is it known whose it is: one nobody serves is answered by
-   *   `unserved`.
+   *   a key, since only then is it known whose it is: one nobody serves gets what it would have
+   *   got after, `unserved` for a navigation and the network for anything else.
    * So a host with a page of its own for urls nobody serves gives it as `unserved`, rather than
    * deciding before calling this.
    */
   handleFetch(event: FetchEvent, request: Request = event.request): boolean {
+    // A navigation is told by the event's own request: a rewritten copy is no longer one (`new
+    // Request(navigation, init)` makes its mode "same-origin").
+    const navigation = event.request.mode === "navigate";
     // Another origin's url (a page's request to a CDN, an API) stays the
     // browser's even when the key function maps it: such keys serve handlers'
     // calls and sockets. No key: not ours either. No `respondWith` for those,
@@ -421,7 +424,7 @@ export class SwHttpDispatcher {
         event.respondWith(this.dispatch(request));
         return true;
       }
-      if (request.mode === "navigate") {
+      if (navigation) {
         // A navigation under the scope is answered even when it is nobody's,
         // by passing it through: Firefox can leave a page uncontrolled when
         // its worker did not answer the navigation, and an uncontrolled page's
@@ -437,8 +440,10 @@ export class SwHttpDispatcher {
     event.respondWith(
       (async () => {
         await this._restored.catch(() => {});
-        if (!this.serves(key)) return await this._unserved(request);
-        return await this.dispatch(request);
+        if (this.serves(key)) return await this.dispatch(request);
+        // Nobody's: what it would have got once the keys were read, a navigation the
+        // `unserved` answer, anything else the network.
+        return navigation ? await this._unserved(request) : await fetch(request);
       })(),
     );
     return true;

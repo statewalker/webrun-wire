@@ -448,11 +448,16 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(handled).toMatchObject({ "app/who": true, "page/who": true, "nobody/x": false });
       });
 
-      it("a navigation no handler serves gets the host's page (unserved)", async () => {
+      it("a navigation no handler serves gets the host's page (unserved), rewritten or not", async () => {
         const page = await open("?module=host-sw.js");
         await page.goto(new URL("./nobody/x", page.url()).href);
         expect(await page.textContent("body")).toBe(
           "host page for /tests/fixtures/browser/links/nobody/x",
+        );
+        // The host rewrites it (?tunnel): still a navigation for the dispatcher.
+        await page.goto(new URL(`${BASE}nobody/z?tunnel`, page.url()).href);
+        expect(await page.textContent("body")).toBe(
+          "host page for /tests/fixtures/browser/links/nobody/z",
         );
       });
 
@@ -472,6 +477,14 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
           expect(await page.textContent("body")).toBe(
             "host page for /tests/fixtures/browser/links/nobody/y",
           );
+          const returned = await run<Array<{ path: string; settled: boolean; handled: boolean }>>(
+            page,
+            `return await (await fetch("./host/returned")).json();`,
+          );
+          expect(returned.find((r) => r.path.endsWith("/nobody/y"))).toMatchObject({
+            settled: false, // the pre-restore branch, not the navigation one
+            handled: true,
+          });
         },
       );
 
