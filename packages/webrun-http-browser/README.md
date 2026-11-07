@@ -362,7 +362,9 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | `key` | `scopeKey` | `(url, scope) => key \| undefined`: which key a url belongs to, for `dispatch()` (a handler's `service.fetch`), sockets, and `fetch` events of this origin. By default the first path segment under the scope; give your own for another layout (a site at the origin's root, projects under a base path). A key for another origin's url serves handlers' `service.fetch` and sockets (whoever opens them); a page's own `fetch` to that origin stays the browser's. Synchronous; must not throw. A handler registered in a page serves only urls under its own `baseUrl`. |
 | `handleFetch` | `true` | `false` leaves `fetch` events to the host's own listener, which passes what it does not answer itself to `dispatcher.handleFetch(event, request?)` (see below). Only for a dispatcher you construct: `startHttpDispatcher` refuses it. |
 | `unserved` | `fetch(request)` | The answer to a navigation under the scope whose key nobody serves (also one taken before the stored keys are read, after a restart). A host page for such urls goes here. Other requests nobody serves go to the network. |
-| `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait for another to attach. |
+| `failure` | 503 / 404 / 502 | `(request, { kind, error })`: the answer to a request the dispatcher took and could not deliver: `"timeout"` (no handler `route` accepts attached in time), `"gone"` (the key's handlers are gone), `"lost"` (lost in flight). |
+| `socketHeaders` | as given | `(headers, from)`: the headers a socket's upgrade carries to `route` and its handler, by `from`: `"page"` or `"handler"`. Drop from pages' sockets what only your handlers may send. |
+| `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait until it accepts one that attaches, up to `attachTimeoutMs` (then `failure` `"timeout"`). |
 | `attachTimeoutMs` | `15_000` | How long a request waits for a handler during a hand-over. Past it, `503`. |
 | `relinkTimeoutMs` | `3_000` | How long a request waits for the pages to attach again after a restart. |
 | `handoverMs` | `5_000` | How long a replaced handler may finish its requests. |
@@ -393,6 +395,10 @@ self.addEventListener("fetch", (event) => {
   }
 });
 ```
+
+While `route` declines every handler of a key (it waits for one in particular, a shard
+say), a request waits for attaches until it accepts one, up to `attachTimeoutMs`.
+`dispatcher.ready` settles once the keys served before a restart are read back.
 
 `handleFetch` takes every request with a key before the worker has read which
 keys it serves (the first requests after a restart), and every navigation
@@ -491,6 +497,9 @@ the handler, and hands the accepted port to the caller. The socket then runs
 between the two directly, so it survives a ServiceWorker restart. A socket to
 a handler in the same page needs no ServiceWorker at all.
 
+- **A server end of your own.** `webSocketUpgradeResponse(port, protocol)` is
+  the 101 for a socket whose server end the handler runs itself on the other
+  end of `port`; the host hands `port` to the caller as for `upgradeWebSocket`.
 - **Upgrade request.** A browser drops `Upgrade` and `Sec-*` headers from every
   `new Request()`, so the upgrade request carries them as its own `headers`
   property. `requestedProtocols(request)` reads the subprotocols.

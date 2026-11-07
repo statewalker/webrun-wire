@@ -16,6 +16,19 @@ if (params.get("key") === "internal") {
     return href.substring(scope.length).replace(/[?#].*$/, "").split("/")[0] || undefined;
   };
 }
+if (params.has("pagesocketheaders")) {
+  // ?pagesocketheaders: pages' sockets lose their `x-slot` header; handlers' keep it.
+  self.HTTP_DISPATCHER_OPTIONS.socketHeaders = (headers, from) =>
+    from === "page" ? headers?.filter(([name]) => name !== "x-slot") : headers;
+}
+if (params.has("failure")) {
+  // ?failure: the dispatcher's own failures answer with their kind.
+  self.HTTP_DISPATCHER_OPTIONS.failure = (request, failure) => {
+    // x-throw: a hook that throws; the dispatcher answers by default then.
+    if (request.headers.get("x-throw")) throw new Error("the hook failed");
+    return new Response(`failure:${failure.kind}`, { status: failure.kind === "gone" ? 404 : 503 });
+  };
+}
 if (params.get("route") === "slot") {
   self.HTTP_DISPATCHER_OPTIONS.route = (request, _key, handlers) => {
     const slot = request.headers.get("x-slot");

@@ -10,6 +10,7 @@ import {
   serveWebSocketUpgrade,
   upgradeWebSocket,
   type WebSocketConnector,
+  webSocketUpgradeResponse,
 } from "../src/ws/index.js";
 
 type Handler = (request: Request) => Response | Promise<Response>;
@@ -379,6 +380,22 @@ describe("server end", () => {
     expect(server.bufferedAmount).toBe(0);
     expect(received).toBe(100);
     ws.close();
+  });
+
+  it("webSocketUpgradeResponse: a 101 over a port the handler serves itself", async () => {
+    const channel = new MessageChannel();
+    const result = await serveWebSocketUpgrade(
+      () => webSocketUpgradeResponse(channel.port2, "v2"),
+      { url: "ws://example.test/x", protocols: ["v1", "v2"] },
+    );
+    expect(result).toMatchObject({ ok: true, protocol: "v2" });
+    if (!result.ok) return;
+    // The caller's port is the one the handler gave: a frame crosses to the handler's end.
+    const got = new Promise((r) => (channel.port1.onmessage = (e) => r(e.data)));
+    result.port.postMessage({ t: "m", d: "hi" });
+    expect(await got).toEqual({ t: "m", d: "hi" });
+    channel.port1.close();
+    result.port.close();
   });
 
   it("the subprotocols asked for come from `protocols`, not from a caller's header", () => {
