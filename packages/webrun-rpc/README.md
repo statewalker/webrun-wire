@@ -583,7 +583,11 @@ window holds this end's sends, each chunk leaves as a plain message,
 waits only for `whenPortReady`. The receiver's listener settles once its consumer pulls past the
 chunk, so the window's credit is the confirmation, and a stalled reader holds about one window:
 `tests/duplex-pipelining-stall.test.ts` measures the producer stopping about one window ahead,
-and the memory held staying within twice the window above an unwindowed link.
+and the memory held staying within twice the window above an unwindowed link. Nor does a stalled
+stream slow the others on its link: `pnpm bench` (kept out of `pnpm test`, so that a loaded
+machine cannot fail the suite) measures ping p99 beside a stalled reader with a 256 KiB window
+and with none, in one run, median of 3 each, and fails when the window's p99 is above twice the
+other's plus 1 ms.
 
 Until the agreement is known (the opener learns it from the ack; the responder's own sends wait
 for the opener's answer) chunks go as confirmed calls, so the handshake adds no round trip to the

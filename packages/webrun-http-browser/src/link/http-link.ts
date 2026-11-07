@@ -8,8 +8,11 @@ import { asyncDisposable } from "./async-dispose.js";
  * own `handleStreams` / `sendStream` (no backpressure); version 2 is
  * webrun-rpc's `connect` / `serve` over `overPipe` with webrun-http-streams'
  * `fetchOverDuplex` / `serveFetchOverDuplex`: one port per link, calls
- * multiplexed on it, each call a stream with a one-chunk window in both
- * directions, and cancellation that reaches the handler.
+ * multiplexed on it, each call a stream with backpressure in both
+ * directions, and cancellation that reaches the handler. A call's port with a
+ * window (`HttpLinkOptions.window`) pipelines its chunks where both ends speak
+ * it, and goes one confirmed chunk at a time otherwise, so the window needs
+ * no new version.
  */
 export const HTTP_LINK_PROTOCOL = "webrun-http-link/2";
 
@@ -34,7 +37,20 @@ export interface HttpLinkOptions {
    * reads the upload afterwards keeps it as long as it keeps reading.
    */
   requestIdleMs?: number;
+  /**
+   * The calling end only: the flow-control window, in bytes, that every
+   * request's port asks for (webrun-rpc's `window`; default 256 KiB). On it,
+   * request and response bodies are pipelined: chunks leave without waiting
+   * for a confirmation each, and a reader that stops holds about one window
+   * of them. `0` turns the window off: one confirmed chunk at a time, the
+   * envelopes of a link with no window. An answering end of an older version
+   * falls back to that by itself.
+   */
+  window?: number;
 }
+
+/** The calling end's default `HttpLinkOptions.window`: 256 KiB. */
+const DEFAULT_HTTP_LINK_WINDOW = 256 * 1024;
 
 /** The calling end of a link: sends requests, gets responses. */
 export interface HttpLink {
@@ -77,10 +93,10 @@ const LINK_CLOSE = "webrun-http:link-close";
 /** Opens the calling end of a link on `port` (one port per link). */
 export async function connectHttpLink(
   port: MessagePort,
-  { streamTimeout, maxPorts }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts, window = DEFAULT_HTTP_LINK_WINDOW }: HttpLinkOptions = {},
 ): Promise<HttpLink> {
   const { call, close } = await connect({
-    mux: overPipe(port, { codec: structuredCodec, side: "initiator", maxPorts }),
+    mux: overPipe(port, { codec: structuredCodec, side: "initiator", maxPorts, window }),
     timeout: streamTimeout,
   });
   return trackedLink(

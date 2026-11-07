@@ -46,9 +46,15 @@ const echo: Duplex = async function* (input) {
 /**
  * `connect` on one end and `serve(echo)` on the other, over one real
  * `MessageChannel`. Every envelope either end receives is logged, in order.
- * `window` is given to every end whose version has the option.
+ * `windows` says what each end is given as its `window` option; `undefined`
+ * leaves the option out, as an end that never heard of it would.
  */
-async function pair(opener: Rpc, responder: Rpc, newRole: "opener" | "responder") {
+async function pair(
+  opener: Rpc,
+  responder: Rpc,
+  newRole: "opener" | "responder",
+  windows: { opener?: number; responder?: number } = { opener: WINDOW, responder: WINDOW },
+) {
   const ch = new MessageChannel();
   const wire: Seen[] = [];
   const openerGets = newRole === "opener" ? "new" : "old";
@@ -65,7 +71,7 @@ async function pair(opener: Rpc, responder: Rpc, newRole: "opener" | "responder"
       mux: responder.overPipe(ch.port2, {
         codec: responder.structuredCodec,
         side: "responder",
-        window: WINDOW,
+        ...(windows.responder === undefined ? {} : { window: windows.responder }),
       }),
     },
     echo,
@@ -74,7 +80,7 @@ async function pair(opener: Rpc, responder: Rpc, newRole: "opener" | "responder"
     mux: opener.overPipe(ch.port1, {
       codec: opener.structuredCodec,
       side: "initiator",
-      window: WINDOW,
+      ...(windows.opener === undefined ? {} : { window: windows.opener }),
     }),
   });
   cleanups.push(async () => {
@@ -250,4 +256,32 @@ describe("mixed versions — paired with 0.5.1 (no window)", () => {
     expectNothingNew(wire);
     expect(confirmations(wire)).toEqual({ in: CHUNKS + 1, out: CHUNKS + 1 });
   });
+});
+
+// What an old ServiceWorker or page actually runs: an answering end of a
+// published version given no window at all, against a new caller asking for
+// the HTTP link's default. More than a window each way, so a new end that
+// waited for credit it never gets would stall here.
+describe("mixed versions — an old answering end with no window option", () => {
+  const MiB = 1024 * KiB;
+  for (const version of ["0.5.1", "0.7.0", "0.8.0"] as const) {
+    it(`new opener asking for 256 KiB, ${version} responder with no window: 2 MiB each way completes`, {
+      timeout: 10_000,
+    }, async () => {
+      const { call, wire } = await pair(current, published[version], "opener", {
+        opener: 256 * KiB,
+      });
+      const size = 4 * KiB;
+      const count = (2 * MiB) / size;
+      const input = Array.from({ length: count }, (_, i) => new Uint8Array(size).fill(i % 256));
+      let bytes = 0;
+      let wrong = 0;
+      for await (const chunk of call(input)) {
+        for (const b of chunk) if (b !== Math.floor(bytes++ / size) % 256) wrong++;
+      }
+      expect({ bytes, wrong }).toEqual({ bytes: 2 * MiB, wrong: 0 });
+      await closed(wire);
+      expectNothingNew(wire);
+    });
+  }
 });

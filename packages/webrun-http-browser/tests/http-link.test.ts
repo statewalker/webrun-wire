@@ -66,7 +66,7 @@ describe("HTTP links", () => {
     expect(link.inflight).toBe(0);
   });
 
-  it("backpressure: the producer stays a few chunks ahead of a slow reader", async () => {
+  it("backpressure: the producer stays about one window ahead of a slow reader", async () => {
     const { state, handler } = endless();
     const { link } = await linked(handler);
     const response = await link.send(new Request("http://x/"));
@@ -75,7 +75,9 @@ describe("HTTP links", () => {
       await reader.read();
       await tick(2);
     }
-    expect(state.produced - 30).toBeLessThanOrEqual(4);
+    // The link's 256 KiB window of these 64 KiB chunks, and the few in hand
+    // at its ends.
+    expect(state.produced - 30).toBeLessThanOrEqual(256 / 64 + 3);
     expect(link.inflight).toBe(1);
     await reader.cancel();
     await tick(20);

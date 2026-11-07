@@ -180,7 +180,7 @@ export async function initHttpService(
  */
 export async function callHttpService(
   request: Request,
-  { key, port, streamTimeout }: ServiceOptions,
+  { key, port, streamTimeout, window }: ServiceOptions,
 ): Promise<Response> {
   const channel = new MessageChannel();
   const reply = await callChannel<boolean | ConnectReply>(
@@ -193,7 +193,7 @@ export async function callHttpService(
     channel.port1.close();
     throw new Error(`No service with key "${key}"`);
   }
-  return await sendOverConnection(channel.port1, reply, request, { streamTimeout });
+  return await sendOverConnection(channel.port1, reply, request, { streamTimeout, window });
 }
 
 /**
