@@ -565,6 +565,11 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
           `const r = await fetch("./app/who", { headers: { "x-slot": "nobody" } }); return r.status + " " + await r.text();`,
         );
         expect(timedOut).toBe("503 failure:timeout");
+        const thrown = await run<string>(
+          page,
+          `const r = await fetch("./app/who", { headers: { "x-slot": "nobody", "x-throw": "1" } }); return r.status + " " + r.statusText;`,
+        );
+        expect(thrown).toBe("503 Service Unavailable (no handler attached in time)");
         const gone = await run<string>(
           page,
           `await window.workers.A.link.detach(); const r = await fetch("./app/who"); return r.status + " " + await r.text();`,

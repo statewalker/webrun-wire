@@ -69,7 +69,10 @@ export interface DispatchFailure {
    * - `"timeout"`: no handler `route` accepts attached within `attachTimeoutMs` (a hand-over,
    *   or `route` waiting for one handler in particular);
    * - `"gone"`: the key was served before, and no handler is left (its tab closed);
-   * - `"lost"`: the handler was lost while the request was in flight.
+   * - `"lost"`: sending to the handler failed: lost while the request was in flight
+   *   (`error` is then a `LinkLostError`), or the stream failed otherwise (a `streamTimeout`, a
+   *   request body that errored). A handler lost once the response head is out fails the body
+   *   instead, and never reaches `failure`.
    */
   kind: "timeout" | "gone" | "lost";
   error?: unknown;
@@ -107,7 +110,7 @@ export interface SwHttpDispatcherOptions {
    * The answer to a request the dispatcher took and could not deliver (`DispatchFailure`).
    * Default: 503 for `"timeout"`, 404 for `"gone"`, a plain-text 502 with the error for
    * `"lost"`. A host whose callers expect another shape (an error its RPC layer rethrows, say)
-   * answers in it here.
+   * answers in it here. If it throws, the default answers.
    */
   failure?: (request: Request, failure: DispatchFailure) => Response | Promise<Response>;
   /**
@@ -115,7 +118,8 @@ export interface SwHttpDispatcherOptions {
    * `"page"` (a page's `connectWebSocket`, `serviceWorkerWebSocketClass`) or `"handler"` (a
    * handler's `service.connectWebSocket`). Default: as given. A host whose handlers trust some
    * headers (routing between its own workers) drops them from pages' sockets here, as it would
-   * from pages' fetches.
+   * from pages' fetches. `from` says which path a socket came by, not whom to trust: any page of
+   * this origin can attach a handler and ask as one.
    */
   socketHeaders?: (
     headers: [string, string][] | undefined,
@@ -390,8 +394,8 @@ export class SwHttpDispatcher {
   }
 
   /**
-   * Settles once the keys this worker served before a restart are read back (whatever the
-   * outcome). Until then `serves()` may answer `false` for a key it will serve.
+   * After `start()`: settles once the keys this worker served before a restart are read back
+   * (whatever the outcome). Until then `serves()` may answer `false` for a key it will serve.
    */
   get ready(): Promise<void> {
     return this._restored.then(
@@ -408,7 +412,13 @@ export class SwHttpDispatcher {
   }
 
   private async _failed(request: Request, failure: DispatchFailure): Promise<Response> {
-    if (this.options.failure) return await this.options.failure(request, failure);
+    if (this.options.failure) {
+      try {
+        return await this.options.failure(request, failure);
+      } catch (error) {
+        this.log("[dispatch] the failure option threw; answering by default", error);
+      }
+    }
     if (failure.kind === "timeout") {
       return new Response(null, {
         status: 503,
@@ -696,7 +706,9 @@ export class SwHttpDispatcher {
       if (left <= 0) return TIMED_OUT;
       // In steps of at most a second: an attach between the last pick and
       // this wait is then noticed at the next step rather than missed.
-      await this.table.waitFor(key, Math.min(left, 1_000), true);
+      // A handler that attached since the last pick counts at once; when route
+      // declined the live ones, only a new attach can change its answer.
+      await this.table.waitFor(key, Math.min(left, 1_000), this.table.live(key).length > 0);
       const picked = await this._pick(request, key);
       if (picked) return picked;
     }

@@ -23,8 +23,11 @@ if (params.has("pagesocketheaders")) {
 }
 if (params.has("failure")) {
   // ?failure: the dispatcher's own failures answer with their kind.
-  self.HTTP_DISPATCHER_OPTIONS.failure = (_request, failure) =>
-    new Response(`failure:${failure.kind}`, { status: failure.kind === "gone" ? 404 : 503 });
+  self.HTTP_DISPATCHER_OPTIONS.failure = (request, failure) => {
+    // x-throw: a hook that throws; the dispatcher answers by default then.
+    if (request.headers.get("x-throw")) throw new Error("the hook failed");
+    return new Response(`failure:${failure.kind}`, { status: failure.kind === "gone" ? 404 : 503 });
+  };
 }
 if (params.get("route") === "slot") {
   self.HTTP_DISPATCHER_OPTIONS.route = (request, _key, handlers) => {

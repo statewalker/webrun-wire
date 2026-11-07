@@ -364,7 +364,7 @@ your own passes the options to `startHttpDispatcher({ self, ...options })`.
 | `unserved` | `fetch(request)` | The answer to a navigation under the scope whose key nobody serves (also one taken before the stored keys are read, after a restart). A host page for such urls goes here. Other requests nobody serves go to the network. |
 | `failure` | 503 / 404 / 502 | `(request, { kind, error })`: the answer to a request the dispatcher took and could not deliver: `"timeout"` (no handler `route` accepts attached in time), `"gone"` (the key's handlers are gone), `"lost"` (lost in flight). |
 | `socketHeaders` | as given | `(headers, from)`: the headers a socket's upgrade carries to `route` and its handler, by `from`: `"page"` or `"handler"`. Drop from pages' sockets what only your handlers may send. |
-| `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait for another to attach. |
+| `route` | `leastInflightRoute` | Picks the handler. `undefined` makes the request wait until it accepts one that attaches, up to `attachTimeoutMs` (then `failure` `"timeout"`). |
 | `attachTimeoutMs` | `15_000` | How long a request waits for a handler during a hand-over. Past it, `503`. |
 | `relinkTimeoutMs` | `3_000` | How long a request waits for the pages to attach again after a restart. |
 | `handoverMs` | `5_000` | How long a replaced handler may finish its requests. |
