@@ -84,6 +84,12 @@ export interface SwHttpDispatcherOptions {
    */
   key?: KeyFunction;
   /**
+   * Whether the dispatcher listens to `fetch` events itself. Default `true`. With `false` the
+   * host's own `fetch` listener decides first (a page no tab serves, its own routes) and hands
+   * the rest to `dispatcher.handleFetch(event)`, which answers what is the dispatcher's.
+   */
+  handleFetch?: boolean;
+  /**
    * Picks the handler of a request among the live handlers of its key.
    * Default `leastInflightRoute`: the fewest requests in flight, the oldest on
    * a tie — with one tab per key, the first live handler, as before.
@@ -288,10 +294,10 @@ export class SwHttpDispatcher {
       this.log("Claim control over all clients.");
       event.waitUntil(self.clients.claim());
     };
-    const onFetch = (event: FetchEvent) => this._onFetch(event);
+    const onFetch = (event: FetchEvent) => void this.handleFetch(event);
     self.addEventListener("install", onInstall);
     self.addEventListener("activate", onActivate);
-    self.addEventListener("fetch", onFetch);
+    if (this.options.handleFetch !== false) self.addEventListener("fetch", onFetch);
     this._cleanup.push(() => {
       self.removeEventListener("install", onInstall);
       self.removeEventListener("activate", onActivate);
@@ -378,26 +384,36 @@ export class SwHttpDispatcher {
     return await answer;
   }
 
-  private _onFetch(event: FetchEvent): void {
+  /**
+   * Answers `event` if it is the dispatcher's: its url has a key (the `key` option) that this
+   * worker serves, or serves once its stored keys are read. Returns whether it called
+   * `respondWith`; when it did not, the event is the caller's to answer or to leave to the
+   * network. For a host that listens to `fetch` itself (`handleFetch: false`); it must be called
+   * synchronously in the event's listener, as `respondWith` must.
+   */
+  handleFetch(event: FetchEvent): boolean {
     const request = event.request;
     // Another origin's url (a page's request to a CDN, an API) stays the
-    // browser's even when the key function maps it: such keys are for calls
-    // between handlers. No key: not ours either. No `respondWith` for those,
+    // browser's even when the key function maps it: such keys serve handlers'
+    // calls and sockets. No key: not ours either. No `respondWith` for those,
     // so the browser does the request exactly as it would without a worker.
-    if (new URL(request.url).origin !== this.self.location.origin) return;
+    if (new URL(request.url).origin !== this.self.location.origin) return false;
     const key = this.keyOf(request.url);
-    if (key === undefined) return;
+    if (key === undefined) return false;
     if (this._restoreSettled) {
       if (this.serves(key)) {
         event.respondWith(this.dispatch(request));
-      } else if (request.mode === "navigate") {
+        return true;
+      }
+      if (request.mode === "navigate") {
         // A navigation under the scope is answered even when it is nobody's,
         // by passing it through: Firefox can leave a page uncontrolled when
         // its worker did not answer the navigation, and an uncontrolled page's
         // `fetch()` never reaches this worker. Everything else is left alone.
         event.respondWith(fetch(request));
+        return true;
       }
-      return;
+      return false;
     }
     // Before the stored keys are read there is nothing to decide on, and
     // `respondWith` cannot be called after an await: claim the request, and
@@ -409,6 +425,7 @@ export class SwHttpDispatcher {
         return await this.dispatch(request);
       })(),
     );
+    return true;
   }
 
   private async _attach(

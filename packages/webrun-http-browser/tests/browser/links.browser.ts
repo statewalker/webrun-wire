@@ -411,6 +411,24 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         ).toBe("network: TypeError");
       });
 
+      it("a host that listens to fetch itself: its routes first, the rest through handleFetch", async () => {
+        const page = await open("?module=host-sw.js");
+        await run(page, `await window.attach("A");`);
+        const texts = await run<string[]>(
+          page,
+          `
+      const text = (path, init) => fetch(path, init).then((r) => r.text());
+      return [
+        await text("./app/who"),
+        await text("./host/hello"),
+        await text("./app/who", { headers: { "x-host": "take" } }),
+        await text("./page/who"),
+      ];
+    `,
+        );
+        expect(texts).toEqual(["A", "from the host", "the host took it", "page"]);
+      });
+
       it("a custom route picks the handler by a header", async () => {
         const page = await open("?sw=route%3Dslot");
         await run(
