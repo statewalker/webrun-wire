@@ -78,7 +78,7 @@ Port multiplexing:
 | `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
 | `portBufferedAmount(port)`, `whenPortReady(port, below?)` | A windowed port's queued bytes, and a promise for room. See below. |
 | `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
-| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames). |
+| `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames) and `halfClose: true` for a codec that reads `end`. |
 | `structuredCodec` | Envelopes passed through unencoded. |
 | `DEFAULT_MAX_PORTS` | `1024`. |
 | `PORT_TRANSFER` | `"webrun-rpc:port-transfer"`, the `type` of the message that carries a port. |
@@ -345,7 +345,8 @@ keeps running without flow control, as it always did; `ports()` reports `window`
 in force. A peer's `window` that is not a positive integer is ignored.
 
 **A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
-`caps: ["pipeline", "end"]`, what this mux speaks on the port, and the responder's ack answers with the
+`caps: ["pipeline", "end"]` (`end` only over a codec that declares it, below), what this mux
+speaks on the port, and the responder's ack answers with the
 subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
 could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
 control is one chunk, or the window where both ends pipeline" below); nothing else changes
@@ -358,13 +359,25 @@ behind everything already posted on that port: it is a size-0 item in the port's
 it needs no credit, and with `frameSize` it takes its turn in the port's queue behind the frames of
 the last message. So the peer has every byte before it sees the end, even of a last message larger
 than the window. Anything posted on that side afterwards is dropped. A port closed while its `end`
-still waits in the queue sends its `close` alone: an abandoned port never looks finished. The other direction keeps
-sending, and both keep returning credit, until it ends too. Once both directions have ended, each
+still waits in the queue sends its `close` alone: an abandoned port never looks finished. The other
+direction keeps sending, and both keep returning credit, until it ends too. Once both directions have ended, each
 end frees the id on its own, with no `close` on the wire, and the port's close signal aborts with
 `webrun-rpc: the port ended in both directions`. No exported function sends `end`: it is internal
 to this package. An `end` from a peer where it was not agreed (no window, or not in the handshake) is a
 protocol violation: the port closes, with `close` reason `"protocol"`, and its close signal aborts
-with `webrun-rpc: the peer ended a port where end was not agreed`.
+with `webrun-rpc: the peer ended a port where end was not agreed`. So is a `message` or `frame`
+from a peer after its own `end` (`webrun-rpc: the peer sent on a port after its end`): an honest
+sender drops whatever it posts after ending, and delivering it would hand the consumer data after
+it was told its input was over.
+
+**A codec must declare that it reads `end`, or `end` is never offered.** `PortCodec.halfClose:
+true` says the codec's `read` (and `decode`) accept the `end` envelope; `structuredCodec` and
+`msgpackCodec` set it. A mux over a codec without it offers only `pipeline` and agrees `end` with
+nobody, so its ports close as before. The flag exists because the failure it prevents is silent: a
+codec that drops envelope types it does not know (any codec written before `end`) would let both
+muxes agree `end` and then lose it on the way in. The sender frees the id; the receiver never sees
+the end, and the port stays in its `ports()` after a normal finish until the mux closes, with no
+error, until a full table refuses new ports with `maxPorts (<n>) reached`.
 
 **Closing does not wait for credit.** A port closed with messages still queued sends them at once,
 then its close, regardless of the window: a peer that stopped returning credit (a listener that

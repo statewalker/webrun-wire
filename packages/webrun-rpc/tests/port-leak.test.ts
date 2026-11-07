@@ -3,6 +3,7 @@ import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MessageTarget } from "../src/message-target.js";
 import { multiplexPort } from "../src/multiplex-port.js";
+import { endPort, whenPortEnded } from "../src/port-credit.js";
 import type { PortInfo, PortMux } from "../src/port-types.js";
 import { structuredCodec } from "../src/structured-codec.js";
 
@@ -110,6 +111,35 @@ describe("a port dropped without close", () => {
     for (let i = 1; i < 5; i++) sender.postMessage(i);
     expect(await collectUntil(() => received.length === 5)).toBe(true);
     expect(b.ports()).toHaveLength(1);
+  });
+
+  it("a dropped port that waits for its peer's end is still reported and freed", async () => {
+    const leaks: PortInfo[] = [];
+    const ch = new MessageChannel();
+    rawPorts.push(ch.port1, ch.port2);
+    const window = 8 * 1024;
+    const a = multiplexPort(ch.port1, {
+      codec: structuredCodec,
+      window,
+      onLeak: (info) => leaks.push(info),
+    });
+    // A peer that never ends its direction.
+    const b = multiplexPort(ch.port2, {
+      codec: structuredCodec,
+      side: "responder",
+      window,
+      onPort: () => true,
+    });
+    muxes.push(a, b);
+    await (async () => {
+      const port = await a.openPort({ kind: "ending" });
+      while (a.ports()[0]?.window == null) await new Promise((r) => setTimeout(r, 5));
+      expect(endPort(port)).toBe(true);
+      // What waits on the peer's end holds the port; the mux must not hold it.
+      void whenPortEnded(port).then(() => port.close?.());
+    })();
+    expect(await collectUntil(() => leaks.length > 0 && b.ports().length === 0)).toBe(true);
+    expect(a.ports()).toEqual([]);
   });
 });
 

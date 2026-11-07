@@ -95,8 +95,13 @@ export function portAgreement(port: MessageTarget): PortAgreement | undefined {
 export interface PortEndState {
   /** Queue this side's `end`; `false` when `end` was not agreed. */
   end(): boolean;
-  /** Resolves once the peer has ended its direction. */
-  whenPeerEnded(): Promise<void>;
+  /**
+   * Calls `resolve` once the peer has ended its direction (at once if it has
+   * already); `false`, and `resolve` is never called, when `end` was not
+   * agreed. The mux holds `resolve` weakly, so a port dropped while someone
+   * waits on it can still be collected (`onLeak`).
+   */
+  watchPeerEnd(resolve: () => void): boolean;
 }
 
 const ends = new WeakMap<MessageTarget, PortEndState>();
@@ -119,10 +124,24 @@ export function endPort(port: MessageTarget): boolean {
 
 /**
  * @internal Resolves once the peer has ended its direction of `port`. It never
- * settles otherwise: not on a port where `end` cannot be agreed, and not when
- * the port closes first, so a caller races it against the port's close
- * signal. Not exported from the package.
+ * settles otherwise: not on a port where `end` is not agreed when it is asked
+ * (no window, the handshake not answered yet, a peer or codec without it), and
+ * not when the port closes first, so a caller races it against the port's
+ * close signal. Not exported from the package.
  */
 export function whenPortEnded(port: MessageTarget): Promise<void> {
-  return ends.get(port)?.whenPeerEnded() ?? new Promise<void>(() => {});
+  let waiting = peerEnds.get(port);
+  if (!waiting) {
+    let resolve: () => void = () => {};
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    if (!ends.get(port)?.watchPeerEnd(resolve)) return promise;
+    // Held from the port only: what waits on it lives as long as the port.
+    waiting = { promise, resolve };
+    peerEnds.set(port, waiting);
+  }
+  return waiting.promise;
 }
+
+const peerEnds = new WeakMap<MessageTarget, { promise: Promise<void>; resolve: () => void }>();

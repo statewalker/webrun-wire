@@ -1,15 +1,13 @@
+import type { MessageListener, MessageTarget, PortCodec } from "@statewalker/webrun-rpc";
 import { afterEach, describe, expect, it } from "vitest";
-// webrun-rpc by path, from its source: the half-close helpers are internal
-// (not exported from its index), and they must be the same module instance as
-// the `multiplexPort` that registers its ports with them, also when this runs
-// from the package's own directory, where the package name resolves to `dist`.
-import {
-  getPortCloseSignal,
-  type MessageListener,
-  type MessageTarget,
-  multiplexPort,
-  type PortCodec,
-} from "../../webrun-rpc/src/index.js";
+// webrun-rpc's runtime by path, from its source modules. The half-close helpers
+// are internal (not exported from its index), and they must be the same module
+// instance as the `multiplexPort` that registers its ports with them, also when
+// this runs from the package's own directory, where the package name resolves
+// to `dist`. Only the modules needed, not the index: `typecheck:tests` then
+// compiles no more of webrun-rpc than these under this package's settings.
+import { getPortCloseSignal } from "../../webrun-rpc/src/close-signal.js";
+import { multiplexPort } from "../../webrun-rpc/src/multiplex-port.js";
 import { endPort, whenPortEnded } from "../../webrun-rpc/src/port-credit.js";
 import { msgpackCodec } from "../src/index.js";
 
@@ -102,16 +100,21 @@ async function pair() {
   });
   cleanups.push(() => a.close());
   cleanups.push(() => b.close());
-  const portA = await a.openPort({ kind: "stream" });
-  await waitFor(() => accepted.length === 1, "B accepts the port");
-  // Frames go only once both ends enforce the window (the ack round trip).
-  await waitFor(
-    () => a.ports()[0]?.window != null && b.ports()[0]?.window != null,
-    "window in force on both ends",
-  );
-  // biome-ignore lint/style/noNonNullAssertion: checked by the wait above.
-  const portB = accepted[0]!;
-  return { a, b, portA, portB, seenA, seenB };
+  /** One more port, its window in force on both ends. */
+  const connect = async () => {
+    const n = accepted.length;
+    const portA = await a.openPort({ kind: "stream" });
+    await waitFor(() => accepted.length === n + 1, "B accepts the port");
+    // Frames go only once both ends enforce the window (the ack round trip).
+    await waitFor(
+      () => a.ports()[n]?.window != null && b.ports()[n]?.window != null,
+      "window in force on both ends",
+    );
+    // biome-ignore lint/style/noNonNullAssertion: checked by the wait above.
+    return { portA, portB: accepted[n]! };
+  };
+  const { portA, portB } = await connect();
+  return { a, b, portA, portB, seenA, seenB, connect };
 }
 
 /**
@@ -155,6 +158,7 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
     const { a, b, portA, portB, seenA, seenB } = await pair();
     const atA = receiver(portA);
     const atB = receiver(portB);
+    const signals = [getPortCloseSignal(portA), getPortCloseSignal(portB)];
 
     const fromA = sendAll(portA);
     const fromB = sendAll(portB);
@@ -176,16 +180,25 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
     expect(seenB.filter((t) => t === "end")).toHaveLength(1);
     expect(seenA).not.toContain("close");
     expect(seenB).not.toContain("close");
+    for (const signal of signals) {
+      expect(signal?.reason).toMatchObject({
+        message: "webrun-rpc: the port ended in both directions",
+      });
+    }
   });
 
   it("one-sided: a side whose peer ended first keeps sending and getting credit until it ends", async () => {
     const { a, b, portA, portB } = await pair();
     const atA = receiver(portA);
     const atB = receiver(portB);
+    // Quiet for a while, so the end alone is what marks the port active.
+    const before = b.ports()[0]?.lastActivity ?? 0;
+    await new Promise((r) => setTimeout(r, 20));
     // A ends its direction at once, with nothing sent.
     expect(endPort(portA)).toBe(true);
     await waitFor(() => atB.ended, "B sees A's end");
     expect(b.ports()).toHaveLength(1);
+    expect(b.ports()[0]?.lastActivity).toBeGreaterThan(before);
 
     // B then sends several windows' worth: it only gets through if A, which
     // has ended its own direction, keeps granting credit.
@@ -206,7 +219,7 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
   });
 
   it("drops what is posted after the end, and sends the end once", async () => {
-    const { portA, portB, seenB } = await pair();
+    const { b, portA, portB, seenA, seenB } = await pair();
     const atB = receiver(portB);
     portA.postMessage(new Uint8Array(1 * KiB));
     expect(endPort(portA)).toBe(true);
@@ -217,6 +230,9 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
     await new Promise((r) => setTimeout(r, 50));
     expect(atB.sizes).toEqual([1 * KiB]);
     expect(seenB.filter((t) => t === "end")).toHaveLength(1);
+    // Dropped here, not refused by the peer: its port is still open, waiting for its own end.
+    expect(b.ports()).toHaveLength(1);
+    expect(seenA).not.toContain("close");
   });
 
   it("whenPortEnded resolves also when first asked after the end arrived", async () => {
@@ -241,5 +257,46 @@ describe("end on a windowed port (msgpackCodec, window, frameSize, slow pipe)", 
     await waitFor(() => seenB.includes("close"), "B reads the close");
     expect(seenB).not.toContain("end");
     expect(signal?.reason).toMatchObject({ message: "webrun-rpc: the peer closed the port" });
+  });
+
+  it("several ports end on one ring, each behind its own frames", async () => {
+    const { a, b, connect, portA, portB, seenA, seenB } = await pair();
+    const ports = [{ portA, portB }, await connect(), await connect()];
+    const states = ports.map(({ portA, portB }) => ({
+      atA: receiver(portA),
+      atB: receiver(portB),
+    }));
+    const sent = ports.map(({ portA, portB }) => ({
+      fromA: sendAll(portA),
+      fromB: sendAll(portB),
+    }));
+    await waitFor(
+      () => states.every(({ atA, atB }) => atA.ended && atB.ended),
+      "every port sees both ends",
+    );
+    states.forEach(({ atA, atB }, i) => {
+      expect(atB.sizesAtEnd).toEqual(sent[i]?.fromA.sizes);
+      expect(atA.sizesAtEnd).toEqual(sent[i]?.fromB.sizes);
+    });
+    await waitFor(() => a.ports().length === 0 && b.ports().length === 0, "ids freed");
+    expect(seenA.filter((t) => t === "end")).toHaveLength(3);
+    expect(seenB.filter((t) => t === "end")).toHaveLength(3);
+    expect([...seenA, ...seenB]).not.toContain("close");
+  });
+
+  it("mux.close() with ends still queued puts only closes on the wire", async () => {
+    const { a, connect, portA, portB, seenB } = await pair();
+    const second = await connect();
+    for (const ends of [{ portA, portB }, second]) {
+      receiver(ends.portB, { stall: true });
+      // As above: the window spent, so the second message and the end wait.
+      ends.portA.postMessage(new Uint8Array(200 * KiB));
+      ends.portA.postMessage(new Uint8Array(1 * KiB));
+      expect(endPort(ends.portA)).toBe(true);
+    }
+    await waitFor(() => a.ports().every((p) => (p.queued ?? 0) > 0), "both ends wait for credit");
+    await a.close();
+    await waitFor(() => seenB.filter((t) => t === "close").length === 2, "B reads both closes");
+    expect(seenB).not.toContain("end");
   });
 });

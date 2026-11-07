@@ -3,6 +3,7 @@ import {
   getPortCloseSignal,
   type MessageTarget,
   multiplexPort,
+  type PortCodec,
   type PortEnvelope,
   structuredCodec,
 } from "../src/index.js";
@@ -162,4 +163,88 @@ describe("end in the windowed handshake", () => {
     expect(signal?.aborted).toBe(true);
     expect(signal?.reason).toMatchObject({ message: expect.stringMatching(/end was not agreed/) });
   });
+
+  it("an opener that sends after its own end fails the port and closes it", async () => {
+    const ch = channel();
+    const peer = hostile(ch.port1);
+    const { mux, accepted } = responder(ch.port2);
+    peer.post({ type: "open", id: 0, window: 64 * KiB, caps: ["pipeline", "end"] });
+    await waitFor("the port is accepted", () => accepted.length === 1);
+    // biome-ignore lint/style/noNonNullAssertion: checked by the wait above.
+    const port = accepted[0]!;
+    const got: unknown[] = [];
+    port.addEventListener("message", (e) => {
+      got.push(e.data);
+    });
+    const signal = getPortCloseSignal(port);
+    peer.post({ type: "credit", id: 0, bytes: 0 });
+    peer.post({ type: "message", id: 0, payload: "before" });
+    peer.post({ type: "end", id: 0 });
+    peer.post({ type: "message", id: 0, payload: "after" });
+
+    await waitFor("the port is closed", () => peer.received.some((e) => e.type === "close"));
+    expect(got).toEqual(["before"]);
+    expect(mux.ports()).toEqual([]);
+    expect(signal?.reason).toMatchObject({ message: expect.stringMatching(/after its end/) });
+  });
+});
+
+describe("end needs a codec that declares it reads end (halfClose)", () => {
+  // The same codec, minus the declaration: as a codec from before `end`.
+  const { halfClose: _, ...withoutFlag } = structuredCodec;
+  const legacyCodec: PortCodec = withoutFlag;
+
+  /** The codec, recording every envelope this end reads. */
+  const tapped = (codec: PortCodec, seen: PortEnvelope[]): PortCodec => ({
+    ...codec,
+    read(event) {
+      const envelope = codec.read(event);
+      if (envelope) seen.push(envelope);
+      return envelope;
+    },
+  });
+
+  it.each([
+    ["the opener's", legacyCodec, structuredCodec],
+    ["the responder's", structuredCodec, legacyCodec],
+  ])(
+    "where %s codec lacks it, end is never offered or agreed, and endPort is false on both ends",
+    async (_who, openerCodec, responderCodec) => {
+      const ch = channel();
+      const seenA: PortEnvelope[] = [];
+      const seenB: PortEnvelope[] = [];
+      const accepted: MessageTarget[] = [];
+      const a = multiplexPort(ch.port1, { codec: tapped(openerCodec, seenA), window: 64 * KiB });
+      const b = multiplexPort(ch.port2, {
+        codec: tapped(responderCodec, seenB),
+        side: "responder",
+        window: 64 * KiB,
+        onPort: (port) => {
+          accepted.push(port);
+        },
+      });
+      cleanups.push(() => a.close());
+      cleanups.push(() => b.close());
+      const portA = await a.openPort({ kind: "stream" });
+      await waitFor(
+        "the window is in force on both ends",
+        () => a.ports()[0]?.window != null && b.ports()[0]?.window != null,
+      );
+      // biome-ignore lint/style/noNonNullAssertion: checked by the wait above.
+      const portB = accepted[0]!;
+      const open = seenB.find((e) => e.type === "open");
+      const ack = seenA.find((e) => e.type === "credit");
+      expect(open).toMatchObject({
+        caps: openerCodec === legacyCodec ? ["pipeline"] : ["pipeline", "end"],
+      });
+      expect(ack).toMatchObject({ caps: ["pipeline"] });
+
+      // The fallback: neither end may end, so each closes as before.
+      expect(endPort(portA)).toBe(false);
+      expect(endPort(portB)).toBe(false);
+      portA.close?.();
+      await waitFor("B reads the close", () => seenB.some((e) => e.type === "close"));
+      expect([...seenA, ...seenB].some((e) => e.type === "end")).toBe(false);
+    },
+  );
 });

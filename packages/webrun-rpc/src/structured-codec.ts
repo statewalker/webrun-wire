@@ -27,6 +27,9 @@ function isEnvelope(value: unknown): value is PortEnvelope {
  * not send anything a byte codec could not also carry.
  */
 export const structuredCodec: PortCodec = {
+  // `read` accepts `end`, so windowed ports over this codec offer it.
+  halfClose: true,
+
   post(port, envelope, transfer) {
     // An empty transfer list is not the same as no transfer list — some
     // implementations reject the former.

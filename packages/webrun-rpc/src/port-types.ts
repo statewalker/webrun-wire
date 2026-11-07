@@ -49,6 +49,13 @@ export interface PortCodec {
   encode?(envelope: PortEnvelope): Uint8Array;
   /** Optional, with `encode`: an envelope back from its bytes, or `undefined`. */
   decode?(data: unknown): PortEnvelope | undefined;
+  /**
+   * Optional: this codec's `read` (and `decode`) accept the `end` envelope.
+   * Only then does a windowed port offer the `end` capability. A codec that
+   * dropped `end` would leave a port that ended normally in the peer's table
+   * (`ports()`) until the mux closes, with no error anywhere.
+   */
+  halfClose?: true;
 }
 
 export interface PortMuxOptions {
