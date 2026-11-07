@@ -444,6 +444,16 @@ describe("server end: other platforms' semantics (workerd's WebSocketPair)", () 
     expect(got).toEqual(["true:late"]);
   });
 
+  it("deliverWhileClosing: a message queued before accept() still arrives after close()", async () => {
+    const { socket, client } = end({ deliverWhileClosing: true, sendBeforeAccept: true });
+    client.postMessage({ t: "m", d: "early" });
+    await sleep(10); // queued: not accepted yet
+    socket.close(1000);
+    const got = next<MessageEvent>(socket, "message");
+    socket.accept();
+    expect((await got).data).toBe("early");
+  });
+
   it('binaryType "blob": binary messages arrive as Blobs', async () => {
     const { socket, client } = end();
     socket.binaryType = "blob";

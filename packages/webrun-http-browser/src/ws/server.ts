@@ -182,7 +182,7 @@ export class ServerWebSocket extends PortSocketCore {
     }
     if (this._accepted) return;
     this._accepted = true;
-    for (const frame of this._queue.splice(0)) super._deliver(frame);
+    for (const frame of this._queue.splice(0)) this._deliver(frame);
   }
 
   send(data: string | ArrayBuffer | ArrayBufferView): void {
