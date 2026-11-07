@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createWebSocketClass,
   isWebSocketUpgrade,
+  newWebSocketUpgradeRequest,
   type PortWebSocket,
   requestedProtocols,
   type ServerWebSocket,
@@ -313,6 +314,18 @@ describe("server end", () => {
     expect(server.bufferedAmount).toBe(0);
     expect(received).toBe(100);
     ws.close();
+  });
+
+  it("the subprotocols asked for come from `protocols`, not from a caller's header", () => {
+    const none = newWebSocketUpgradeRequest("ws://example.test/x", {
+      headers: { "sec-websocket-protocol": "v1", "x-shard": "7" },
+    });
+    expect([requestedProtocols(none), none.headers.get("x-shard")]).toEqual([[], "7"]);
+    const two = newWebSocketUpgradeRequest("ws://example.test/x", {
+      protocols: ["v2", "v3"],
+      headers: { "sec-websocket-protocol": "v1" },
+    });
+    expect(requestedProtocols(two)).toEqual(["v2", "v3"]);
   });
 
   it("the upgrade request carries its forbidden headers", async () => {

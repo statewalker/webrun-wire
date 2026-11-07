@@ -214,8 +214,12 @@ export class SwHttpDispatcher {
       }),
       handleChannelCalls(self, WS_CONNECT_CALL, async (event, params) => {
         if (!this._isOwnClient(event)) throw new Error("Only this origin's pages may open sockets");
-        const { url, protocols } = params as { url: string; protocols?: string[] };
-        const connection = await this.connectWebSocket(url, protocols ?? []);
+        const { url, protocols, headers } = params as {
+          url: string;
+          protocols?: string[];
+          headers?: [string, string][];
+        };
+        const connection = await this.connectWebSocket(url, protocols ?? [], headers);
         return withTransfer(connection, [connection.port]);
       }),
     );
@@ -627,7 +631,7 @@ export class SwHttpDispatcher {
         return;
       case "ws-open":
         // A handler opens a socket to another handler, through this router.
-        this.connectWebSocket(message.url, message.protocols).then(
+        this.connectWebSocket(message.url, message.protocols, message.headers).then(
           ({ port, protocol }) =>
             entry.ctl?.postMessage(
               { t: "ws-opened", id: message.id, protocol, port } satisfies ControlMessage,

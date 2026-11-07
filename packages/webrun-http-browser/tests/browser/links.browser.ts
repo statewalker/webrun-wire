@@ -735,6 +735,74 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(text).toBe("A got page:hello");
       });
 
+      it("worker to worker: the socket's headers reach the router's route function", async () => {
+        const page = await open("?sw=route%3Dslot");
+        await run(
+          page,
+          `await window.attach("A", { id: "a" }); await window.attach("B", { id: "b" });`,
+        );
+        const replies = await run<string[]>(
+          page,
+          `
+      const via = (slot) =>
+        fetch("./app/ws-up?slot=" + slot + "&url=" + encodeURIComponent(new URL("./app/chat", location.href)), {
+          headers: { "x-slot": "a" },
+        }).then((r) => r.text());
+      return [await via("b"), await via("a"), await via("b")];
+    `,
+        );
+        // A serves each call (x-slot: a); its socket goes where ITS header says.
+        expect(replies).toEqual(["A got B:hello", "A got A:hello", "A got B:hello"]);
+        // From the page, through the ServiceWorker, the same.
+        const fromPage = await run<string[]>(
+          page,
+          `
+      const lib = await import(location.origin + "/dist/sw.js");
+      const via = async (slot) => {
+        const WS = lib.createWebSocketClass((u, protocols) =>
+          window.adapter.connectWebSocket(u, protocols, { "x-slot": slot }),
+        );
+        const ws = new WS(new URL("./app/chat", location.href));
+        const reply = await new Promise((resolve, reject) => {
+          ws.onopen = () => ws.send("hi");
+          ws.onmessage = (event) => resolve(event.data);
+          ws.onerror = () => reject(new Error("socket failed"));
+        });
+        ws.close();
+        return reply;
+      };
+      return [await via("b"), await via("a")];
+    `,
+        );
+        expect(fromPage).toEqual(["B:hi", "A:hi"]);
+      });
+
+      it("the handler sees the socket's headers, in the same page and through the router", async () => {
+        const page = await open();
+        await run(page, `await window.attach("A");`);
+        const replies = await run<string[]>(
+          page,
+          `
+      const ask = async (path, slot) => {
+        const WS = lib.createWebSocketClass((u, protocols) =>
+          window.adapter.connectWebSocket(u, protocols, { "x-slot": slot }),
+        );
+        const ws = new WS(new URL(path, location.href));
+        const reply = await new Promise((resolve, reject) => {
+          ws.onopen = () => ws.send("?");
+          ws.onmessage = (event) => resolve(event.data);
+          ws.onerror = () => reject(new Error("socket failed"));
+        });
+        ws.close();
+        return reply;
+      };
+      return [await ask("./page/ws-header", "p"), await ask("./app/ws-header", "w")];
+    `,
+        );
+        // The page's own handler (no ServiceWorker) and a worker's, through it.
+        expect(replies).toEqual(["page:p", "A:w"]);
+      });
+
       it("from a page with no adapter: serviceWorkerWebSocketClass", async () => {
         const page = await open();
         await run(page, `await window.attach("A");`);

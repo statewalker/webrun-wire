@@ -1,5 +1,5 @@
 // A Dedicated Worker serving HTTP and WebSockets through the ServiceWorker.
-import { serveHttpInWorker } from "/dist/worker.js";
+import { createWebSocketClass, serveHttpInWorker } from "/dist/worker.js";
 import { newHandler } from "./handler.js";
 import { readPaced } from "./paced.js";
 
@@ -16,9 +16,17 @@ const { handler } = newHandler(name, {
       return new Response(`${name} up failed: ${error.message}`, { status: 502 });
     }
   },
-  // A socket from this worker to another handler, through the router.
+  // A socket from this worker to another handler, through the router. ?slot=<id> sends it with
+  // an `x-slot` header, which the `route=slot` ServiceWorker routes by.
   "ws-up": async (_request, url) => {
-    const ws = new service.WebSocket(url.searchParams.get("url"));
+    const target = url.searchParams.get("url");
+    const slot = url.searchParams.get("slot");
+    const WS = slot
+      ? createWebSocketClass((u, protocols) =>
+          service.connectWebSocket(u, protocols, { "x-slot": slot }),
+        )
+      : service.WebSocket;
+    const ws = new WS(target);
     const reply = await new Promise((resolve, reject) => {
       ws.onopen = () => ws.send("hello");
       ws.onmessage = (event) => resolve(event.data);
