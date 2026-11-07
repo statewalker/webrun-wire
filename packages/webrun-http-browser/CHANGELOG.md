@@ -1,5 +1,30 @@
 # @statewalker/webrun-http-browser
 
+## 0.12.1
+
+### Patch Changes
+
+- d7d8229: The same-origin dispatcher serves hosts that route by their own rules:
+  
+  - A request whose `route` declines every handler of its key, because it waits for one in particular such as a shard, now waits for attaches until `route` accepts one, up to `attachTimeoutMs`. The time a relink round takes counts against that. Before, the next attach of any handler ended the wait with a 503. After a relink round that brought back handlers `route` declined, it gave a 404. Now it waits, and answers `"timeout"` (503) past the deadline. A key with no handler back at all still answers `"gone"` (404).
+  - `failure(request, { kind, error })` answers the dispatcher's own failures, `"timeout"`, `"gone"` and `"lost"`, in the host's shape. `"lost"` covers every failed send, its `error` being a `LinkLostError` when the handler was lost. If the hook throws, the default answers. The defaults are unchanged: 503, 404 and a plain-text 502.
+  - `socketHeaders(headers, from)` filters what a socket's upgrade carries, by whether a page or a handler asked for it. A host drops from pages' sockets the headers only its handlers may send. `from` is the path the socket came by, not a trust boundary: any page of the origin can attach a handler.
+  - `dispatcher.ready` settles once the keys served before a restart are read back.
+  - `webSocketUpgradeResponse(port, protocol)` is the 101 for a socket whose server end the handler runs itself.
+- de7c7fb: The declarations compile with the DOM lib alone. The ServiceWorker-facing API (`SwHttpDispatcher`'s and `SwPortDispatcher`'s `self`, `handleFetch(event)`, `handleClaimRequests(self)`, and `relay-worker`'s `startRelayServiceWorker(self)` with its `canRegister(client)`) named `ServiceWorkerGlobalScope` and `FetchEvent`, which only TypeScript's WebWorker lib has. Every consumer that imported a type from `sw` or the main entry then failed to compile without that lib, unless it skipped lib checks. These now take a `ServiceWorkerScope`, a `FetchEventLike` and a `ServiceWorkerClientLike`, all exported: structural types that a ServiceWorker's `self` and its `fetch` events satisfy. `dispatcher.self` is typed as `ServiceWorkerScope` too. Code that used `dispatcher.self` for WebWorker members (`self.clients.claim()`) casts it, or keeps its own reference to the global `self`.
+- 21d2d7f: `ServerWebSocket`, through `upgradeWebSocket`'s options, carries what other platforms' server ends need. workerd's `WebSocketPair` can be built on it:
+  
+  - `heartbeatPeriod: "first"` keeps the first ping's period. A page announces a longer one when it turns hidden, and a closing tab turns hidden on its way out.
+  - `sendBeforeAccept` lets `send()` before `accept()`.
+  - `deliverWhileClosing` delivers the messages that were in flight when `close()` was called.
+  - `defaultCloseCode` is the code `close()` sends when given none, for example 1005.
+  - `closeTimeoutMs: Infinity` waits for the close echo for as long as it takes. A timer given Infinity used to fire at once.
+  - `binaryType` can be `"blob"`.
+  - A subclass can override `checkClose(code, reason)` with its platform's close rules.
+  - `detach()` hands an unaccepted end's port to another holder, with the frames that reached it delivered first. Acks the end was still owed are absorbed on the way.
+  
+  A ping announcing a period no timer takes (2³¹−1 ms or more, a client that turned its heartbeat off) stops the heartbeat watch rather than arming one that would fire every millisecond.
+
 ## 0.12.0
 
 ### Minor Changes
