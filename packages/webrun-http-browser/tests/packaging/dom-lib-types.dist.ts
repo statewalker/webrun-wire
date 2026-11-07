@@ -24,11 +24,12 @@ afterAll(async () => {
 describe("the built declarations need no WebWorker lib", () => {
   it("each entry's types compile with lib dom + es2022", async () => {
     dir = await mkdtemp(join(tmpdir(), "webrun-http-browser-types-"));
-    const entries = ["index", "sw", "worker"];
+    const entries = ["index", "sw", "worker", "relay-worker"];
+    const id = (entry: string) => entry.replace(/\W/g, "_");
     await writeFile(
       join(dir, "consumer.ts"),
-      `${entries.map((e) => `import type * as ${e} from "${join(pkg, "dist", `${e}.js`)}";`).join("\n")}
-export type Used = [${entries.map((e) => `typeof ${e}`).join(", ")}];
+      `${entries.map((e) => `import type * as ${id(e)} from "${join(pkg, "dist", `${e}.js`)}";`).join("\n")}
+export type Used = [${entries.map((e) => `typeof ${id(e)}`).join(", ")}];
 `,
     );
     await writeFile(

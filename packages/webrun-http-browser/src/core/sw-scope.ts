@@ -16,3 +16,12 @@ export interface FetchEventLike extends Event {
   readonly request: Request;
   respondWith(response: Response | PromiseLike<Response>): void;
 }
+
+/**
+ * A ServiceWorker's client (a page or a worker it controls), structurally (see
+ * `ServiceWorkerScope`). A `Client` is one.
+ */
+export interface ServiceWorkerClientLike {
+  readonly id: string;
+  readonly url: string;
+}
