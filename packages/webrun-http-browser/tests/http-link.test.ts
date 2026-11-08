@@ -149,16 +149,19 @@ describe("HTTP links", () => {
   });
 
   it("a close between the head and the body still fails the body with the link's reason", async () => {
+    const head = Promise.resolve(new Response(new ReadableStream<Uint8Array>())); // never ends
     const link = trackedLink(
-      async () => new Response(new ReadableStream<Uint8Array>()), // a body that never ends
+      () => head,
       () => {},
     );
     const reason = new LinkLostError("The worker was lost as the head arrived");
-    const sent = link.send(new Request("http://x/"));
-    // The head has arrived; `send` has not resumed to wrap its body yet.
-    queueMicrotask(() => void link.close(reason));
-    const response = await sent;
-    await expect(response.text()).rejects.toBe(reason);
+    // Registered before the link's own wait on the head, so the close runs as
+    // the head arrives, before `send` resumes to wrap the body.
+    void head.then(() => link.close(reason));
+    // The head won: `send` resolves, and only the body can carry the reason.
+    const response = await link.send(new Request("http://x/"));
+    const read = response.text();
+    await expect(Promise.race([read, tick(1000).then(() => "hung")])).rejects.toBe(reason);
     expect(link.inflight).toBe(0);
   });
 
