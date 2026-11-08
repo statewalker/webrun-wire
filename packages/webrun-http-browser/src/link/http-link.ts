@@ -196,14 +196,18 @@ export function trackedLink(
         finish();
         return response;
       }
-      return new Response(
-        guardBody(response.body, lost, () => lostReason, finish, request.signal),
-        {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-        },
-      );
+      // From here the body fails with the link's reason when the link closes:
+      // `fail` becomes the body's, and `finish` removes whichever is current.
+      failers.delete(fail);
+      const body = guardBody(response.body, finish, request.signal);
+      fail = body.fail;
+      if (closed) fail(lostReason as Error);
+      else if (!finished) failers.add(fail);
+      return new Response(body.stream, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
     },
     async close(reason) {
       if (closed) return;
@@ -220,18 +224,18 @@ export function trackedLink(
 }
 
 /**
- * A response body that reports its end (done, cancelled, failed or aborted) and
- * fails with the link's reason when the link is lost mid-stream. An abort of the
- * request's signal ends it at once, read or not: the exchange is over (the layer
- * below has given its port back), so the request leaves `inflight` then.
+ * A response body that reports its end (done, cancelled, failed or aborted).
+ * `fail(error)` ends it with `error` at once — the link calls it when it is lost
+ * mid-stream. An abort of the request's signal does the same with the signal's
+ * reason, read or not: the exchange is over (the layer below has given its port
+ * back), so the request leaves `inflight` then. A read waits on the reader
+ * alone, so nothing outlives the chunk it brings.
  */
 function guardBody(
   body: ReadableStream<Uint8Array>,
-  lost: Promise<never>,
-  reason: () => Error | undefined,
   finish: () => void,
   signal: AbortSignal | undefined,
-): ReadableStream<Uint8Array> {
+): { stream: ReadableStream<Uint8Array>; fail: (error: Error) => void } {
   const reader = body.getReader();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
@@ -240,17 +244,18 @@ function guardBody(
     signal?.removeEventListener("abort", onAbort);
     finish();
   };
-  const onAbort = () => {
+  const fail = (error: Error) => {
     if (ended) return;
     end();
     void reader.cancel().catch(() => {});
     try {
-      controller.error(abortError(signal as AbortSignal));
+      controller.error(error);
     } catch {
       /* already closed or errored */
     }
   };
-  return new ReadableStream<Uint8Array>({
+  const onAbort = () => fail(abortError(signal as AbortSignal));
+  const stream = new ReadableStream<Uint8Array>({
     start(c) {
       controller = c;
       if (signal?.aborted) onAbort();
@@ -258,7 +263,7 @@ function guardBody(
     },
     async pull(controller) {
       try {
-        const { done, value } = await Promise.race([reader.read(), lost]);
+        const { done, value } = await reader.read();
         if (ended) return;
         if (done) {
           end();
@@ -267,10 +272,7 @@ function guardBody(
         }
         controller.enqueue(value);
       } catch (error) {
-        if (ended) return;
-        end();
-        void reader.cancel().catch(() => {});
-        controller.error(reason() ?? error);
+        fail(error as Error);
       }
     },
     async cancel(why) {
@@ -278,6 +280,7 @@ function guardBody(
       await reader.cancel(why).catch(() => {});
     },
   });
+  return { stream, fail };
 }
 
 /** The signal's reason as an `Error` (`AbortError` when it gave none). */

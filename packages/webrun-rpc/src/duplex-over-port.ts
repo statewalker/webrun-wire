@@ -766,13 +766,6 @@ async function sendChunks(
   const producer = output as Partial<AsyncIterator<Uint8Array>>;
   const returnProducer = () => void Promise.resolve(producer.return?.()).catch(() => {});
   if (framed !== output) signal.addEventListener("abort", returnProducer, { once: true });
-  // A pipelined sender waits only for room in the window, or for the abort.
-  let onAborted = () => {};
-  const aborted = new Promise<void>((resolve) => {
-    onAborted = () => resolve();
-  });
-  if (signal.aborted) onAborted();
-  else signal.addEventListener("abort", onAborted, { once: true });
   try {
     await sendIterator<Uint8Array>(async ({ done, value, error }) => {
       if (signal.aborted) return;
@@ -788,7 +781,7 @@ async function sendChunks(
         port.postMessage({ type: CHUNK, channelName, chunk });
         touch();
         if (done && !error) onSent();
-        if (portBufferedAmount(port) > 0) await Promise.race([whenPortReady(port), aborted]);
+        if (portBufferedAmount(port) > 0) await whenReadyOrAborted(port, signal);
         return;
       }
       await callPort<void, WireChunk>(port, chunk, {
@@ -806,6 +799,22 @@ async function sendChunks(
     throw err;
   } finally {
     signal.removeEventListener("abort", returnProducer);
-    signal.removeEventListener("abort", onAborted);
   }
+}
+
+/**
+ * A pipelined sender waits only for room in the window, or for the abort. The
+ * abort listener lives for this one wait: a promise held for the whole stream
+ * would keep one reaction per wait until the stream ends.
+ */
+function whenReadyOrAborted(port: MessageTarget, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const settle = () => {
+      signal.removeEventListener("abort", settle);
+      resolve();
+    };
+    signal.addEventListener("abort", settle, { once: true });
+    whenPortReady(port).then(settle, settle);
+  });
 }
