@@ -119,6 +119,35 @@ describe("duplexOverPort — pipelined chunks under a window", () => {
     expect(seen).toEqual(input.flatMap((c) => [...c]));
   });
 
+  it("a caller that gives up while its input waits on a full window ends at once", async () => {
+    // The handler takes 10 chunks and then stops reading, so the caller's
+    // input fills the window and waits for room that never comes.
+    const stalled: Duplex = async function* (input) {
+      let taken = 0;
+      for await (const _ of input) if (++taken === 10) await new Promise(() => {});
+      yield new Uint8Array(0);
+    };
+    const { call } = await link(KiB, stalled);
+    let produced = 0;
+    const body = call(
+      (function* () {
+        for (;;) {
+          produced++;
+          yield new Uint8Array(64);
+        }
+      })(),
+    );
+    void body.next().catch(() => {});
+    await new Promise((r) => setTimeout(r, 100));
+    expect(produced).toBeGreaterThan(10); // past what the handler took: the window is full
+    // The abort wakes the wait: `return()` does not hang on the sender.
+    const ended = await Promise.race([
+      body.return(undefined).then(() => "ended"),
+      new Promise((r) => setTimeout(r, 1000, "hung")),
+    ]);
+    expect(ended).toBe("ended");
+  });
+
   for (const window of [undefined, 64 * KiB]) {
     const mode = window ? "pipelined" : "confirmed";
 

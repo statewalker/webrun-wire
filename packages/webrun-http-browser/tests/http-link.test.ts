@@ -4,6 +4,7 @@ import {
   type HttpLink,
   LinkLostError,
   serveHttpLink,
+  trackedLink,
 } from "../src/link/http-link.js";
 
 const closers: Array<() => unknown> = [];
@@ -123,6 +124,45 @@ describe("HTTP links", () => {
         for (;;) if ((await reader.read()).done) break;
       })(),
     ).rejects.toThrow(/ServiceWorker was lost/);
+  });
+
+  it("a read waiting on a stalled body fails with the link's reason when the link closes", async () => {
+    const { link } = await linked(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(16)); // and nothing after it
+            },
+          }),
+        ),
+    );
+    const response = await link.send(new Request("http://x/"));
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read();
+    const pending = reader.read();
+    await tick(10);
+    const reason = new LinkLostError("The worker was lost while this body was read");
+    await link.close(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(link.inflight).toBe(0);
+  });
+
+  it("a close between the head and the body still fails the body with the link's reason", async () => {
+    const head = Promise.resolve(new Response(new ReadableStream<Uint8Array>())); // never ends
+    const link = trackedLink(
+      () => head,
+      () => {},
+    );
+    const reason = new LinkLostError("The worker was lost as the head arrived");
+    // Registered before the link's own wait on the head, so the close runs as
+    // the head arrives, before `send` resumes to wrap the body.
+    void head.then(() => link.close(reason));
+    // The head won: `send` resolves, and only the body can carry the reason.
+    const response = await link.send(new Request("http://x/"));
+    const read = response.text();
+    await expect(Promise.race([read, tick(1000).then(() => "hung")])).rejects.toBe(reason);
+    expect(link.inflight).toBe(0);
   });
 
   it("the handler's teardown fails the caller instead of hanging", async () => {
