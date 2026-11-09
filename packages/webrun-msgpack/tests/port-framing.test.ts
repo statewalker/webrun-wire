@@ -276,7 +276,7 @@ describe("a message reassembled from frames is bounded (#50)", () => {
       channel.port2.close();
     });
     const got: unknown[] = [];
-    const ports: Array<{ close(): void }> = [];
+    const ports: MessageTarget[] = [];
     const b = multiplexPort(channel.port2, {
       codec: msgpackCodec,
       side: "responder",
@@ -373,7 +373,7 @@ describe("a message reassembled from frames is bounded (#50)", () => {
       for (const frame of frames) peer(frame); // 96 KiB charged, never finished
       await new Promise((r) => setTimeout(r, 20));
       if (closer === "the peer") peer({ type: "close", id: 0 });
-      else ports[0]?.close();
+      else ports[0]?.close?.();
       await open(2);
       // Another 116 KiB past the window fits only once the first is freed.
       for (const frame of framesOf(2, pattern(180 * KiB, 1), 16 * KiB)) peer(frame);
@@ -403,7 +403,8 @@ describe("a message reassembled from frames is bounded (#50)", () => {
     await acknowledged(a, 1);
     port.postMessage(pattern(40 * KiB, 0));
     port.postMessage(pattern(40 * KiB, 1)); // waits for credit the held listener never gives
-    port.close();
+    expect(port.close).toBeTypeOf("function"); // the test is about a close: it must happen
+    port.close?.();
     await waitFor(() => arrivals.length === 2, "both messages arrive");
     expect(arrivals[1]?.data).toEqual(pattern(40 * KiB, 1));
   });
