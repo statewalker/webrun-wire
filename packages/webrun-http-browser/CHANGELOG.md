@@ -1,5 +1,16 @@
 # @statewalker/webrun-http-browser
 
+## 0.12.3
+
+### Patch Changes
+
+- 3bb1254: A response body read over an HTTP link no longer keeps memory per chunk. Each read raced the reader against a promise for the link's loss, which never settles while the link lives, so every chunk left a reaction on it until the body ended: a 200,000 × 16 B body grew the heap by about 88 MB. A read now waits on the reader alone, and closing the link fails the body directly. The body still fails with the link's reason when the link closes, and an abort of the request's signal still ends it at once. One difference shows: chunks already buffered in the body when the link closes are dropped (up to about a flow-control window of data that had arrived), and the next read fails at once with the link's reason, as an abort does. A body cancelled just after its last chunk still leaves the handler the rest of the upload: the cancel reaches the body a macrotask later, once its read in flight has started, so that read decides whatever the engine's microtask timing.
+- 1e8e15d: An abort of a request's signal reaches its response body even after the caller has let the `Request` go. In Node, a `Request`'s signal follows the caller's signal only while the `Request` lives (undici holds the Request's controller through a WeakRef), so a caller that kept only the `Response` could abort, and the body (from `fetchOverDuplex`, or an HTTP link's `send`) never saw it: the read went on, and the call, its port and the link's `inflight` stayed taken. The response body now holds its `Request` until it ends, and lets it go then; a call that is finished but not yet ended by the peer holds it until the call ends, so an abort can still abandon it (`HttpDataOptions.keepAlive`, which `fetchOverDuplex` sets). `WorkerHttpService.fetch(request, init)` passes the request's signal on explicitly.
+- Updated dependencies [3bb1254]
+- Updated dependencies [1e8e15d]
+  - @statewalker/webrun-rpc@0.10.1
+  - @statewalker/webrun-http-streams@0.4.1
+
 ## 0.12.2
 
 ### Patch Changes
