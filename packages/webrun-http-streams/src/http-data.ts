@@ -25,6 +25,12 @@ export type HttpDataOptions = {
    */
   signal?: AbortSignal;
   /**
+   * `httpFetch` only: a value held until the call ends, so whatever `signal` depends on stays
+   * alive while the call listens to it. `fetchOverDuplex` passes its `Request`: in Node
+   * (undici), a Request's signal follows the caller's signal only while the Request lives.
+   */
+  keepAlive?: unknown;
+  /**
    * `serveFetchOverDuplex` only: once the response is out, how long the request
    * body may go unread before it is abandoned and the exchange ends (default
    * 30 s). A handler that answers first and reads the upload afterwards keeps
@@ -258,7 +264,12 @@ export async function httpFetch(
     }
     const onAbort = () => void release();
     signal?.addEventListener("abort", onAbort, { once: true });
-    void drain(output).finally(() => signal?.removeEventListener("abort", onAbort));
+    // `keepAlive` is held until the call ends: the abort must still reach `signal` meanwhile.
+    const kept = options.keepAlive;
+    void drain(output).finally(() => {
+      signal?.removeEventListener("abort", onAbort);
+      void kept;
+    });
   };
   let decoded: Awaited<ReturnType<MessageCodec["decodeResponse"]>>;
   try {

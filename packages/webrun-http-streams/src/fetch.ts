@@ -135,6 +135,8 @@ export async function fetchOverDuplex(
   } = await httpFetch(call, env, body, {
     ...options,
     signal: request.signal ?? undefined,
+    // A call that is finished but not yet ended by the peer still listens for the abort.
+    keepAlive: request,
   });
   const responseInit: ResponseInit = {
     status: envelope.status,
@@ -359,7 +361,7 @@ function responseBody(
   release: (() => Promise<void>) | undefined,
 ): ReadableStream<Uint8Array> {
   // The body holds its Request until it ends. A Request's signal follows the caller's signal
-  // only while the Request lives (the platform links them weakly): once a caller that keeps
+  // only while the Request lives (Node's undici holds the Request's controller through a WeakRef): once a caller that keeps
   // only the Response lets the Request go, an abort would never reach this body.
   const keep: { request?: Request } = { request };
   const signal: AbortSignal | undefined = request.signal ?? undefined;

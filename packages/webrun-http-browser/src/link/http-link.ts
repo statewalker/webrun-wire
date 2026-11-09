@@ -237,7 +237,7 @@ function guardBody(
   request: Request,
 ): { stream: ReadableStream<Uint8Array>; fail: (error: Error) => void } {
   // Held until the body ends: the Request's signal follows the caller's signal only while the
-  // Request lives (the platform links them weakly), and a caller may keep only the Response.
+  // Request lives (Node's undici holds the Request's controller through a WeakRef), and a caller may keep only the Response.
   const keep: { request?: Request } = { request };
   const signal: AbortSignal | undefined = request.signal ?? undefined;
   const reader = body.getReader();
