@@ -26,8 +26,12 @@ export function returningAtOnce<T>(
     abandon(reason);
   };
   // An AsyncGenerator but for `Symbol.asyncDispose`, which `asyncDisposable` adds below where
-  // the runtime has it (with Node's types, AsyncGenerator requires it).
-  const wrapped = {
+  // the runtime has it (with Node's types, AsyncGenerator requires it). Typed as the members it
+  // has, so a missing one is still an error.
+  const wrapped: Pick<
+    AsyncGenerator<T>,
+    "next" | "return" | "throw" | typeof Symbol.asyncIterator
+  > = {
     // A `next()` that was pending when the consumer gave up ends as the
     // stream does — done — rather than rejecting with the abort it caused: a
     // consumer that raced it against a timer may hold no handler for it.
@@ -45,9 +49,9 @@ export function returningAtOnce<T>(
       return gen.throw(error);
     },
     [Symbol.asyncIterator]() {
-      return wrapped;
+      return wrapped as AsyncGenerator<T>;
     },
-  } as AsyncGenerator<T>;
+  };
   // `await using` ends the stream as leaving a `for await` early does.
-  return asyncDisposable(wrapped, () => wrapped.return(undefined));
+  return asyncDisposable(wrapped as AsyncGenerator<T>, () => wrapped.return(undefined));
 }
