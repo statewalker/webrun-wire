@@ -105,3 +105,42 @@ describe("many requests on one link", () => {
     expect((heapAfterGc() - atFirst) / MB).toBeLessThanOrEqual(2);
   });
 });
+
+describe("a request the caller lets go", () => {
+  // A Request's signal follows the caller's signal only while the Request lives: the platform
+  // links them weakly. A caller that keeps only the Response must still be able to abort it.
+  it("an abort after the Request is collected still ends the body and frees the request", async () => {
+    const channel = new MessageChannel();
+    const stop = await serveHttpLink(
+      channel.port2,
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array(4096));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      { maxPorts: 2 },
+    );
+    const link = await connectHttpLink(channel.port1, { maxPorts: 2 });
+    try {
+      const controller = new AbortController();
+      const response = await link.send(new Request("http://x/", { signal: controller.signal }));
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+      heapAfterGc(); // the test keeps no reference to the Request
+      controller.abort(new Error("gave up"));
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+      expect(link.inflight).toBe(0);
+      await expect(response.text()).rejects.toThrow("gave up");
+    } finally {
+      await link.close();
+      await stop();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+});

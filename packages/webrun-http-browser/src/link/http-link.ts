@@ -199,7 +199,7 @@ export function trackedLink(
       // From here the body fails with the link's reason when the link closes:
       // `fail` becomes the body's, and `finish` removes whichever is current.
       failers.delete(fail);
-      const body = guardBody(response.body, finish, request.signal);
+      const body = guardBody(response.body, finish, request);
       fail = body.fail;
       if (closed) fail(lostReason as Error);
       else if (!finished) failers.add(fail);
@@ -234,14 +234,19 @@ export function trackedLink(
 function guardBody(
   body: ReadableStream<Uint8Array>,
   finish: () => void,
-  signal: AbortSignal | undefined,
+  request: Request,
 ): { stream: ReadableStream<Uint8Array>; fail: (error: Error) => void } {
+  // Held until the body ends: the Request's signal follows the caller's signal only while the
+  // Request lives (the platform links them weakly), and a caller may keep only the Response.
+  const keep: { request?: Request } = { request };
+  const signal: AbortSignal | undefined = request.signal ?? undefined;
   const reader = body.getReader();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
   const end = () => {
     ended = true;
     signal?.removeEventListener("abort", onAbort);
+    keep.request = undefined;
     finish();
   };
   const fail = (error: Error) => {
