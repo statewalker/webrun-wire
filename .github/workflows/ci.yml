@@ -14,6 +14,31 @@ jobs:
   ci:
     uses: statewalker/.github/.github/workflows/ci.yml@main
 
+  # The shared CI runs the Node suites on one Node version (24). The packages declare no
+  # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
+  # passed on 24 and failed on 22): run the Node suites on 22, the older LTS, too.
+  node22:
+    name: Node 22 tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r run build
+
+      - name: Test
+        run: pnpm -r run test
+
   # The shared CI runs the Node suites only. webrun-http-browser's browser
   # suites (ServiceWorkers, workers, relays, WebSockets) need real browsers:
   # Chromium and Firefox, installed by Playwright on the runner.
