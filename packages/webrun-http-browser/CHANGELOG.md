@@ -1,5 +1,14 @@
 # @statewalker/webrun-http-browser
 
+## 0.12.4
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-http-streams ^0.4.1 -> ^0.4.2
+  - @statewalker/webrun-rpc ^0.10.1 -> ^0.10.2
+
 ## 0.12.3
 
 ### Patch Changes
