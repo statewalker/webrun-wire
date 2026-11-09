@@ -163,7 +163,8 @@ describe("per-port window", () => {
     const port = await a.openPort();
     await acknowledged(a);
     for (let i = 0; i < 5; i++) port.postMessage(new Uint8Array(40 * KiB).fill(i));
-    port.close();
+    expect(port.close).toBeTypeOf("function"); // the test is about a close: it must happen
+    port.close?.();
     // A close sends what is queued at once, then the close, without waiting for
     // credit: the peer's listener holding its first message holds nothing up.
     await waitFor(() => got.length === 5 && closed, "the queue, then the close");

@@ -563,7 +563,8 @@ describe("every exchange ends its call", () => {
       httpServe(async () => ({
         envelope: {
           status: 200,
-          headers: framing === "length" ? [["content-length", "6"]] : [],
+          statusText: "OK",
+          headers: framing === "length" ? [["content-length", "6"] as [string, string]] : [],
         },
         body: (async function* () {
           yield new TextEncoder().encode("abc");

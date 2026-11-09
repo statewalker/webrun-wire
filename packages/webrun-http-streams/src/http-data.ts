@@ -448,7 +448,9 @@ function abortingOnReturn<T>(
     if (r.done) finished = true;
     return r;
   };
-  const wrapped: AsyncGenerator<T> = {
+  // An AsyncGenerator but for `Symbol.asyncDispose`, which `asyncDisposable` adds below where
+  // the runtime has it (with Node's types, AsyncGenerator requires it).
+  const wrapped = {
     next: (...args: [] | [unknown]) => gen.next(...args).then(settle),
     return(value) {
       if (!finished) abandon();
@@ -463,7 +465,7 @@ function abortingOnReturn<T>(
     [Symbol.asyncIterator]() {
       return wrapped;
     },
-  };
+  } as AsyncGenerator<T>;
   // `await using` ends it as leaving a `for await` early does.
   return asyncDisposable(wrapped, () => wrapped.return(undefined));
 }

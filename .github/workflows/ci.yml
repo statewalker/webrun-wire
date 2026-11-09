@@ -39,6 +39,11 @@ jobs:
       - name: Test
         run: pnpm -r run test
 
+      # The tests' own typecheck (src and tests together, with Node's types): the shared CI's
+      # typecheck covers src only.
+      - name: Typecheck the tests
+        run: pnpm -r --if-present run typecheck:tests
+
   # The shared CI runs the Node suites only. webrun-http-browser's browser
   # suites (ServiceWorkers, workers, relays, WebSockets) need real browsers:
   # Chromium and Firefox, installed by Playwright on the runner.
