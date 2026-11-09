@@ -316,7 +316,8 @@ describe("a link gives every request's port back", () => {
         );
       });
       // The quiet peer never answers the read in flight: the call is abandoned after the
-      // cancel's grace (1 s). Five rounds against a ceiling of two: one port kept fails round 3.
+      // cancel's grace (1 s). Five rounds 700 ms apart against a ceiling of two: a port kept
+      // past about 1.4 s (two graces one after the other, say) fails round 3.
       for (let i = 0; i < 5; i++) {
         const controller = new AbortController();
         const response = await link.send(new Request("http://x/", { signal: controller.signal }));
@@ -329,12 +330,43 @@ describe("a link gives every request's port back", () => {
         expect(Date.now() - t0).toBeLessThan(100); // the cancel does not wait for the peer
         expect(await pending).toEqual({ done: true, value: undefined });
         if (abortAfter) controller.abort();
-        await tick(1_100);
+        await tick(700);
         await settle();
       }
       expect(link.inflight).toBe(0);
     }, 30_000);
   }
+
+  it("a body cancelled with no read waiting gives the port back after one grace", async () => {
+    // Two chunks, then the peer goes quiet: the client reads one and cancels. The body's
+    // own read then waits on the quiet peer, and the call is abandoned after its grace (1 s),
+    // once. Rounds 700 ms apart against a ceiling of two fail round 3 on a longer hold.
+    const { link } = await linked(async () => {
+      let sent = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              if (sent >= 2) return await new Promise<void>(() => {});
+              sent++;
+              controller.enqueue(bytes(8));
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      );
+    });
+    for (let i = 0; i < 5; i++) {
+      const response = await link.send(new Request("http://x/"));
+      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      expect((await reader.read()).value?.byteLength).toBe(8);
+      await tick(2);
+      await reader.cancel();
+      expect(link.inflight, `round ${i + 1}`).toBe(0);
+      await tick(700);
+      await settle();
+    }
+  }, 30_000);
 
   it("a body cancelled just after its last chunk leaves the handler the rest of the upload", async () => {
     const received: number[] = [];
@@ -345,7 +377,9 @@ describe("a link gives every request's port back", () => {
       );
       return new Response("accepted", { status: 202 });
     });
-    for (let delay = 0; delay < 10; delay++) {
+    // Microtasks between the last read and the cancel: the pulls of the body and of the
+    // stream around it interleave differently at each, and differently on each engine.
+    for (let delay = 0; delay < 40; delay++) {
       let n = 0;
       const body = new ReadableStream<Uint8Array>({
         async pull(c) {
@@ -365,7 +399,7 @@ describe("a link gives every request's port back", () => {
     }
     // Every upload reached the handler whole: the cancel came after the body's end was on its
     // way, so the call was finished, not abandoned.
-    expect(received).toEqual(Array(10).fill(50));
+    expect(received).toEqual(Array(40).fill(50));
     await settle();
     expect(link.inflight).toBe(0);
   });

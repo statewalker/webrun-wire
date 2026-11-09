@@ -275,9 +275,16 @@ function guardBody(
         fail(error as Error);
       }
     },
-    async cancel(why) {
+    cancel(why) {
       end();
-      await reader.cancel(why).catch(() => {});
+      // The body is cancelled a macrotask later, not at once. Between two of its pulls it has
+      // no read in flight (the stream holds the next `pull` until the last one settles, for a
+      // few microtasks), and a cancel landing there abandons the call even with its end on the
+      // way. A macrotask later it has either closed (its end came: the call is finished, and
+      // an upload the handler reads after answering goes on) or started its next read, which
+      // then decides as `fetchOverDuplex`'s body does. How many microtasks the gap lasts
+      // differs between engines (Node 22 and 24 do). `cancel()` does not wait for it.
+      setTimeout(() => void reader.cancel(why).catch(() => {}), 0);
     },
   });
   return { stream, fail };
