@@ -239,11 +239,6 @@ function guardBody(
   const reader = body.getReader();
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
-  /**
-   * The next read of `body`, started as soon as a chunk is delivered, so that a cancel always
-   * finds a read in flight to decide by (below), however the engine schedules `pull`.
-   */
-  let ahead: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
   const end = () => {
     ended = true;
     signal?.removeEventListener("abort", onAbort);
@@ -268,9 +263,7 @@ function guardBody(
     },
     async pull(controller) {
       try {
-        const next = ahead ?? reader.read();
-        ahead = undefined;
-        const { done, value } = await next;
+        const { done, value } = await reader.read();
         if (ended) return;
         if (done) {
           end();
@@ -278,40 +271,24 @@ function guardBody(
           return;
         }
         controller.enqueue(value);
-        ahead = reader.read();
-        // Until it is pulled, a failure of the read ahead is the next pull's to report.
-        ahead.catch(() => {});
       } catch (error) {
         fail(error as Error);
       }
     },
     cancel(why) {
       end();
-      const pending = ahead;
-      ahead = undefined;
-      const cancelBody = () => void reader.cancel(why).catch(() => {});
-      if (!pending) return cancelBody();
-      // The read in flight decides, as `fetchOverDuplex`'s body does: the body's end → the call
-      // is finished (an upload the handler reads after answering goes on); a chunk → the body is
-      // cancelled and the call abandoned. A peer that never answers is cancelled after a grace.
-      // Cancelling at once would race the body's own pull: in the moment between two of its
-      // pulls it has no read in flight and abandons the call, even with its end on the way.
-      const grace = setTimeout(cancelBody, CANCEL_GRACE_MS);
-      (grace as { unref?: () => void }).unref?.();
-      pending.then(
-        (r) => {
-          clearTimeout(grace);
-          if (!r.done) cancelBody();
-        },
-        () => clearTimeout(grace),
-      );
+      // The body is cancelled a macrotask later, not at once. Between two of its pulls it has
+      // no read in flight (the stream holds the next `pull` until the last one settles, for a
+      // few microtasks), and a cancel landing there abandons the call even with its end on the
+      // way. A macrotask later it has either closed (its end came: the call is finished, and
+      // an upload the handler reads after answering goes on) or started its next read, which
+      // then decides as `fetchOverDuplex`'s body does. How many microtasks the gap lasts
+      // differs between engines (Node 22 and 24 do). `cancel()` does not wait for it.
+      setTimeout(() => void reader.cancel(why).catch(() => {}), 0);
     },
   });
   return { stream, fail };
 }
-
-/** How long a cancelled body waits for the read in flight (as `fetchOverDuplex` waits). */
-const CANCEL_GRACE_MS = 1_000;
 
 /** The signal's reason as an `Error` (`AbortError` when it gave none). */
 function abortError(signal: AbortSignal): Error {

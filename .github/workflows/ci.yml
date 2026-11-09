@@ -86,7 +86,7 @@ jobs:
   # breaking line), then opens or updates the "chore: version packages" pull request. Never
   # publishes.
   version:
-    needs: [ci, browser]
+    needs: [ci, browser, node22]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
