@@ -127,10 +127,21 @@ export function serveHttpInWorker(
 
   return {
     fetch(input, init) {
+      // A Request built from another follows its signal only as long as the other lives (in Node,
+      // undici links them weakly): pass the signal on directly, so a caller who keeps neither
+      // can still abort.
       const request =
         input instanceof Request && init === undefined
           ? input
-          : new Request(input instanceof Request ? input : new URL(`${input}`, baseUrl()), init);
+          : new Request(input instanceof Request ? input : new URL(`${input}`, baseUrl()), {
+              ...init,
+              signal:
+                init && "signal" in init
+                  ? init.signal
+                  : input instanceof Request
+                    ? input.signal
+                    : undefined,
+            });
       return endpoint.fetch(request);
     },
     connectWebSocket,

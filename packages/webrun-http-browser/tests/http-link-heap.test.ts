@@ -73,7 +73,10 @@ describe("many requests on one link", () => {
         if (i === 300) atFirst = heapAfterGc();
         expect(await (await link.send(new Request("http://x/"))).text()).toBe("abc");
       }
-      expect((heapAfterGc() - atFirst) / MB).toBeLessThanOrEqual(4);
+      // The heap settles about 3–4 MB above its level at request 300 and stays there (measured
+      // over 12,000 requests): 6 MB leaves room for that, while a leak of a few kilobytes per
+      // request still exceeds it within the 2,700 requests measured.
+      expect((heapAfterGc() - atFirst) / MB).toBeLessThanOrEqual(6);
     } finally {
       await link.close();
       await stop();
@@ -103,5 +106,72 @@ describe("many requests on one link", () => {
     expect(aborted).toBe(5_000);
     expect(link.inflight).toBe(0);
     expect((heapAfterGc() - atFirst) / MB).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("a request the caller lets go", () => {
+  it("the link's own body: an abort after the Request is collected still ends it", async () => {
+    // `send` hands back a plain body here, not fetchOverDuplex's, so only the link's body can
+    // keep the Request alive.
+    const link = trackedLink(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array(16));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      () => {},
+    );
+    const controller = new AbortController();
+    const response = await (async () =>
+      link.send(new Request("http://x/", { signal: controller.signal })))();
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+    heapAfterGc();
+    controller.abort(new Error("gave up"));
+    for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(link.inflight).toBe(0);
+    await expect(response.text()).rejects.toThrow("gave up");
+  });
+
+  // A Request's signal follows the caller's signal only while the Request lives: the platform
+  // links them weakly. A caller that keeps only the Response must still be able to abort it.
+  it("an abort after the Request is collected still ends the body and frees the request", async () => {
+    const channel = new MessageChannel();
+    const stop = await serveHttpLink(
+      channel.port2,
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array(4096));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      { maxPorts: 2 },
+    );
+    const link = await connectHttpLink(channel.port1, { maxPorts: 2 });
+    try {
+      const controller = new AbortController();
+      const response = await link.send(new Request("http://x/", { signal: controller.signal }));
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+      heapAfterGc(); // the test keeps no reference to the Request
+      controller.abort(new Error("gave up"));
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+      expect(link.inflight).toBe(0);
+      await expect(response.text()).rejects.toThrow("gave up");
+    } finally {
+      await link.close();
+      await stop();
+      channel.port1.close();
+      channel.port2.close();
+    }
   });
 });
