@@ -159,14 +159,17 @@ describe("README examples (prose sections)", () => {
     }
     expect(await collect(decodeJsonl<{ a: number }>(decodeText(chunks())))).toEqual([{ a: 1 }]);
 
-    const jsonl = encodeText(encodeJsonl([{ a: 1 }, { a: 2 }]));
+    // As the README writes it: the values come from an async generator.
+    async function* records() {
+      yield { a: 1 };
+      yield { a: 2 };
+    }
+    const jsonl = encodeText(encodeJsonl(records()));
     expect(await collectString(decodeText(jsonl))).toBe('{"a":1}\n{"a":2}\n');
 
     // …and the round trip survives more than one value, which is what the
     // previously documented `decodeJsonl(splitLines(...))` form did not.
-    const roundTrip = decodeJsonl<{ a: number }>(
-      decodeText(encodeText(encodeJsonl([{ a: 1 }, { a: 2 }]))),
-    );
+    const roundTrip = decodeJsonl<{ a: number }>(decodeText(encodeText(encodeJsonl(records()))));
     expect(await collect(roundTrip)).toEqual([{ a: 1 }, { a: 2 }]);
 
     // splitLines / joinLines on plain string streams

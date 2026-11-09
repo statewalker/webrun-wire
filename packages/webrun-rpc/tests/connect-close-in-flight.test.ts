@@ -28,7 +28,9 @@ function stalling() {
     release = resolve;
   });
   let finished = false;
-  const handler = async function* (input: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const handler = async function* (
+    input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  ): AsyncGenerator<Uint8Array> {
     try {
       for await (const _ of input) {
         // drain
