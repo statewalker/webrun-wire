@@ -403,6 +403,7 @@ describe("a message reassembled from frames is bounded (#50)", () => {
     await acknowledged(a, 1);
     port.postMessage(pattern(40 * KiB, 0));
     port.postMessage(pattern(40 * KiB, 1)); // waits for credit the held listener never gives
+    expect(port.close).toBeTypeOf("function"); // the test is about a close: it must happen
     port.close?.();
     await waitFor(() => arrivals.length === 2, "both messages arrive");
     expect(arrivals[1]?.data).toEqual(pattern(40 * KiB, 1));
