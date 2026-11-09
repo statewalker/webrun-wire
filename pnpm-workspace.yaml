@@ -13,7 +13,7 @@ catalog:
   "@multiformats/multiaddr": ^13.0.3
   "@roamhq/wrtc": "^0.10.0"
   "@types/ws": "^8.18.2"
-  "@vitest/browser-playwright": "^5.0.3"
+  "@vitest/browser-playwright": "^5.0.5"
   "esbuild": "^0.28.2"
   "libp2p": ^3.0.0
   "livekit-client": "^2.18.3"
@@ -25,7 +25,7 @@ catalog:
   "ws": "^8.22.0"
   "@biomejs/biome": ^2.5.15
   "@types/node": ^26.6.4
-  "@vitest/coverage-v8": ^5.0.3
+  "@vitest/coverage-v8": ^5.0.5
   hono: ^4.13.12
   http-server: ^14.1.1
   idb-keyval: ^6.3.0
@@ -36,7 +36,7 @@ catalog:
   turbo: ^2.11.7
   typescript: ^7.0.2
   vite: ^8.3.2
-  vitest: ^5.0.3
+  vitest: ^5.0.5
   # Published webrun-rpc versions the mixed-versions test pairs a new end with.
   webrun-rpc-0-5: npm:@statewalker/webrun-rpc@0.5.1
   webrun-rpc-0-7: npm:@statewalker/webrun-rpc@0.7.0
