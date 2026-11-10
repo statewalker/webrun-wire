@@ -182,3 +182,54 @@ describe("HTTP links", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("HTTP links: the scheme of request urls", () => {
+  async function seenUrl(url: string, options: { scheme?: "http" | "https" } = {}) {
+    const channel = new MessageChannel();
+    let seen = "";
+    const stop = await serveHttpLink(
+      channel.port2,
+      (request) => {
+        seen = request.url;
+        return new Response("ok");
+      },
+      options,
+    );
+    const link = await connectHttpLink(channel.port1);
+    closers.push(
+      () => link.close(),
+      () => stop(),
+      () => channel.port1.close(),
+      () => channel.port2.close(),
+    );
+    const response = await link.send(new Request(url, { method: "POST", body: "x" }));
+    expect(await response.text()).toBe("ok");
+    return seen;
+  }
+
+  it("keeps https when the answering end is told its scheme", async () => {
+    expect(await seenUrl("https://app.test/k/api?x=1", { scheme: "https" })).toBe(
+      "https://app.test/k/api?x=1",
+    );
+  });
+
+  it("takes the answering realm's scheme by default", async () => {
+    const g = globalThis as { location?: unknown };
+    const before = Object.getOwnPropertyDescriptor(g, "location");
+    Object.defineProperty(g, "location", {
+      value: { protocol: "https:" },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      expect(await seenUrl("https://app.test/k/")).toBe("https://app.test/k/");
+    } finally {
+      if (before) Object.defineProperty(g, "location", before);
+      else delete g.location;
+    }
+  });
+
+  it("rebuilds http where the realm has no location (Node), as before", async () => {
+    expect(await seenUrl("https://app.test/k/")).toBe("http://app.test/k/");
+  });
+});

@@ -1,4 +1,11 @@
-import { fetchOverDuplex, serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
+import {
+  fetchOverDuplex,
+  jsonEnvelopeCodec,
+  type MessageCodec,
+  newHttpCodec,
+  newSniffingCodec,
+  serveFetchOverDuplex,
+} from "@statewalker/webrun-http-streams";
 import { connect, overPipe, serve, structuredCodec } from "@statewalker/webrun-rpc";
 import { asyncDisposable } from "./async-dispose.js";
 
@@ -38,6 +45,15 @@ export interface HttpLinkOptions {
    */
   requestIdleMs?: number;
   /**
+   * The answering end only: the scheme of the urls its handler sees. A request crosses the link
+   * as HTTP/1.1, whose origin-form target (`GET /key/path` and a `Host` header) carries no
+   * scheme, so the answering end rebuilds the url with this one. Default: the scheme of this
+   * realm's `location` when it is http or https (a page, a Dedicated Worker or a ServiceWorker
+   * answers for its own origin), else `http`. Before, it was always `http`: on an https page a
+   * handler saw `http://host/…`, and a handler found by its https base url was not found at all.
+   */
+  scheme?: "http" | "https";
+  /**
    * The calling end only: the flow-control window, in bytes, that every
    * request's port asks for (webrun-rpc's `window`; default 256 KiB). On it,
    * request and response bodies are pipelined: chunks leave without waiting
@@ -47,6 +63,20 @@ export interface HttpLinkOptions {
    * falls back to that by itself.
    */
   window?: number;
+}
+
+/** The scheme an answering end rebuilds request urls with: `scheme`, else this realm's. */
+function linkScheme(scheme: HttpLinkOptions["scheme"]): "http" | "https" {
+  if (scheme) return scheme;
+  const protocol = (globalThis as { location?: { protocol?: unknown } }).location?.protocol;
+  return protocol === "https:" ? "https" : "http";
+}
+
+/** `defaultCodec` (writes HTTP/1.1, reads it or the JSON envelope), decoding urls at `scheme`. */
+function linkCodec(scheme: "http" | "https"): MessageCodec | undefined {
+  if (scheme === "http") return undefined; // defaultCodec's own
+  const http = newHttpCodec({ scheme });
+  return newSniffingCodec({ write: http, accept: [http, jsonEnvelopeCodec] });
 }
 
 /** The calling end's default `HttpLinkOptions.window`: 256 KiB. */
@@ -118,14 +148,15 @@ export async function connectHttpLink(
 export async function serveHttpLink(
   port: MessagePort,
   handler: (request: Request) => Response | Promise<Response>,
-  { streamTimeout, maxPorts, requestIdleMs }: HttpLinkOptions = {},
+  { streamTimeout, maxPorts, requestIdleMs, scheme }: HttpLinkOptions = {},
 ): Promise<() => Promise<void>> {
+  const codec = linkCodec(linkScheme(scheme));
   const teardown = await serve(
     {
       mux: overPipe(port, { codec: structuredCodec, side: "responder", maxPorts }),
       timeout: streamTimeout,
     },
-    serveFetchOverDuplex(async (request) => await handler(request), { requestIdleMs }),
+    serveFetchOverDuplex(async (request) => await handler(request), { requestIdleMs, codec }),
   );
   const onClose = (event: MessageEvent) => {
     if ((event.data as { type?: unknown } | null)?.type === LINK_CLOSE) void close();
