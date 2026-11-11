@@ -2,7 +2,7 @@ import type { Duplex } from "@statewalker/webrun-streams";
 import { asyncDisposable } from "./async-dispose.js";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
-import { NULL_BODY_STATUSES } from "./http-stubs.js";
+import { type FetchHandler, NULL_BODY_STATUSES } from "./http-stubs.js";
 import type { ByteSource } from "./message.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
@@ -161,13 +161,10 @@ export async function fetchOverDuplex(
 }
 
 /**
- * Wrap a `(Request) => Promise<Response>` handler as a `Duplex` so it can be
- * registered with any `webrun-streams-*` adapter's `serve`.
+ * Wrap a {@link FetchHandler} as a `Duplex` so it can be registered with any
+ * `webrun-streams-*` adapter's `serve`.
  */
-export function serveFetchOverDuplex(
-  handler: (request: Request) => Promise<Response>,
-  options: HttpDataOptions = {},
-): Duplex {
+export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOptions = {}): Duplex {
   return httpServe(async (env, body, exchange) => {
     const reqInit: RequestInit = {
       method: env.method,

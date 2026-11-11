@@ -21,6 +21,7 @@ export {
 } from "./http-data.js";
 export { HttpError, type HttpErrorOptions } from "./http-error.js";
 export {
+  type FetchHandler,
   type HttpHandler,
   newHttpClientStub,
   newHttpServerStub,
