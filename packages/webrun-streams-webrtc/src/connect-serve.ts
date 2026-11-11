@@ -67,8 +67,9 @@ export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
       await waitForOpen(dc);
       inputFromPeer = peekInput(dc);
       const out = handler(inputFromPeer.input);
+      // the next chunk is pulled (and its credit returned) only once the handler took this one
       for await (const chunk of duplexOverDataChannel(dc, out)) {
-        inputFromPeer.deliver(chunk);
+        await inputFromPeer.deliver(chunk);
       }
       inputFromPeer.done();
     })().catch(() => {
@@ -137,7 +138,8 @@ function toAsyncIterable(
 
 interface PeekInput {
   input: AsyncGenerator<Uint8Array>;
-  deliver(chunk: Uint8Array): void;
+  /** resolves once the handler has taken the chunk (or stopped reading) */
+  deliver(chunk: Uint8Array): Promise<void>;
   done(): void;
 }
 
@@ -152,7 +154,8 @@ interface PeekInput {
  * the handler's input queue.
  */
 function peekInput(_dc: RTCDataChannel): PeekInput {
-  const slots: Array<{ type: "value"; value: Uint8Array } | { type: "done" }> = [];
+  const slots: Array<{ type: "value"; value: Uint8Array; taken: () => void } | { type: "done" }> =
+    [];
   let wake: (() => void) | null = null;
   let closed = false;
   const input = (async function* () {
@@ -168,18 +171,22 @@ function peekInput(_dc: RTCDataChannel): PeekInput {
         const slot = slots.shift();
         if (!slot) continue;
         if (slot.type === "done") return;
+        slot.taken();
         yield slot.value;
       }
     } finally {
       closed = true;
+      for (const s of slots.splice(0)) if (s.type === "value") s.taken();
     }
   })();
   return {
     input,
-    deliver(chunk: Uint8Array): void {
-      if (closed) return;
-      slots.push({ type: "value", value: chunk });
-      wake?.();
+    deliver(chunk: Uint8Array): Promise<void> {
+      if (closed) return Promise.resolve();
+      return new Promise<void>((taken) => {
+        slots.push({ type: "value", value: chunk, taken });
+        wake?.();
+      });
     },
     done(): void {
       if (closed) return;

@@ -8,12 +8,23 @@ import {
 const TYPE_DATA = 0x00;
 const TYPE_END = 0x01;
 const TYPE_ERROR = 0x02;
+const TYPE_CREDIT = 0x03;
 
 const DC_MTU = 16 * 1024; // conservative across browsers
 
-/** (stub) */
+/**
+ * Send-side backpressure: a sender waits while the DataChannel holds more than this many bytes
+ * unsent (`bufferedAmount`), until it drains to {@link LOW_WATER_MARK} (`bufferedamountlow`).
+ * Without it a fast producer fills the browser's send queue (Chrome fails `send` past 16 MiB).
+ */
 export const HIGH_WATER_MARK = 1024 * 1024;
-/** (stub) */
+export const LOW_WATER_MARK = 256 * 1024;
+/**
+ * Receive-side backpressure: a sender may have at most this many payload bytes outstanding that
+ * the receiving consumer has not yet pulled. The receiver returns credit (`CREDIT` frames) as its
+ * consumer pulls, half a window at a time. A DataChannel delivers every message as it arrives,
+ * whether or not anyone reads, so without credit a slow reader's queue grows without bound.
+ */
 export const RECEIVE_WINDOW = 1024 * 1024;
 const FRAME_OVERHEAD = 1; // 1-byte type tag
 
@@ -28,7 +39,9 @@ const textDecoder = new TextDecoder();
  *
  * Types are `DATA` (0x00, body bytes), `END` (0x01, signals half-close — the
  * sender is done emitting; the channel stays open for the other direction),
- * and `ERROR` (0x02, followed by a serialised `Error`).
+ * `ERROR` (0x02, followed by a serialised `Error`) and `CREDIT` (0x03, a
+ * big-endian u32: payload bytes the receiver's consumer has pulled, which the
+ * sender may now send again; see {@link RECEIVE_WINDOW}).
  *
  * `RTCDataChannel` has no native half-close, so `END` is emitted by the
  * sender once its input iterator exhausts; the channel is only physically
@@ -50,6 +63,44 @@ async function* runStream(
   const incoming = makeInboundQueue();
   let peerEnded = false;
   let localEnded = false;
+
+  // flow control: what the peer still lets us send, and what our consumer has pulled
+  let credit = RECEIVE_WINDOW;
+  let pulled = 0;
+  let wakeSender: (() => void) | null = null;
+  const nudge = (): void => {
+    const w = wakeSender;
+    wakeSender = null;
+    w?.();
+  };
+  const stalled = (): Promise<void> =>
+    new Promise<void>((r) => {
+      wakeSender = r;
+    });
+  dc.bufferedAmountLowThreshold = LOW_WATER_MARK;
+  const sendRaw = (bytes: Uint8Array): void => {
+    (dc as unknown as { send: (data: Uint8Array) => void }).send(bytes);
+  };
+  /** waits for credit for `n` bytes and room in the send buffer; false once the channel is gone */
+  const room = async (n: number): Promise<boolean> => {
+    while (dc.readyState === "open" && (credit < n || dc.bufferedAmount > HIGH_WATER_MARK))
+      await stalled();
+    return dc.readyState === "open";
+  };
+  /** returns credit for what our consumer pulled, half a window at a time */
+  const consumed = (n: number): void => {
+    pulled += n;
+    if (pulled < RECEIVE_WINDOW / 2 || dc.readyState !== "open") return;
+    const frame = new Uint8Array(5);
+    frame[0] = TYPE_CREDIT;
+    new DataView(frame.buffer).setUint32(1, pulled);
+    pulled = 0;
+    try {
+      sendRaw(frame);
+    } catch {
+      /* closing */
+    }
+  };
 
   const maybeClose = (): void => {
     if (peerEnded && localEnded) {
@@ -79,6 +130,9 @@ async function* runStream(
       peerEnded = true;
       incoming.done();
       maybeClose();
+    } else if (type === TYPE_CREDIT && payload.byteLength >= 4) {
+      credit += new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0);
+      nudge();
     } else if (type === TYPE_ERROR) {
       let err: Error;
       try {
@@ -93,6 +147,7 @@ async function* runStream(
   };
 
   const onClose = (): void => {
+    nudge();
     if (!peerEnded) {
       incoming.done(new TransportClosedError());
       peerEnded = true;
@@ -101,16 +156,18 @@ async function* runStream(
 
   dc.addEventListener("message", onMessage);
   dc.addEventListener("close", onClose);
+  dc.addEventListener("bufferedamountlow", nudge);
 
   // Outbound pump runs in parallel with inbound iteration.
   const outbound = (async () => {
     try {
       for await (const chunk of toChunks(DC_MTU - FRAME_OVERHEAD)(input)) {
-        if (dc.readyState !== "open") return;
+        if (!(await room(chunk.byteLength))) return;
+        credit -= chunk.byteLength;
         const framed = new Uint8Array(chunk.byteLength + 1);
         framed[0] = TYPE_DATA;
         framed.set(chunk, 1);
-        (dc as unknown as { send: (data: Uint8Array) => void }).send(framed);
+        sendRaw(framed);
       }
       if (dc.readyState === "open") {
         const end = new Uint8Array([TYPE_END]);
@@ -139,6 +196,7 @@ async function* runStream(
   try {
     for await (const chunk of incoming.iterate()) {
       yield chunk;
+      consumed(chunk.byteLength); // pulled: the peer may send that much again
     }
     inboundDrained = true;
   } finally {
