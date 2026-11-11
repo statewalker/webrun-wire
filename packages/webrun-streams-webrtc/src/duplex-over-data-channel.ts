@@ -83,11 +83,17 @@ async function* runStream(
   const sendRaw = (bytes: Uint8Array): void => {
     (dc as unknown as { send: (data: Uint8Array) => void }).send(bytes);
   };
-  /** waits for credit for `n` bytes and room in the send buffer; false once the channel is gone */
+  /** set when this call is abandoned (cancelled, or the peer failed): the sender stops waiting */
+  let aborted = false;
+  /** waits for credit for `n` bytes and room in the send buffer; false once the call is over */
   const room = async (n: number): Promise<boolean> => {
-    while (dc.readyState === "open" && (credit < n || dc.bufferedAmount > HIGH_WATER_MARK))
+    while (
+      !aborted &&
+      dc.readyState === "open" &&
+      (credit < n || dc.bufferedAmount > HIGH_WATER_MARK)
+    )
       await stalled();
-    return dc.readyState === "open";
+    return !aborted && dc.readyState === "open";
   };
   /** returns credit for what our consumer pulled, half a window at a time */
   const consumed = (n: number): void => {
@@ -159,6 +165,15 @@ async function* runStream(
   dc.addEventListener("message", onMessage);
   dc.addEventListener("close", onClose);
   dc.addEventListener("bufferedamountlow", nudge);
+  // The listeners stay until both halves are done: after the peer's END our own sending may still
+  // wait for the peer's CREDIT frames (a reply larger than the window, sent after the input ended).
+  let inboundFinished = false;
+  const detach = (): void => {
+    if (!inboundFinished || !localEnded) return;
+    dc.removeEventListener("message", onMessage);
+    dc.removeEventListener("close", onClose);
+    dc.removeEventListener("bufferedamountlow", nudge);
+  };
 
   // Outbound pump runs in parallel with inbound iteration.
   const outbound = (async () => {
@@ -191,6 +206,7 @@ async function* runStream(
     } finally {
       localEnded = true;
       maybeClose();
+      detach();
     }
   })();
 
@@ -202,10 +218,11 @@ async function* runStream(
     }
     inboundDrained = true;
   } finally {
-    dc.removeEventListener("message", onMessage);
-    dc.removeEventListener("close", onClose);
-    // Wait for outbound to settle so an early exit doesn't truncate in-flight
-    // sends — but ONLY on an early exit.
+    inboundFinished = true;
+    detach();
+    // On an early exit, stop the outbound pump (it may be waiting for credit
+    // the peer will never send now), close the channel, then let the pump
+    // settle — but ONLY on an early exit.
     //
     // Awaiting it unconditionally deadlocks a responder. `serve` feeds the
     // handler from the values this generator yields and closes the handler's
@@ -219,7 +236,8 @@ async function* runStream(
     // there is nothing of theirs left to truncate; outbound keeps running on
     // its own and `maybeClose` still closes the channel once both halves end.
     if (!inboundDrained) {
-      await outbound.catch(() => {});
+      aborted = true;
+      nudge();
       // The consumer walked away mid-response (`.return()` on the generator),
       // or the peer errored. Either way this call is over while the peer may
       // still be producing, and a DataChannel has no half-close to say so —
@@ -229,11 +247,14 @@ async function* runStream(
       // `onClose` then ends its inbound queue, which closes the handler's
       // input and runs the handler's `finally`. Without this, cancellation is
       // silently local and the handler leaks until the connection drops.
+      // The close comes before waiting on the pump: a pump stalled on credit
+      // would otherwise hold the cancellation back.
       try {
         dc.close();
       } catch {
         /* already closing */
       }
+      await outbound.catch(() => {});
     }
   }
 }

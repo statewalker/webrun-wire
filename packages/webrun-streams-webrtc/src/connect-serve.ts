@@ -65,8 +65,18 @@ export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
     let inputFromPeer: PeekInput | null = null;
     void (async () => {
       await waitForOpen(dc);
-      inputFromPeer = peekInput(dc);
-      const out = handler(inputFromPeer.input);
+      const peek = peekInput(dc);
+      inputFromPeer = peek;
+      // Once the handler's output ends (or throws) the handler is done with its input: what the
+      // peer still sends is dropped, so its upload finishes instead of waiting for credit.
+      const handlerOutput = handler(peek.input);
+      const out = (async function* () {
+        try {
+          yield* handlerOutput;
+        } finally {
+          peek.release();
+        }
+      })();
       // the next chunk is pulled (and its credit returned) only once the handler took this one
       for await (const chunk of duplexOverDataChannel(dc, out)) {
         await inputFromPeer.deliver(chunk);
@@ -141,6 +151,8 @@ interface PeekInput {
   /** resolves once the handler has taken the chunk (or stopped reading) */
   deliver(chunk: Uint8Array): Promise<void>;
   done(): void;
+  /** the handler is finished: pending and later chunks are dropped */
+  release(): void;
 }
 
 /**
@@ -175,10 +187,14 @@ function peekInput(_dc: RTCDataChannel): PeekInput {
         yield slot.value;
       }
     } finally {
-      closed = true;
-      for (const s of slots.splice(0)) if (s.type === "value") s.taken();
+      release();
     }
   })();
+  function release(): void {
+    closed = true;
+    for (const s of slots.splice(0)) if (s.type === "value") s.taken();
+    wake?.();
+  }
   return {
     input,
     deliver(chunk: Uint8Array): Promise<void> {
@@ -193,5 +209,6 @@ function peekInput(_dc: RTCDataChannel): PeekInput {
       slots.push({ type: "done" });
       wake?.();
     },
+    release,
   };
 }

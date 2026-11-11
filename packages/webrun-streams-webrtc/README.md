@@ -144,6 +144,13 @@ Two limits keep memory bounded whatever the speed of either side:
 Both ends must speak `CREDIT`: a sender facing a peer that never returns
 credit stops after the first window.
 
+Each side keeps listening for `CREDIT` until both directions are done, so a
+reply larger than the window, sent after the input ended, still flows. When
+the responder's handler finishes (or throws) without reading all its input,
+the rest of the caller's upload is read and dropped, so the caller's upload
+finishes rather than waiting for credit. A caller that cancels, or gets an
+error, stops its own upload and closes the channel at once.
+
 ```
 caller                          responder
   | createDataChannel("webrun/…")  |  datachannel event -> handler(input)
