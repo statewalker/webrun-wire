@@ -8,12 +8,70 @@ import {
 const TYPE_DATA = 0x00;
 const TYPE_END = 0x01;
 const TYPE_ERROR = 0x02;
+const TYPE_CREDIT = 0x03;
 
 const DC_MTU = 16 * 1024; // conservative across browsers
+
+/**
+ * Send-side backpressure: a sender waits while the DataChannel holds more than this many bytes
+ * unsent (`bufferedAmount`), until it drains to {@link LOW_WATER_MARK} (`bufferedamountlow`).
+ * Without it a fast producer fills the browser's send queue (Chrome fails `send` past 16 MiB).
+ */
+export const HIGH_WATER_MARK = 1024 * 1024;
+export const LOW_WATER_MARK = 256 * 1024;
+/**
+ * Receive-side backpressure: a sender may have at most this many payload bytes outstanding that
+ * the receiving consumer has not yet pulled. The receiver returns credit (`CREDIT` frames) as its
+ * consumer pulls, half a window at a time. A DataChannel delivers every message as it arrives,
+ * whether or not anyone reads, so without credit a slow reader's queue grows without bound. The
+ * window is larger than the send buffer's high-water mark so a long round trip does not throttle a
+ * fast link: the buffer limit is what bounds the sender's memory.
+ */
+export const RECEIVE_WINDOW = 4 * 1024 * 1024;
 const FRAME_OVERHEAD = 1; // 1-byte type tag
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+/**
+ * Messages (and a close) that arrive on a channel before its stream starts listening. A generator
+ * runs only on its first `next()`, so without this a peer that answers at once (a handler that
+ * throws, a reply with no input to wait for) can be faster than our listener: its frames are
+ * dropped and the call hangs or reports a bare close.
+ */
+const held = new WeakMap<RTCDataChannel, { events: Event[]; listener: (ev: Event) => void }>();
+
+/**
+ * Channels this side answers (from `datachannel`). A finished call is closed by its caller only,
+ * once it has the responder's `END` or `ERROR`: a responder that closed right after sending them
+ * could lose them in flight (Chrome delivers the close first), turning an error into a bare close.
+ */
+const answering = new WeakSet<RTCDataChannel>();
+export function markAnswering(dc: RTCDataChannel): void {
+  answering.add(dc);
+}
+
+/** starts holding a channel's events until {@link duplexOverDataChannel} takes them */
+export function holdEvents(dc: RTCDataChannel): void {
+  if (held.has(dc)) return;
+  dc.binaryType = "arraybuffer";
+  const events: Event[] = [];
+  const listener = (ev: Event): void => {
+    events.push(ev);
+  };
+  dc.addEventListener("message", listener);
+  dc.addEventListener("close", listener);
+  held.set(dc, { events, listener });
+}
+
+function takeHeld(dc: RTCDataChannel): Event[] {
+  const h = held.get(dc);
+  if (!h) return [];
+  held.delete(dc);
+  dc.removeEventListener("message", h.listener);
+  dc.removeEventListener("close", h.listener);
+  return h.events;
+}
 
 /**
  * Drive one `Duplex` over one `RTCDataChannel`. The DataChannel hosts a tiny
@@ -23,7 +81,9 @@ const textDecoder = new TextDecoder();
  *
  * Types are `DATA` (0x00, body bytes), `END` (0x01, signals half-close — the
  * sender is done emitting; the channel stays open for the other direction),
- * and `ERROR` (0x02, followed by a serialised `Error`).
+ * `ERROR` (0x02, followed by a serialised `Error`) and `CREDIT` (0x03, a
+ * big-endian u32: payload bytes the receiver's consumer has pulled, which the
+ * sender may now send again; see {@link RECEIVE_WINDOW}).
  *
  * `RTCDataChannel` has no native half-close, so `END` is emitted by the
  * sender once its input iterator exhausts; the channel is only physically
@@ -46,8 +106,52 @@ async function* runStream(
   let peerEnded = false;
   let localEnded = false;
 
+  // flow control: what the peer still lets us send, and what our consumer has pulled
+  let credit = RECEIVE_WINDOW;
+  let pulled = 0;
+  let wakeSender: (() => void) | null = null;
+  const nudge = (): void => {
+    const w = wakeSender;
+    wakeSender = null;
+    w?.();
+  };
+  const stalled = (): Promise<void> =>
+    new Promise<void>((r) => {
+      wakeSender = r;
+    });
+  dc.bufferedAmountLowThreshold = LOW_WATER_MARK;
+  const sendRaw = (bytes: Uint8Array): void => {
+    (dc as unknown as { send: (data: Uint8Array) => void }).send(bytes);
+  };
+  /** set when this call is abandoned (cancelled, or the peer failed): the sender stops waiting */
+  let aborted = false;
+  /** waits for credit for `n` bytes and room in the send buffer; false once the call is over */
+  const room = async (n: number): Promise<boolean> => {
+    while (
+      !aborted &&
+      dc.readyState === "open" &&
+      (credit < n || dc.bufferedAmount > HIGH_WATER_MARK)
+    )
+      await stalled();
+    return !aborted && dc.readyState === "open";
+  };
+  /** returns credit for what our consumer pulled, half a window at a time */
+  const consumed = (n: number): void => {
+    pulled += n;
+    if (pulled < RECEIVE_WINDOW / 2 || dc.readyState !== "open") return;
+    const frame = new Uint8Array(5);
+    frame[0] = TYPE_CREDIT;
+    new DataView(frame.buffer).setUint32(1, pulled);
+    pulled = 0;
+    try {
+      sendRaw(frame);
+    } catch {
+      /* closing */
+    }
+  };
+
   const maybeClose = (): void => {
-    if (peerEnded && localEnded) {
+    if (peerEnded && localEnded && !answering.has(dc)) {
       try {
         dc.close();
       } catch {
@@ -74,6 +178,9 @@ async function* runStream(
       peerEnded = true;
       incoming.done();
       maybeClose();
+    } else if (type === TYPE_CREDIT && payload.byteLength >= 4) {
+      credit += new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0);
+      nudge();
     } else if (type === TYPE_ERROR) {
       let err: Error;
       try {
@@ -88,6 +195,7 @@ async function* runStream(
   };
 
   const onClose = (): void => {
+    nudge();
     if (!peerEnded) {
       incoming.done(new TransportClosedError());
       peerEnded = true;
@@ -96,16 +204,33 @@ async function* runStream(
 
   dc.addEventListener("message", onMessage);
   dc.addEventListener("close", onClose);
+  dc.addEventListener("bufferedamountlow", nudge);
+  // what arrived before we listened, in order
+  for (const ev of takeHeld(dc)) {
+    if (ev.type === "message") onMessage(ev as MessageEvent);
+    else onClose();
+  }
+  if (dc.readyState === "closed") onClose();
+  // The listeners stay until both halves are done: after the peer's END our own sending may still
+  // wait for the peer's CREDIT frames (a reply larger than the window, sent after the input ended).
+  let inboundFinished = false;
+  const detach = (): void => {
+    if (!inboundFinished || !localEnded) return;
+    dc.removeEventListener("message", onMessage);
+    dc.removeEventListener("close", onClose);
+    dc.removeEventListener("bufferedamountlow", nudge);
+  };
 
   // Outbound pump runs in parallel with inbound iteration.
   const outbound = (async () => {
     try {
       for await (const chunk of toChunks(DC_MTU - FRAME_OVERHEAD)(input)) {
-        if (dc.readyState !== "open") return;
+        if (!(await room(chunk.byteLength))) return;
+        credit -= chunk.byteLength;
         const framed = new Uint8Array(chunk.byteLength + 1);
         framed[0] = TYPE_DATA;
         framed.set(chunk, 1);
-        (dc as unknown as { send: (data: Uint8Array) => void }).send(framed);
+        sendRaw(framed);
       }
       if (dc.readyState === "open") {
         const end = new Uint8Array([TYPE_END]);
@@ -127,6 +252,7 @@ async function* runStream(
     } finally {
       localEnded = true;
       maybeClose();
+      detach();
     }
   })();
 
@@ -134,13 +260,15 @@ async function* runStream(
   try {
     for await (const chunk of incoming.iterate()) {
       yield chunk;
+      consumed(chunk.byteLength); // pulled: the peer may send that much again
     }
     inboundDrained = true;
   } finally {
-    dc.removeEventListener("message", onMessage);
-    dc.removeEventListener("close", onClose);
-    // Wait for outbound to settle so an early exit doesn't truncate in-flight
-    // sends — but ONLY on an early exit.
+    inboundFinished = true;
+    detach();
+    // On an early exit, stop the outbound pump (it may be waiting for credit
+    // the peer will never send now), close the channel, then let the pump
+    // settle — but ONLY on an early exit.
     //
     // Awaiting it unconditionally deadlocks a responder. `serve` feeds the
     // handler from the values this generator yields and closes the handler's
@@ -154,7 +282,8 @@ async function* runStream(
     // there is nothing of theirs left to truncate; outbound keeps running on
     // its own and `maybeClose` still closes the channel once both halves end.
     if (!inboundDrained) {
-      await outbound.catch(() => {});
+      aborted = true;
+      nudge();
       // The consumer walked away mid-response (`.return()` on the generator),
       // or the peer errored. Either way this call is over while the peer may
       // still be producing, and a DataChannel has no half-close to say so —
@@ -164,11 +293,14 @@ async function* runStream(
       // `onClose` then ends its inbound queue, which closes the handler's
       // input and runs the handler's `finally`. Without this, cancellation is
       // silently local and the handler leaks until the connection drops.
+      // The close comes before waiting on the pump: a pump stalled on credit
+      // would otherwise hold the cancellation back.
       try {
         dc.close();
       } catch {
         /* already closing */
       }
+      await outbound.catch(() => {});
     }
   }
 }

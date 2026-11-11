@@ -121,10 +121,42 @@ for await (const chunk of duplexOverDataChannel(dc, request())) {
 | 1 byte | rest of the message       |
 +--------+---------------------------+
 
-DATA  0x00  body bytes, at most 16 KiB - 1 per message
-END   0x01  this side has finished sending (half-close)
-ERROR 0x02  JSON of serializeError(err): message, stack, custom fields
+DATA   0x00  body bytes, at most 16 KiB - 1 per message
+END    0x01  this side has finished sending (half-close)
+ERROR  0x02  JSON of serializeError(err): message, stack, custom fields
+CREDIT 0x03  big-endian u32: payload bytes the receiver's consumer pulled
 ```
+
+### Flow control
+
+Two limits keep memory bounded whatever the speed of either side:
+
+- **Send buffer.** Before each `DATA` message the sender waits while the
+  channel holds more than `HIGH_WATER_MARK` (1 MiB) unsent
+  (`bufferedAmount`), until `bufferedamountlow` fires at `LOW_WATER_MARK`
+  (256 KiB).
+- **Receive window.** A sender may have at most `RECEIVE_WINDOW` (4 MiB) of
+  payload outstanding that the receiving consumer has not pulled. The receiver
+  returns credit with `CREDIT` frames as its consumer pulls, half a window at a
+  time. On the responder, the next chunk is pulled only once the handler took
+  the previous one, so a slow handler stalls the caller.
+
+Both ends must speak `CREDIT`: a sender facing a peer that never returns
+credit stops after the first window.
+
+Each side keeps listening for `CREDIT` until both directions are done, so a
+reply larger than the window, sent after the input ended, still flows. When
+the responder's handler finishes (or throws) without reading all its input,
+the rest of the caller's upload is read and dropped, so the caller's upload
+finishes rather than waiting for credit. A caller that cancels, or gets an
+error, stops its own upload and closes the channel at once.
+
+A finished call's channel is closed by the caller, once it has the
+responder's `END` or `ERROR`: a responder that closed right after sending them
+could lose them in flight. Each side also holds the frames that arrive before
+its stream starts listening, so a responder that answers at once (a handler
+that throws, a reply with no input to wait for) is not faster than the
+caller's listener.
 
 ```
 caller                          responder
@@ -180,11 +212,9 @@ is caught, so it does not become an unhandled rejection.
 
 ### Constraints
 
-- **No flow control in the adapter.** Outbound messages go to `dc.send` as
-  fast as `input` yields; `bufferedAmount` is not checked, and the inbound
-  queue is not bounded. Very large or fast bodies rely on the browser's send
-  buffer, which closes the channel when it overflows.
-- Conformance runs in Chromium through Playwright: `pnpm run test:browser`.
+- Conformance and the flow-control tests (100 MiB under the high-water mark;
+  a sleeping reader stalls the sender within the window) run in Chromium
+  through Playwright: `pnpm run test:browser`, also in CI.
   Under `pnpm test` (Node) the suite is registered as skipped, because Node
   has no `RTCPeerConnection`. L6's small window does not apply here (there is
   no `emulateMux`), so L6 is an integrity check.

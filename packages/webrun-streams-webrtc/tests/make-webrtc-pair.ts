@@ -54,11 +54,11 @@ function waitConnected(pc: RTCPeerConnection, label: string): Promise<void> {
 
 /**
  * `tuning` is accepted and ignored: this adapter does not use `emulateMux`.
- * It opens one `RTCDataChannel` per call and lets SCTP do the flow control,
- * so there is no advertised credit window to shrink. L6 therefore degrades to
- * an integrity check here — it proves the `Duplex` seam still holds under a
- * body many times any single frame, not that credit stalls and replenishes.
- * That distinction is stated in the conformance README.
+ * It opens one `RTCDataChannel` per call, with its own fixed credit window
+ * (`RECEIVE_WINDOW`) and send-buffer limit, so there is no window to shrink
+ * from outside. L6 therefore stays an integrity check here; the stalls and
+ * replenishment are tested in `backpressure.test.ts` and
+ * `flow-control-edges.test.ts`.
  */
 export const makeWebRtcPair: MakePair = async () => {
   const clientPc = new RTCPeerConnection({ iceServers: [] });

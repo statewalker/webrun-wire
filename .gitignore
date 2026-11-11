@@ -46,4 +46,5 @@ apps/p2p-demo/deploy/
 
 # vitest browser-mode failure debris
 .vitest-attachments/
+.vitest/
 **/tests/__screenshots__/
