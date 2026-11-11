@@ -1,3 +1,4 @@
+import type { FetchHandler } from "@statewalker/webrun-http-streams";
 import { errorMessage } from "../link/errors.js";
 import {
   connectHttpLink,
@@ -12,7 +13,7 @@ import type { WebSocketConnection } from "../ws/client.js";
 import { serveWebSocketUpgrade } from "../ws/upgrade.js";
 import { type ControlMessage, headerPairs } from "./protocol.js";
 
-export type FetchHandler = (request: Request) => Response | Promise<Response>;
+export type { FetchHandler };
 
 export interface HandlerEndpointOptions extends HttpLinkOptions {
   /** Asks whoever attaches this endpoint to do it again (its links died). */

@@ -1,7 +1,12 @@
 import { type Broker, type BrokerOptions, newBroker, type Unsubscribe } from "./broker.js";
 import { formatSseEvent } from "./sse.js";
 
-export type FetchHandler = (request: Request) => Promise<Response>;
+/**
+ * A handler: sync or async, as a Service Worker's or a Durable Object's `fetch`. The same type as
+ * `FetchHandler` in `@statewalker/webrun-http-streams` (a type test there keeps them identical),
+ * declared here so this package keeps zero runtime dependencies.
+ */
+export type FetchHandler = (request: Request) => Response | Promise<Response>;
 
 export interface PubSubOptions extends BrokerOptions {
   /**

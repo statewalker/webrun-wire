@@ -24,19 +24,21 @@
  */
 
 /**
- * A handler, in the only shape this package needs.
+ * A handler: sync or async, as a Service Worker's or a Durable Object's `fetch`.
  *
- * Declared here rather than imported: it is one line, and depending on another
- * package for it would give a proxy a dependency it has no other use for.
+ * The same type as `FetchHandler` in `@statewalker/webrun-http-streams` (a type
+ * test there keeps them identical). Declared here rather than imported: it is
+ * one line, and depending on another package for it would give a proxy a
+ * dependency it has no other use for.
  */
-export type FetchHandler = (request: Request) => Promise<Response>;
+export type FetchHandler = (request: Request) => Response | Promise<Response>;
 
 /** Marks this layer's OWN responses, so they are never mistaken for an upstream's. Same header the proxy already uses. */
 export const MARKER = "x-webrun-proxy";
 
 /**
  * An upstream is just a handler. That is the whole merge: a local service, a
- * remote origin and another peer are all `(Request) => Promise<Response>`.
+ * remote origin and another peer are all a `FetchHandler`.
  */
 export type Upstream = FetchHandler;
 

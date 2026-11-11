@@ -39,7 +39,14 @@ export interface SerializedHttpEnvelope<Options> {
   content: AsyncIterable<Uint8Array>;
 }
 
-export type HttpHandler = (request: Request) => Response | Promise<Response>;
+/**
+ * The handler type of webrun-wire: `(request) => Response | Promise<Response>`, sync or async, as a
+ * Service Worker's or a Durable Object's `fetch`. webrun-http-browser re-exports it;
+ * webrun-http-proxy and webrun-http-events declare the identical type to stay dependency-free.
+ */
+export type FetchHandler = (request: Request) => Response | Promise<Response>;
+/** @deprecated The same type as {@link FetchHandler}. */
+export type HttpHandler = FetchHandler;
 
 // Statuses that MUST NOT carry a body — `new Response(body, { status })` throws
 // for these (per the Fetch spec's "null body status" set). Exported so
