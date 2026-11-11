@@ -241,12 +241,6 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.5.15
-      '@statewalker/webrun-http-events':
-        specifier: workspace:^
-        version: link:../webrun-http-events
-      '@statewalker/webrun-http-proxy':
-        specifier: workspace:^
-        version: link:../webrun-http-proxy
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4

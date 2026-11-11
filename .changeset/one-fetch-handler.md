@@ -1,5 +1,5 @@
 ---
-"@statewalker/webrun-http-streams": minor
+"@statewalker/webrun-http-streams": patch
 "@statewalker/webrun-http-proxy": minor
 "@statewalker/webrun-http-events": minor
 "@statewalker/webrun-http-browser": patch

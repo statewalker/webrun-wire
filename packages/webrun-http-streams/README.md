@@ -5,7 +5,7 @@
 HTTP request/response over a `Duplex` from `@statewalker/webrun-streams`. A
 caller sends a standard `Request` (or a plain envelope plus body bytes) into a
 `Duplex` call and gets a `Response` back. A server wraps a
-`(Request) => Promise<Response>` handler as a `Duplex` that any transport
+`FetchHandler` (`(Request) => Response | Promise<Response>`) as a `Duplex` that any transport
 adapter can serve. The bytes on the `Duplex` are conforming HTTP/1.1 by
 default. The package also ships a pair of transport-agnostic stubs that move a
 structured-clonable envelope instead of bytes.
@@ -282,9 +282,9 @@ Check `err.name`, not `instanceof`; see
 | Export | What it is |
 | --- | --- |
 | `httpFetch`, `httpServe` | Data layer. Types: `HttpDataHandler`, `HttpDataHandlerResult`, `HttpDataOptions`, `HttpExchange`, `HttpFetchResult`; `EXCHANGE_ABANDONED_MESSAGE`. |
-| `fetchOverDuplex`, `serveFetchOverDuplex` | Fetch layer. |
+| `fetchOverDuplex`, `serveFetchOverDuplex` | Fetch layer. Type: `FetchHandler`, the handler type of webrun-wire (sync or async). |
 | `DuplexSiteBuilder`, `SiteHandler` | Site host over an adapter's `Serve<P>`. |
-| `newHttpClientStub`, `newHttpServerStub` | Transport-agnostic stubs. Types: `HttpHandler`, `SerializedHttpEnvelope`, `SerializedHttpRequest`, `SerializedHttpResponse`. |
+| `newHttpClientStub`, `newHttpServerStub` | Transport-agnostic stubs. Types: `HttpHandler` (deprecated alias of `FetchHandler`), `SerializedHttpEnvelope`, `SerializedHttpRequest`, `SerializedHttpResponse`. |
 | `defaultCodec`, `httpCodec`, `newHttpCodec`, `HttpCodecOptions` | HTTP/1.1 codec and the default sniffing codec. |
 | `jsonEnvelopeCodec`, `encodeMessage`, `decodeMessage` | JSON-envelope format. |
 | `newSniffingCodec`, `SniffingCodecOptions` | Build a write/accept combination. |

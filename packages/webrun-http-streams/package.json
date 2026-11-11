@@ -43,8 +43,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@statewalker/webrun-http-events": "workspace:^",
-    "@statewalker/webrun-http-proxy": "workspace:^",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",

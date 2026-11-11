@@ -39,7 +39,7 @@ pnpm add @statewalker/webrun-http-proxy
 | --- | --- |
 | `urlUpstream(init)` | Returns an `Upstream` that re-issues requests against `init.base`. |
 | `UrlUpstreamInit` | Its options (below). |
-| `Upstream`, `FetchHandler` | Both `(request: Request) => Promise<Response>`. |
+| `Upstream`, `FetchHandler` | Both `(request: Request) => Response \| Promise<Response>`: the same type as `FetchHandler` in `@statewalker/webrun-http-streams`, declared here to keep zero dependencies. |
 | `MARKER` | `"x-webrun-proxy"`, the header on responses this package makes itself. |
 
 | `UrlUpstreamInit` field | Default | Meaning |
