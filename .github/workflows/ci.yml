@@ -45,7 +45,8 @@ jobs:
         run: pnpm -r --if-present run typecheck:tests
 
   # The shared CI runs the Node suites only. webrun-http-browser's browser
-  # suites (ServiceWorkers, workers, relays, WebSockets) need real browsers:
+  # suites (ServiceWorkers, workers, relays, WebSockets) and webrun-streams-webrtc's
+  # (RTCPeerConnection) need real browsers:
   # Chromium and Firefox, installed by Playwright on the runner.
   browser:
     name: Browser tests (webrun-http-browser)
@@ -71,6 +72,10 @@ jobs:
 
       - name: Test
         run: pnpm --filter @statewalker/webrun-http-browser run test:browser
+
+      # RTCPeerConnection pairs in the page: conformance L0–L6 and DataChannel backpressure
+      - name: Test (webrun-streams-webrtc)
+        run: pnpm --filter @statewalker/webrun-streams-webrtc run test:browser
 
   # Releases to npm in three jobs: `version` opens the version pull request, `pack` packs what
   # npm lacks once it is merged, `publish` uploads the tarballs after a maintainer approves.

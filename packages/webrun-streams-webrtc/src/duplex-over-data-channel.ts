@@ -10,6 +10,11 @@ const TYPE_END = 0x01;
 const TYPE_ERROR = 0x02;
 
 const DC_MTU = 16 * 1024; // conservative across browsers
+
+/** (stub) */
+export const HIGH_WATER_MARK = 1024 * 1024;
+/** (stub) */
+export const RECEIVE_WINDOW = 1024 * 1024;
 const FRAME_OVERHEAD = 1; // 1-byte type tag
 
 const textEncoder = new TextEncoder();
