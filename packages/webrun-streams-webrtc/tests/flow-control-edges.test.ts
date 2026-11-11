@@ -94,13 +94,13 @@ if (isBrowser) {
           (async () => {
             while (!state.finalized) await new Promise((r) => setTimeout(r, 50));
           })(),
-          5_000,
+          20_000, // in-page SCTP can stall for seconds on a retransmit; the point is that it ends
           "upload finalized",
         );
       } finally {
         await pair.close();
       }
-    }, 30_000);
+    }, 45_000);
 
     it("cancelling a call whose upload is stalled returns promptly", async () => {
       const pair = await makeWebRtcPair();

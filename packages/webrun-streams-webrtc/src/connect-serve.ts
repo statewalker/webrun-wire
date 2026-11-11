@@ -1,5 +1,5 @@
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
-import { duplexOverDataChannel } from "./duplex-over-data-channel.js";
+import { duplexOverDataChannel, holdEvents, markAnswering } from "./duplex-over-data-channel.js";
 
 export interface WebRtcParams {
   /** Open `RTCPeerConnection`. Signalling, auth, and connection setup are the caller's responsibility. */
@@ -31,6 +31,7 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
     }
     const label = `webrun/${Date.now().toString(36)}/${(counter++).toString(36)}`;
     const dc = pc.createDataChannel(label);
+    holdEvents(dc); // the responder may answer before our stream starts listening
     open.add(dc);
     dc.addEventListener("close", () => open.delete(dc));
     return (async function* () {
@@ -62,6 +63,8 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
 export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
   const onChannel = (ev: RTCDataChannelEvent): void => {
     const dc = ev.channel;
+    holdEvents(dc);
+    markAnswering(dc); // the caller closes the channel once the call is over
     let inputFromPeer: PeekInput | null = null;
     void (async () => {
       await waitForOpen(dc);

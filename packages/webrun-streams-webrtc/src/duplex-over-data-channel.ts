@@ -34,6 +34,46 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /**
+ * Messages (and a close) that arrive on a channel before its stream starts listening. A generator
+ * runs only on its first `next()`, so without this a peer that answers at once (a handler that
+ * throws, a reply with no input to wait for) can be faster than our listener: its frames are
+ * dropped and the call hangs or reports a bare close.
+ */
+const held = new WeakMap<RTCDataChannel, { events: Event[]; listener: (ev: Event) => void }>();
+
+/**
+ * Channels this side answers (from `datachannel`). A finished call is closed by its caller only,
+ * once it has the responder's `END` or `ERROR`: a responder that closed right after sending them
+ * could lose them in flight (Chrome delivers the close first), turning an error into a bare close.
+ */
+const answering = new WeakSet<RTCDataChannel>();
+export function markAnswering(dc: RTCDataChannel): void {
+  answering.add(dc);
+}
+
+/** starts holding a channel's events until {@link duplexOverDataChannel} takes them */
+export function holdEvents(dc: RTCDataChannel): void {
+  if (held.has(dc)) return;
+  dc.binaryType = "arraybuffer";
+  const events: Event[] = [];
+  const listener = (ev: Event): void => {
+    events.push(ev);
+  };
+  dc.addEventListener("message", listener);
+  dc.addEventListener("close", listener);
+  held.set(dc, { events, listener });
+}
+
+function takeHeld(dc: RTCDataChannel): Event[] {
+  const h = held.get(dc);
+  if (!h) return [];
+  held.delete(dc);
+  dc.removeEventListener("message", h.listener);
+  dc.removeEventListener("close", h.listener);
+  return h.events;
+}
+
+/**
  * Drive one `Duplex` over one `RTCDataChannel`. The DataChannel hosts a tiny
  * in-band framing protocol:
  *
@@ -111,7 +151,7 @@ async function* runStream(
   };
 
   const maybeClose = (): void => {
-    if (peerEnded && localEnded) {
+    if (peerEnded && localEnded && !answering.has(dc)) {
       try {
         dc.close();
       } catch {
@@ -165,6 +205,12 @@ async function* runStream(
   dc.addEventListener("message", onMessage);
   dc.addEventListener("close", onClose);
   dc.addEventListener("bufferedamountlow", nudge);
+  // what arrived before we listened, in order
+  for (const ev of takeHeld(dc)) {
+    if (ev.type === "message") onMessage(ev as MessageEvent);
+    else onClose();
+  }
+  if (dc.readyState === "closed") onClose();
   // The listeners stay until both halves are done: after the peer's END our own sending may still
   // wait for the peer's CREDIT frames (a reply larger than the window, sent after the input ended).
   let inboundFinished = false;

@@ -151,6 +151,13 @@ the rest of the caller's upload is read and dropped, so the caller's upload
 finishes rather than waiting for credit. A caller that cancels, or gets an
 error, stops its own upload and closes the channel at once.
 
+A finished call's channel is closed by the caller, once it has the
+responder's `END` or `ERROR`: a responder that closed right after sending them
+could lose them in flight. Each side also holds the frames that arrive before
+its stream starts listening, so a responder that answers at once (a handler
+that throws, a reply with no input to wait for) is not faster than the
+caller's listener.
+
 ```
 caller                          responder
   | createDataChannel("webrun/…")  |  datachannel event -> handler(input)

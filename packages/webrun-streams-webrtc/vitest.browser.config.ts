@@ -33,6 +33,9 @@ export default {
   resolve: { alias },
   test: {
     include: ["tests/**/*.test.ts"],
+    // One file at a time: the files share one Chromium, and a 100 MiB transfer in one file starves
+    // another's peer connection past its timeouts (a timing artefact, not a protocol failure).
+    fileParallelism: false,
     browser: {
       enabled: true,
       headless: true,
