@@ -23,9 +23,11 @@ export const LOW_WATER_MARK = 256 * 1024;
  * Receive-side backpressure: a sender may have at most this many payload bytes outstanding that
  * the receiving consumer has not yet pulled. The receiver returns credit (`CREDIT` frames) as its
  * consumer pulls, half a window at a time. A DataChannel delivers every message as it arrives,
- * whether or not anyone reads, so without credit a slow reader's queue grows without bound.
+ * whether or not anyone reads, so without credit a slow reader's queue grows without bound. The
+ * window is larger than the send buffer's high-water mark so a long round trip does not throttle a
+ * fast link: the buffer limit is what bounds the sender's memory.
  */
-export const RECEIVE_WINDOW = 1024 * 1024;
+export const RECEIVE_WINDOW = 4 * 1024 * 1024;
 const FRAME_OVERHEAD = 1; // 1-byte type tag
 
 const textEncoder = new TextEncoder();

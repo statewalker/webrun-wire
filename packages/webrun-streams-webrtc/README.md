@@ -135,7 +135,7 @@ Two limits keep memory bounded whatever the speed of either side:
   channel holds more than `HIGH_WATER_MARK` (1 MiB) unsent
   (`bufferedAmount`), until `bufferedamountlow` fires at `LOW_WATER_MARK`
   (256 KiB).
-- **Receive window.** A sender may have at most `RECEIVE_WINDOW` (1 MiB) of
+- **Receive window.** A sender may have at most `RECEIVE_WINDOW` (4 MiB) of
   payload outstanding that the receiving consumer has not pulled. The receiver
   returns credit with `CREDIT` frames as its consumer pulls, half a window at a
   time. On the responder, the next chunk is pulled only once the handler took
