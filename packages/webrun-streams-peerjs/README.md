@@ -178,8 +178,8 @@ pnpm --filter @statewalker/webrun-streams-peerjs test           # reports it ski
 
 The `@statewalker/webrun-streams-conformance` suite runs in headless Chromium through Playwright,
 over the port stack (`overPipe` + `msgpackCodec`, with the pipe's 16 KiB-safe `maxMessageSize`, so
-L6's 256 KiB body crosses as chunks under the cross-browser frame limit). The pair ignores
-`PairTuning`, as every port-stack pair does, so L6 is an integrity check until D17 redefines it.
+L6's 256 KiB body crosses as chunks under the cross-browser frame limit). L6 asserts the port
+stack's bound: a consumer that stops reading lets the producer get at most 8 KiB ahead (measured 0).
 A Vitest global setup starts the reference broker (the [`peer`](https://www.npmjs.com/package/peer)
 package's `PeerServer`) on a loopback port in a child process, so runs need no internet access.
 The broker runs out of process because, hosted in-process, it keeps the test run alive after the

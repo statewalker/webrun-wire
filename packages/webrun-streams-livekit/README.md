@@ -177,8 +177,8 @@ pnpm --filter @statewalker/webrun-streams-livekit test:browser
 ```
 
 This runs the `@statewalker/webrun-streams-conformance` suite in headless Chromium through
-Playwright, over the port stack (`overPipe` + `msgpackCodec`). The pair ignores `PairTuning`, as
-every port-stack pair does, so L6 is an integrity check until D17 redefines it. A Vitest global
+Playwright, over the port stack (`overPipe` + `msgpackCodec`). L6 asserts the port stack's bound: a
+consumer that stops reading lets the producer get at most 8 KiB (two chunks) ahead. A Vitest global
 setup starts `livekit-server --dev` on a loopback port and mints the two access tokens with
 `livekit-server-sdk`, so the `livekit-server` binary must be on `PATH`. Without it the setup fails
 with `livekit-server exited early (code …). Install it from

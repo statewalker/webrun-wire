@@ -216,8 +216,9 @@ is caught, so it does not become an unhandled rejection.
   a sleeping reader stalls the sender within the window) run in Chromium
   through Playwright: `pnpm run test:browser`, also in CI.
   Under `pnpm test` (Node) the suite is registered as skipped, because Node
-  has no `RTCPeerConnection`. L6's small window does not apply here (the
-  pair has no credit window to shrink), so L6 is an integrity check.
+  has no `RTCPeerConnection`. L6 asserts the per-channel window: a consumer
+  that stops reading lets the producer get at most `RECEIVE_WINDOW` (4 MiB)
+  ahead, measured at exactly that.
 
 ### Dependencies
 

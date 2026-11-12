@@ -338,8 +338,17 @@ its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
 each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
-`skipHugeBody`, and L6's small window does not apply (the pair has no credit
-window to shrink), so L6 is an integrity check.
+`skipHugeBody`.
+
+**L6 found no bound on run-ahead** (spec D17). A consumer that stops reading
+lets the producer get 22-24 MiB ahead within half a second, in either direction,
+until libp2p's 4 MiB read buffer (`maxReadBufferLength`) aborts the stream and
+the call fails with `PeerGoneError`. So a slow consumer is not throttled: its
+stream is killed. Pausing the stream while the consumer holds a chunk (libp2p
+3's `pause()` / `resume()`, which yamux honours by withholding window updates)
+and capping yamux's `maxStreamWindowSize` at 1 MiB did not bound it, so the
+buffering is elsewhere in the stack. The pair declares no `runAheadBytes`
+until it is found, and L6 checks only that a stalled transfer completes.
 
 ### Dependencies
 
