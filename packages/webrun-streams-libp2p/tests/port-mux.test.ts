@@ -8,6 +8,7 @@ import { collectBytes } from "@statewalker/webrun-streams";
 import { describeDuplexAdapter, type MakePair } from "@statewalker/webrun-streams-conformance";
 import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it } from "vitest";
+import { PeerGoneError } from "../src/duplex-over-stream.js";
 import { messageTargetOverStream } from "../src/message-target-over-stream.js";
 import { libp2pPortMux } from "../src/port-mux.js";
 
@@ -238,10 +239,108 @@ describe("libp2pPortMux (mutants)", () => {
     return libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL });
   }
 
-  it("a port the serving side refuses is aborted: the opener's close signal aborts", async () => {
+  it("a port the serving side refuses is aborted: the opener's close signal aborts, as a PeerGoneError", async () => {
     const mux = await pair(() => false);
     const port = await mux.openPort();
     await expect.poll(() => port.closeSignal.aborted, { timeout: 5000 }).toBe(true);
+    expect(port.closeSignal.reason).toBeInstanceOf(PeerGoneError);
+  });
+
+  it("(review) a call on a refused port fails instead of hanging", async () => {
+    const server = await createNode();
+    const client = await createNode();
+    const addr = server.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    await libp2pPortMux({ node: server, codec, protocol: PROTOCOL, onPort: () => false });
+    const { call, close } = await connect({
+      mux: overPorts(() => libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL })),
+    });
+    const failure = await Promise.race([
+      collectBytes(call([new Uint8Array([1])])).catch((e) => e as Error),
+      new Promise((r) => setTimeout(() => r("hung"), 4000)),
+    ]);
+    expect(failure).toBeInstanceOf(Error);
+    await close();
+  });
+
+  it("(review) 40 calls at once over native ports all complete: the stream limits allow them", async () => {
+    const server = await createNode();
+    const client = await createNode();
+    const addr = server.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started = 0;
+    await serve(
+      {
+        mux: overPorts((onPort) =>
+          libp2pPortMux({ node: server, codec, protocol: PROTOCOL, onPort }),
+        ),
+      },
+      async function* (input) {
+        started++;
+        for await (const chunk of input) {
+          await gate;
+          yield chunk;
+        }
+      },
+    );
+    const { call, close } = await connect({
+      mux: overPorts(() => libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL })),
+    });
+    const calls = Array.from({ length: 40 }, (_, i) => collectBytes(call([new Uint8Array([i])])));
+    await expect.poll(() => started, { timeout: 10_000 }).toBe(40);
+    release();
+    const out = await Promise.all(calls);
+    expect(out.map((b) => b[0])).toEqual(Array.from({ length: 40 }, (_, i) => i));
+    await close();
+  }, 30_000);
+
+  it("(review) a frame the codec cannot decode fails the port instead of vanishing", async () => {
+    const server = await createNode();
+    const client = await createNode();
+    const addr = server.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    let served: { closeSignal: AbortSignal } | undefined;
+    await libp2pPortMux({
+      node: server,
+      codec,
+      protocol: PROTOCOL,
+      onPort: (port) => {
+        served = port;
+        port.addEventListener("message", () => {});
+        return true;
+      },
+    });
+    // a peer speaking another codec: 0xc1 is a byte msgpack never uses
+    const { target } = messageTargetOverStream(await client.dialProtocol(addr, PROTOCOL));
+    target.postMessage(new Uint8Array([0xc1]));
+    await expect.poll(() => served?.closeSignal.aborted, { timeout: 5000 }).toBe(true);
+  });
+
+  it("openPort's signal listener is removed when the port closes", async () => {
+    const mux = await pair(() => true);
+    const life = new AbortController();
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const add = life.signal.addEventListener.bind(life.signal);
+    const remove = life.signal.removeEventListener.bind(life.signal);
+    life.signal.addEventListener = ((t: string, l: EventListener, o?: unknown) => {
+      added.push(l);
+      add(t, l, o as AddEventListenerOptions);
+    }) as typeof life.signal.addEventListener;
+    life.signal.removeEventListener = ((t: string, l: EventListener, o?: unknown) => {
+      removed.push(l);
+      remove(t, l, o as EventListenerOptions);
+    }) as typeof life.signal.removeEventListener;
+    for (let i = 0; i < 5; i++) {
+      const p = await mux.openPort(undefined, { signal: life.signal });
+      await p.close();
+    }
+    expect(added.length).toBeGreaterThan(0);
+    expect(removed.length).toBe(added.length);
   });
 
   it("25 ports opened at once on a fresh connection all work (the early-stream gate: yamux allows 10 early streams)", async () => {
