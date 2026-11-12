@@ -1,5 +1,30 @@
 # @statewalker/webrun-streams-peerjs
 
+## 0.3.0
+
+### Minor Changes
+
+- e5e180b: **Breaking: `emulateMux` is removed (Plan C3).** Every transport now runs `webrun-rpc`'s port stack. Each adapter gives a pipe (`messageTargetOver…`), `overPipe` with `msgpackCodec` invents a port per call on it, and `webrun-rpc`'s `connect` / `serve` run one call per port. On that stack a producer stays at most one chunk ahead of its consumer; `emulateMux` buffered up to its 8 MiB window. The wire format changes, so both ends must upgrade together.
+  
+  - `webrun-streams`: `emulateMux`, `EmulateMuxOptions` and `ByteChannel` are gone. `newCreditLedger` / `newCreditGrantor` stay exported, dormant, as the mechanism for per-stream windowing (spec D13).
+  - `webrun-streams-ws`, `-peerjs`, `-livekit`: the `emulateMux`-based `connect` / `serve` and `byteChannelFromWebSocket` / `byteChannelFromPeerJs` / `byteChannelFromLiveKit` are gone. Use `messageTargetOverWebSocket` / `messageTargetOverPeerJs` / `messageTargetOverLiveKit` with `overPipe` (see each README). None of the three has a runtime dependency left.
+  - `webrun-rpc`: `byteChannelFromMessagePort` is gone; a `MessagePort` goes to `overPipe` directly.
+  - `webrun-streams-signaling`: `ByteChannel` is now declared here, with the same shape, and the package has no runtime dependency. Import the type from this package instead of `webrun-streams`. New `messageTargetOverByteChannel(channel)` runs the port stack over a channel this package hands back, reporting 16 KiB − 256 as `maxMessageSize`.
+  - `webrun-streams-conformance`: comments only. `PairTuning` is unchanged here, and every pair now ignores it until D17 redefines L6.
+  - `webrun-http-streams`: comments only. Its peer-error slot test now runs on the port stack.
+  
+  `webrun-streams-signaling` also fixes `byteChannelFromRoom`, which never ended. It now closes when the room disconnects, when its participant leaves, or when a reliable publish fails, and it ignores packets that carry no participant. Before this, anything run over it (now the port stack) hung when the other end went away.
+
+### Patch Changes
+
+- 3166c3b: New `messageTargetOverPeerJs(conn)` and `messageTargetOverLiveKit(room, peerIdentity)`: a raw PeerJS connection, or one LiveKit participant, as a pipe of bytes for `webrun-rpc`'s port stack (Plan C2). Each returns `{ target, signal, maxMessageSize }`. `target` is a `MessageTarget` with `bufferedAmount` and `whenDrained()`. `signal` aborts when the transport goes. `maxMessageSize` is the payload ceiling to give `overPipe`: 16 KiB − 256 for PeerJS, 12 KiB for LiveKit.
+  
+  PeerJS's ceiling was measured first, as the spec required. Between two Chromiums, 256 KiB arrives and one byte more arrives as nothing, with the connection silently closed. Firefox to Chrome cuts off at 16 KiB. So a post past `maxFrameBytes` (16 KiB) ends the pipe with a `RangeError` rather than vanishing. The connection must be open, raw and reliable, and `close()` flushes before closing.
+  
+  LiveKit packets carry their own topic. Ending a pipe on one side sends a goodbye that ends the peer's pipe, because the room stays connected. The packet cap is livekit-client's own 64,000 bytes.
+  
+  `webrun-rpc`: `duplexOverPort` fits the error a stream ends with to `maxMessageSize` before sending it whole. In order, it drops the stack, then the largest extra fields, then the message's tail, and marks the error `truncated: true`. Before this, a large error message, or an error carrying an HTTP body, went out as one oversized message, which a transport with a ceiling drops or dies on.
+
 ## 0.2.4
 
 ### Patch Changes

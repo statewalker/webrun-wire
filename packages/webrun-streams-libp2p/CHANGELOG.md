@@ -1,5 +1,33 @@
 # @statewalker/webrun-streams-libp2p
 
+## 0.3.0
+
+### Minor Changes
+
+- 35a41ba: `connect` / `serve` bound run-ahead past a stalled consumer: the inbound side reads through a
+  queue that pauses the stream past `readHighWaterBytes` (default 64 KiB; yamux then withholds
+  window updates), and `serve` waits for the handler to read its input queue down before reading
+  more (input a handler never started to read is dropped once its output ended). Run-ahead is at
+  most two of the receiving node's yamux windows plus about 256 KiB (2.00 MiB measured with
+  `streamOptions.maxStreamWindowSize: 1 MiB`). A paused stream raises `maxReadBufferLength` to its
+  window so yamux's default 16 MiB window no longer kills a slow consumer's stream; muxers that do
+  not expose a window are read as before. New option
+  `readHighWaterBytes` on `connect`, `serve` and `serveConnections`.
+
+### Patch Changes
+
+- 9ed3bc7: New `libp2pPortMux(options)` in `webrun-streams-libp2p`: native MessagePorts over libp2p. Each port is its own libp2p stream, multiplexed by yamux, framed by `messageTargetOverStream` and encoded by a value codec (`{ encode: serialize, decode: deserialize }` from `webrun-msgpack`). It is a `webrun-rpc` `PortMux` by shape: pass it to `overPorts`, and `webrun-rpc`'s `connect` / `serve` run each call on its own stream. The port stack's backpressure keeps a producer within one chunk of a consumer that stopped reading. With libp2p's own `connect` / `serve`, a producer gets tens of megabytes ahead and the stream is then aborted.
+  
+  Native ports and emulated ports (`overPipe` on one `messageTargetOverStream`) both pass the conformance suite with L6 at a one-chunk bound. A port carries `closeSignal`, so a call on a dead stream fails. Ports reuse `connect()`'s early-stream gate. The stream limits default to 1024, because every concurrent call is a stream and libp2p's own default of 32 would reset the 33rd. A refused port is aborted on both ends, and a call on it fails. An undecodable frame fails the port. The serving side gets `{ remotePeer, connection }`.
+  
+  `messageTargetOverStream` now aborts its `signal` for a stream that ended before it was attached, for example a peer that reset the stream during protocol negotiation. Before, that signal never aborted; it now aborts with `PeerGoneError`. Its target also carries `closeSignal`.
+  
+  `webrun-rpc`: `MessageTarget` gains the optional `closeSignal`, and `getPortCloseSignal` returns it when no signal was registered with `setPortCloseSignal`. A transport adapter can now supply a port's close signal by shape, without importing `webrun-rpc`.
+  
+  `webrun-rpc` also fixes a stream-tier bug. A port whose close signal had already aborted when `duplexOverPort` or `serveDuplexOverPort` got it left the stream waiting forever, because an `abort` listener added to an aborted signal never fires. A call on such a port now fails at once.
+- Updated dependencies [e5e180b]
+  - @statewalker/webrun-streams@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
