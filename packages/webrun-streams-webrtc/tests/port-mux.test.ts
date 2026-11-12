@@ -279,6 +279,7 @@ if (isBrowser) {
       let rawCalls = 0;
       await rawServe({ pc: serverPc }, async function* () {
         rawCalls++;
+        yield new Uint8Array(0);
       });
       await webrtcPortMux({
         pc: serverPc,
