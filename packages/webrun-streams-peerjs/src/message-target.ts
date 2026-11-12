@@ -25,6 +25,12 @@ export const DEFAULT_MAX_MESSAGE_SIZE = DEFAULT_MAX_FRAME_BYTES - FRAMING_MARGIN
 
 /** How often `whenDrained` looks: neither PeerJS's queue nor `bufferedAmount` reports emptying. */
 const DRAIN_POLL_MS = 5;
+/**
+ * `whenDrained` resolves once PeerJS's own queue is empty and the data
+ * channel's `bufferedAmount` is at most this: the channel can take more.
+ * Waiting for zero would pause a sender that waits before every frame.
+ */
+export const DRAIN_LOW_WATER = 256 * 1024;
 
 export interface MessageTargetOverPeerJsOptions {
   /**
@@ -52,7 +58,7 @@ export interface PeerJsMessageTarget {
     close(): Promise<void>;
     /** The data channel's `bufferedAmount`. */
     readonly bufferedAmount: number;
-    /** Resolves once PeerJS's own queue and the data channel have written everything out, or the pipe ended. */
+    /** Resolves once PeerJS's own queue is empty and `bufferedAmount` is at most {@link DRAIN_LOW_WATER}, or the pipe ended. */
     whenDrained(): Promise<void>;
   };
   /**
@@ -77,8 +83,8 @@ export interface PeerJsMessageTarget {
  *
  * The connection must use `serialization: "raw"` (PeerJS hands each message to
  * the data channel unchanged) and should be `reliable`. Inbound messages arrive
- * as `Uint8Array` copies; a `Blob` is not expected on a raw connection and is
- * dropped, since reading it is asynchronous and would reorder messages.
+ * as `Uint8Array` copies. Anything else (a `Blob`, a string) ends the pipe
+ * with a `TypeError`: dropping it would lose an envelope and hang its call.
  */
 export function messageTargetOverPeerJs(
   conn: DataConnection,
@@ -102,7 +108,16 @@ export function messageTargetOverPeerJs(
   const onData = (data: unknown): void => {
     if (life.signal.aborted) return;
     const bytes = copyBytes(data);
-    if (!bytes) return;
+    if (!bytes) {
+      // Dropping it would lose a multiplexer envelope and hang its call: fail loudly.
+      end(
+        new TypeError(
+          `webrun-streams-peerjs: a message arrived as ${Object.prototype.toString.call(data)}, not bytes`,
+        ),
+      );
+      closeConn();
+      return;
+    }
     const event = new MessageEvent("message", { data: bytes });
     for (const listener of [...listeners]) {
       try {
@@ -174,9 +189,10 @@ export function messageTargetOverPeerJs(
         return new Promise<void>((resolve) => {
           const check = (): void => {
             const idle =
-              !(internals.bufferSize ?? 0) && !(internals.dataChannel?.bufferedAmount ?? 0);
+              !(internals.bufferSize ?? 0) &&
+              (internals.dataChannel?.bufferedAmount ?? 0) <= DRAIN_LOW_WATER;
             if (life.signal.aborted || idle) resolve();
-            else setTimeout(check, DRAIN_POLL_MS);
+            else (setTimeout(check, DRAIN_POLL_MS) as { unref?: () => void }).unref?.();
           };
           check();
         });

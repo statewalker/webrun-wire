@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MAX_FRAME_BYTES,
   DEFAULT_MAX_MESSAGE_SIZE,
+  DRAIN_LOW_WATER,
   messageTargetOverPeerJs,
 } from "../src/message-target.js";
 
@@ -59,6 +60,14 @@ describe("messageTargetOverPeerJs", () => {
     expect(got.every((g) => g instanceof Uint8Array)).toBe(true);
   });
 
+  it("inbound data that is not bytes ends the pipe loudly: a dropped envelope would hang its call", () => {
+    const { conn, signal } = make();
+    conn.emit("data", "a string");
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBeInstanceOf(TypeError);
+    expect(conn.open).toBe(false);
+  });
+
   it("sends bytes as one message each and refuses anything else", () => {
     const { conn, target } = make();
     target.postMessage(new Uint8Array([1, 2]));
@@ -106,11 +115,13 @@ describe("messageTargetOverPeerJs", () => {
     expect(signal.aborted).toBe(true);
   });
 
-  it("bufferedAmount is the data channel's; whenDrained waits for it and PeerJS's own queue", async () => {
+  it("bufferedAmount is the data channel's; whenDrained waits for PeerJS's queue and the low-water mark", async () => {
     const { conn, target } = make();
-    conn.dataChannel.bufferedAmount = 5000;
+    conn.dataChannel.bufferedAmount = DRAIN_LOW_WATER;
+    await target.whenDrained(); // at the mark, with nothing queued: it can take more
+    conn.dataChannel.bufferedAmount = DRAIN_LOW_WATER + 5000;
     conn.bufferSize = 2;
-    expect(target.bufferedAmount).toBe(5000);
+    expect(target.bufferedAmount).toBe(DRAIN_LOW_WATER + 5000);
     let drained = false;
     const p = target.whenDrained().then(() => {
       drained = true;
@@ -120,7 +131,7 @@ describe("messageTargetOverPeerJs", () => {
     conn.bufferSize = 0;
     await new Promise((r) => setTimeout(r, 30));
     expect(drained).toBe(false);
-    conn.dataChannel.bufferedAmount = 0;
+    conn.dataChannel.bufferedAmount = 1000;
     await p;
     expect(drained).toBe(true);
   });
