@@ -1,5 +1,6 @@
-import { fromReadableStream, toReadableStream } from "@statewalker/webrun-streams";
+import { toReadableStream } from "@statewalker/webrun-streams";
 import { discard } from "./bytes.js";
+import { readerIterator } from "./reader-iterator.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
 export interface SerializedHttpRequest {
@@ -95,7 +96,9 @@ export function newHttpClientStub(
     if (request.body != null) {
       // The streaming path stays first and unconditional: a runtime that has
       // request streams never reaches the fallback, and never buffers an upload.
-      content = fromReadableStream(request.body as ReadableStream<Uint8Array>);
+      // `readerIterator`, not a generator: the transport's `return()` cancels an idle upload at
+      // once instead of waiting behind the read in flight for a next chunk.
+      content = readerIterator(request.body as ReadableStream<Uint8Array>);
     } else if (!supportsRequestStreams()) {
       // Firefox. Without `request.body` there is nothing to stream from, so the
       // only way to see the payload at all is to buffer the whole of it, and
@@ -198,8 +201,10 @@ export function newHttpServerStub(
       statusText: response.statusText,
       headers: Object.fromEntries([...response.headers]),
     };
+    // `readerIterator`, not a generator: the transport's `return()` cancels an idle body (an SSE
+    // stream between events) at once instead of waiting behind the read in flight.
     const responseContent = response.body
-      ? fromReadableStream(response.body as ReadableStream<Uint8Array>)
+      ? readerIterator(response.body as ReadableStream<Uint8Array>)
       : (async function* () {})();
     return { options: responseOptions, content: responseContent };
   };

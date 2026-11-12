@@ -4,6 +4,7 @@ import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { type FetchHandler, NULL_BODY_STATUSES } from "./http-stubs.js";
 import type { ByteSource } from "./message.js";
+import { readerIterator } from "./reader-iterator.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
 /**
@@ -35,57 +36,12 @@ function headersToArray(headers: Headers): [string, string][] {
   return out;
 }
 
-/**
- * `stream` as an async iterable, read through one reader. Left early — `return()`, `throw()`,
- * a failure downstream — the stream is cancelled; read to its end, it is not.
- *
- * `signal` cancels it at once, with the signal's reason, whatever the iteration is doing. That
- * is the only way to reach a read in flight: the generator's own `return()` is queued behind the
- * `next()` that waits on `reader.read()`, and a stream with no chunk pending (an SSE stream
- * between events, a long poll) settles that read only with its next chunk, which may be never.
- * `reader.cancel(reason)` settles it now, and the iteration then fails with the reason rather
- * than ending: a body cut short must not read as complete (the chunked encoder would write its
- * terminator). The listener is added once the iteration starts and removed however it ends.
- */
-async function* readableToAsyncIterable(
+/** `stream` as an async iterable that `signal` tears down at once: see {@link readerIterator}. */
+function readableToAsyncIterable(
   stream: ReadableStream<Uint8Array> | null | undefined,
   signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let cancelled: { reason: unknown; done: Promise<void> } | undefined;
-  const cancel = (reason?: unknown): Promise<void> => {
-    cancelled ??= { reason, done: reader.cancel(reason).catch(() => {}) };
-    return cancelled.done;
-  };
-  const failIfCancelled = () => {
-    if (cancelled) throw cancelled.reason;
-  };
-  // The signal's own reason, as is: a consumer that tore the iteration down knows it as its own.
-  const onAbort = () => void cancel((signal as unknown as { reason?: unknown }).reason);
-  let consumed = false;
-  try {
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener("abort", onAbort, { once: true });
-    while (true) {
-      failIfCancelled();
-      const { done, value } = await reader.read();
-      failIfCancelled();
-      if (done) {
-        consumed = true;
-        return;
-      }
-      if (value) yield value;
-    }
-  } finally {
-    signal?.removeEventListener("abort", onAbort);
-    if (!consumed) await cancel();
-    try {
-      reader.releaseLock();
-    } catch {
-      /* ignore */
-    }
-  }
+): AsyncIterable<Uint8Array> | undefined {
+  return stream ? readerIterator(stream, signal) : undefined;
 }
 
 /**
@@ -285,7 +241,9 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
       env.method === "OPTIONS" ||
       NULL_BODY_STATUSES.has(response.status)
     ) {
-      await response.body?.cancel();
+      // Started, not awaited: a tee branch's cancel (`response.clone()`) settles only once the
+      // other branch is cancelled too, which may be never.
+      void response.body?.cancel().catch(() => {});
       return { envelope: respEnv, body: undefined, settled };
     }
     return {
@@ -293,12 +251,11 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
       // An abandoned exchange cancels the body at once, with the signal's reason: the transport's
       // `return()` is queued behind the read in flight, which an idle body (an SSE stream between
       // events) answers only with its next chunk.
-      body: response.body ? readableToAsyncIterable(response.body, exchange?.signal) : undefined,
+      body: readableToAsyncIterable(response.body, exchange?.signal),
       // A body the codec never started reading has no reader to cancel
-      // through; cancel the stream itself. Once read, it is cancelled or
-      // closed already and this does nothing more.
-      release: () =>
-        response.body?.cancel((exchange?.signal as { reason?: unknown } | undefined)?.reason),
+      // through; cancel the stream itself. Once read, it is locked and this
+      // rejects, harmlessly: the iterator's own cancellation has run.
+      release: () => response.body?.cancel(exchange?.signal.reason),
       settled,
     };
   }, options);

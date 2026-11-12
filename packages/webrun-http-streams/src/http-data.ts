@@ -462,6 +462,9 @@ function abortingOnReturn<T>(
     abandoned.abort(reason);
   };
   const fromAbandon = (error: unknown): IteratorResult<T> => {
+    // By identity: `throw("x")` aborts with the primitive "x", so a failure of the generator's
+    // own that happens to be an identical primitive is taken for the abandonment and settles as
+    // done too. Harmless: it can only happen once the consumer has left, so nobody is told less.
     if (abandoned.signal.aborted && error === abandoned.signal.reason) {
       return { done: true, value: undefined };
     }
