@@ -5,3 +5,10 @@ export {
   type ServePeerJsParams,
   serve,
 } from "./connect-serve.js";
+export {
+  DEFAULT_MAX_FRAME_BYTES,
+  DEFAULT_MAX_MESSAGE_SIZE,
+  type MessageTargetOverPeerJsOptions,
+  messageTargetOverPeerJs,
+  type PeerJsMessageTarget,
+} from "./message-target.js";
