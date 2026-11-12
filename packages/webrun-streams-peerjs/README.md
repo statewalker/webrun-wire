@@ -37,6 +37,8 @@ mux framing does not survive. The adapter checks and throws
 | `ConnectPeerJsParams` | `{ conn: DataConnection; mux?: EmulateMuxOptions }`. |
 | `ServePeerJsParams` | `{ peer: Peer; mux?: EmulateMuxOptions }`. |
 | `byteChannelFromPeerJs(conn)` | The `ByteChannel` both use, for driving `emulateMux` yourself. |
+| `messageTargetOverPeerJs(conn, options?)` | **The port stack (Plan C2).** One open raw connection as `{ target, signal, maxMessageSize }`: a `MessageTarget` of bytes (one data channel message each) with `bufferedAmount` / `whenDrained()`, a signal that aborts when the connection closes or fails, and the payload ceiling to give `overPipe`. See below. |
+| `DEFAULT_MAX_FRAME_BYTES`, `DEFAULT_MAX_MESSAGE_SIZE`, `DRAIN_LOW_WATER` | 16 KiB, 16 KiB − 256, 256 KiB: the defaults of the above. |
 
 `mux` is forwarded to `emulateMux` (`mtu`, `maxStreamBuffer`, `maxStreams`, with `webrun-streams`'
 defaults: 64 KiB, 8 MiB, 256). `side` is fixed by the function you call — `"initiator"` for
@@ -92,6 +94,44 @@ import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
 
 const response = await fetchOverDuplex(call, new Request("http://peer/api/todo"));
 ```
+
+### The port stack over a connection
+
+`connect` / `serve` above run `emulateMux`, which goes away in Plan C3. Its
+replacement is `webrun-rpc`'s port stack: the connection is one pipe, `overPipe`
+invents a port per call, and a producer stays at most one chunk ahead of its
+consumer.
+
+```ts
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { connect, overPipe } from "@statewalker/webrun-rpc";
+import { messageTargetOverPeerJs } from "@statewalker/webrun-streams-peerjs";
+
+const conn = peer.connect(remoteId, { serialization: "raw", reliable: true });
+// ...once conn is open:
+const { target, signal, maxMessageSize } = messageTargetOverPeerJs(conn);
+const { call, close } = await connect({
+  mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal, maxMessageSize }),
+});
+```
+
+The responder does the same per inbound connection with `side: "responder"` and
+`webrun-rpc`'s `serve`. Pass all three: `signal` closes the multiplexer when the
+connection dies, and `maxMessageSize` chunks bodies under the frame limit.
+
+**The message ceiling (measured).** PeerJS hands a raw message to the data
+channel unchanged. Between two Chromiums a message of 262,143 bytes arrives; one
+of 262,145 arrives as nothing, with no throw and no error event, and the
+connection silently closes (`tests/message-ceiling.test.ts`, `test:browser`).
+Firefox to Chrome cuts off at 16,384, as PeerJS itself records. So the pipe
+defaults to `maxFrameBytes` 16 KiB, reports `maxMessageSize` 256 bytes under it
+(the port stack's framing adds up to 134), and a post past `maxFrameBytes` ends
+the pipe with a `RangeError` instead of vanishing. Raise `maxFrameBytes` only
+for peers known to allow more.
+
+Inbound data that is not bytes ends the pipe with a `TypeError`; dropping it
+would lose an envelope and hang its call. `whenDrained()` resolves once PeerJS's
+own queue is empty and `bufferedAmount` is at most 256 KiB.
 
 ### Driving the mux yourself
 
@@ -149,13 +189,19 @@ package's `PeerServer`) on a loopback port in a child process, so runs need no i
 The broker runs out of process because, hosted in-process, it keeps the test run alive after the
 last test: its `close()` waits on the browser's WebSockets and it holds client-expiry timers with
 no public way to clear them. Under plain `pnpm test` (Node) the suite is skipped: the full PeerJS
-handshake hangs there.
+handshake hangs there. The browser run includes the suite a second time over
+the port stack (`overPipe` + `msgpackCodec`), where L6 is an integrity check
+until D17, and the message-ceiling measurement. `message-target.test.ts` runs in
+Node against a structural fake connection and pins the pipe's contract.
 
 ### Dependencies
 
 - `@statewalker/webrun-streams` (runtime): the `Duplex` / `Connect` / `Serve` / `ByteChannel`
   types and `emulateMux`.
 - `peerjs` (peer): you supply and own the `Peer`.
+- `messageTargetOverPeerJs` imports nothing from this repository: its target is a `MessageTarget`
+  by shape. `@statewalker/webrun-rpc` and `@statewalker/webrun-msgpack` are dev dependencies of
+  the tests.
 - Dev only: `peer` (the local broker), `@vitest/browser-playwright` and `playwright` (the browser
   run), `@statewalker/webrun-streams-conformance` (the suite).
 
