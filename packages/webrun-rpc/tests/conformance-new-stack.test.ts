@@ -18,9 +18,8 @@ import {
  * is no window to shrink — so for this pair **L6 is an integrity check only**:
  * its green says the body round-trips, and says nothing at all about flow
  * control. That is not an oversight. L6's redefinition and the `PairTuning`
- * reshape are spec D17, sequenced into Plan C because five adapters still run
- * L6 against `emulateMux`, where the credit window is real and the level does
- * cover it.
+ * reshape are spec D17, the step after `emulateMux` (the last adapter with a
+ * real credit window under L6) was removed in Plan C3.
  *
  * This stack's flow-control coverage lives in its own files:
  * `duplex-over-port-timeout.test.ts` (the F5 regression, and that progress

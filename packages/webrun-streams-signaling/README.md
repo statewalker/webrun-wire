@@ -3,11 +3,11 @@
 ## What it is
 
 Connection-setup helpers for peer-to-peer links. Each one runs a handshake and hands back an
-established `@statewalker/webrun-streams` `ByteChannel` (`send` / `recv` / `closed` / `close`).
+established `ByteChannel` (`send` / `recv` / `closed` / `close`, declared by this package).
 `PeerManager` runs WebRTC offer/answer/ICE over a signaling transport you supply; `QrSignaling`
 pairs two devices without a server by exchanging compact QR strings; `RoomManager` joins a
 LiveKit-style room and opens a channel per participant. What runs on the channel afterwards —
-typically `webrun-streams`' `emulateMux` — is up to you.
+typically `webrun-rpc`'s port stack, through `messageTargetOverByteChannel` — is up to you.
 
 ## Why it exists
 
@@ -43,7 +43,9 @@ pass an `rtc` factory from a WebRTC implementation.
 | `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
 | `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
 | `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`. |
-| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. |
+| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. It closes when the room disconnects, the participant leaves, or a reliable publish fails, so whatever runs on it learns the other end is gone. |
+| `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel; pass `maxMessageSize: 12 * 1024` for a `byteChannelFromRoom` channel). It must be the channel's only reader. |
+| `ByteChannel` | The channel type. It used to come from `@statewalker/webrun-streams`; it is declared here since `emulateMux` was removed. |
 | `generateSessionId()`, `createCompressedSignal(...)`, `parseCompressedSignal(signal)`, `encodeSignal(signal)`, `decodeSignal(text)` | The pure QR payload functions. |
 
 Types and constants: `SignalingTransport` (`localId`, `send(to, msg)`,
@@ -75,8 +77,10 @@ The `SignalingTransport` below is an in-memory bus, so both peers run in one pag
 application it wraps your WebSocket or other rendezvous channel.
 
 ```ts
-import { emulateMux } from "@statewalker/webrun-streams";
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { connect, overPipe, serve } from "@statewalker/webrun-rpc";
 import {
+  messageTargetOverByteChannel,
   PeerManager,
   type SignalingMessage,
   type SignalingTransport,
@@ -99,17 +103,28 @@ const a = new PeerManager(bus("A"));
 const b = new PeerManager(bus("B"));
 
 b.onConnection((peerId, channel) => {
-  const mux = emulateMux(channel, { side: "responder" });
-  mux.serve(async function* echo(input) {
-    for await (const chunk of input) yield chunk;
-  });
+  const { target, signal, maxMessageSize } = messageTargetOverByteChannel(channel);
+  void serve(
+    { mux: overPipe(target, { codec: msgpackCodec, side: "responder", signal, maxMessageSize }) },
+    async function* echo(input) {
+      for await (const chunk of input) yield chunk;
+    },
+  );
 });
 
-const channel = await a.connect("B");
-const mux = emulateMux(channel, { side: "initiator" });
-for await (const chunk of mux.call([new TextEncoder().encode("ping")])) {
+const pipe = messageTargetOverByteChannel(await a.connect("B"));
+const { call, close } = await connect({
+  mux: overPipe(pipe.target, {
+    codec: msgpackCodec,
+    side: "initiator",
+    signal: pipe.signal,
+    maxMessageSize: pipe.maxMessageSize,
+  }),
+});
+for await (const chunk of call([new TextEncoder().encode("ping")])) {
   console.log(new TextDecoder().decode(chunk)); // "ping"
 }
+await close();
 
 a.close();
 b.close();
@@ -167,7 +182,7 @@ for await (const peerId of rooms.participants()) {
   ByteChannel  ── send / recv / closed / close
                 │
                 ▼
-  emulateMux or any byte protocol                      (you run)
+  the port stack (messageTargetOverByteChannel) or any byte protocol   (you run)
 ```
 
 ### How `PeerManager` routes signals
@@ -237,8 +252,8 @@ that joins, and ends at `leave()`. Departures are not reported. Only the most re
 
 ### Dependencies
 
-Zero runtime imports: the bundle imports nothing. `@statewalker/webrun-streams` is a dependency
-for the `ByteChannel` type only. `livekit-client` is an optional peer, used only through the
+Zero runtime dependencies: the bundle imports nothing, and `ByteChannel` is declared here.
+`@statewalker/webrun-rpc`, `-msgpack` and `-streams` are dev dependencies of the tests. `livekit-client` is an optional peer, used only through the
 `RoomLike` shape you inject. A neutrality test (`tests/neutrality.test.ts`) keeps the source from
 importing anything else.
 

@@ -1,10 +1,3 @@
-export { byteChannelFromPeerJs } from "./byte-channel.js";
-export {
-  type ConnectPeerJsParams,
-  connect,
-  type ServePeerJsParams,
-  serve,
-} from "./connect-serve.js";
 export {
   DEFAULT_MAX_FRAME_BYTES,
   DEFAULT_MAX_MESSAGE_SIZE,

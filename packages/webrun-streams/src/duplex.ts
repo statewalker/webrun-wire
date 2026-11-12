@@ -47,7 +47,7 @@ export type Connect<P> = (params: P) => Promise<{
 export type Serve<P> = (params: P, handler: Duplex) => Promise<() => Promise<void>>;
 
 /**
- * Thrown by `emulateMux` and adapters when the underlying transport closes
+ * Thrown by adapters when the underlying transport closes
  * while one or more `Duplex` calls are in flight. Consumers can catch by
  * `instanceof TransportClosedError` or by checking `error.name`.
  */

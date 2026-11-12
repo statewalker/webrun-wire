@@ -12,7 +12,7 @@ between the two peers with no server in the data path.
 ## Why it exists
 
 WebRTC can open as many data channels as needed, so concurrency comes from the
-transport and this adapter does not use `emulateMux`. What an
+transport and this adapter needs no multiplexer over it. What an
 `RTCDataChannel` lacks is what request/response needs:
 
 1. **No half-close.** A channel is open or closed. There is no way to say "I
@@ -216,8 +216,8 @@ is caught, so it does not become an unhandled rejection.
   a sleeping reader stalls the sender within the window) run in Chromium
   through Playwright: `pnpm run test:browser`, also in CI.
   Under `pnpm test` (Node) the suite is registered as skipped, because Node
-  has no `RTCPeerConnection`. L6's small window does not apply here (there is
-  no `emulateMux`), so L6 is an integrity check.
+  has no `RTCPeerConnection`. L6's small window does not apply here (the
+  pair has no credit window to shrink), so L6 is an integrity check.
 
 ### Dependencies
 

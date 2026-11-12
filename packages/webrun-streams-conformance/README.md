@@ -37,7 +37,7 @@ peer dependencies. One entry point, `.`.
 | `makeLoopbackPair` | `MakePair` | Reference pair: `call` invokes the registered handler directly. |
 | `MakePair` | type | `(tuning?: PairTuning) => Promise<ConnectServePair>`. Called once per test case, so each case gets a fresh transport. |
 | `ConnectServePair` | type | `{ connect(): Promise<{ call: Duplex; close(): Promise<void> }>; serve(handler: Duplex): Promise<() => Promise<void>>; close(): Promise<void> }`. |
-| `PairTuning` | type | `{ mtu?: number; maxStreamBuffer?: number }`. The flow-control window L6 asks for. |
+| `PairTuning` | type | `{ mtu?: number; maxStreamBuffer?: number }`. The flow-control window L6 asks for. No remaining adapter has such a window, so pairs ignore it; see L6 below. |
 | `DescribeDuplexAdapterOptions` | type | `{ concurrency?: number; skipHugeBody?: boolean }`. |
 
 | Option | Default | Effect |
@@ -59,31 +59,33 @@ describeDuplexAdapter("my-adapter", makeMyAdapterPair, { skipHugeBody: true });
 
 ### Write a pair factory
 
-A pair factory stands up both ends of one transport and forwards the tuning to
-the adapter if it can. For an adapter built on `emulateMux`, the tuning maps
-directly onto its options:
+A pair factory stands up both ends of one transport. Most adapters are a pipe
+for `@statewalker/webrun-rpc`'s port stack, so the factory runs `overPipe` and
+`webrun-rpc`'s `connect` / `serve` over that pipe. Here the pipe is a
+`MessageChannel`; a real adapter puts its own pipe (and its `signal` and
+`maxMessageSize`) in its place:
 
 ```ts
 // tests/make-pair.ts
-import { type ByteChannel, emulateMux } from "@statewalker/webrun-streams";
+import { connect, overPipe, serve, structuredCodec } from "@statewalker/webrun-rpc";
 import type { MakePair } from "@statewalker/webrun-streams-conformance";
 
-declare function makeChannelPair(): { a: ByteChannel; b: ByteChannel };
-
-export const makeMyAdapterPair: MakePair = async (tuning) => {
-  const { a, b } = makeChannelPair();
-  const client = emulateMux(a, { side: "initiator", ...tuning });
-  const server = emulateMux(b, { side: "responder", ...tuning });
+export const makeMyAdapterPair: MakePair = async () => {
+  const { port1, port2 } = new MessageChannel();
+  const codec = structuredCodec;
   return {
-    connect: async () => ({ call: client.call, close: async () => {} }),
-    serve: async (handler) => server.serve(handler),
+    connect: () => connect({ mux: overPipe(port1, { codec, side: "initiator" }) }),
+    serve: (handler) => serve({ mux: overPipe(port2, { codec, side: "responder" }) }, handler),
     close: async () => {
-      await client.close();
-      await server.close();
+      port1.close();
+      port2.close();
     },
   };
 };
 ```
+
+The factory may take the suite's `tuning` argument and forward it if the
+adapter has a matching window; a port-stack pair has none and leaves it out.
 
 ### Check the suite itself
 
@@ -107,20 +109,22 @@ describeDuplexAdapter("loopback", makeLoopbackPair);
 | L5 | Teardown: calling the `serve` teardown twice resolves; `pair.close()` after a completed call resolves. |
 | L6 | Flow control: a 256 KiB body reaches a consumer that waits 1 ms per chunk, intact and in order, through `{ mtu: 4096, maxStreamBuffer: 16384 }`. |
 
-### Why L6 uses a small window and a slow consumer
+### L6 is an integrity check on every current pair
 
-At an adapter's default window (8 MiB for `emulateMux`) a 256 KiB body never
-exhausts credit, so no sender stalls and no grant is sent, and the test would
-pass with flow control removed. A 16 KiB window against a 256 KiB body makes
-the sender run out of credit and resume on grants sixteen times. The test
-itself checks completion and integrity; stalling and replenishment are covered
-by elimination: without grants the transfer hangs and the test times out;
-without credit reservation the sender floods the window and the receiver's
-buffer cap tears the stream down.
+L6 was written for a credit-window multiplexer, `emulateMux` (removed from
+`@statewalker/webrun-streams` in Plan C3). At its default window (8 MiB) a
+256 KiB body never exhausted credit, so the test asked the pair for a 16 KiB
+window, which made the sender run out of credit and resume on grants sixteen
+times; without grants the transfer hung, and without credit reservation the
+receiver's buffer cap tore the stream down.
 
-An adapter that multiplexes natively, or has no configurable window, ignores
-`tuning`. For it, L6 is an integrity check at the adapter's own defaults and
-nothing more.
+No remaining adapter has that window. Pairs on `@statewalker/webrun-rpc`'s port
+stack ignore `tuning` (`webrun-rpc`'s own `connect` / `serve` run maps `mtu` to
+`maxMessageSize`, which only changes how the body is chunked), and adapters
+that multiplex natively ignore it too. For all of them L6 checks that a 256 KiB
+body reaches a slow consumer intact and in order, and nothing more: it does not
+prove flow control. Each stack measures its own backpressure in its own tests.
+A later change (spec D17) redefines L6 and `PairTuning`.
 
 ### What L5 deliberately does not assert
 

@@ -1,5 +1,3 @@
-export { byteChannelFromLiveKit } from "./byte-channel.js";
-export { connect, type LiveKitParams, serve } from "./connect-serve.js";
 export {
   CLOSE_TOPIC,
   DEFAULT_MAX_FRAME_BYTES,

@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@statewalker/webrun-rpc": "workspace:^",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",

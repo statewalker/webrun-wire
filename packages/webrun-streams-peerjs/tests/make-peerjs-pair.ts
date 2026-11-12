@@ -1,19 +1,9 @@
-import type { MakePair } from "@statewalker/webrun-streams-conformance";
-import type { DataConnection } from "peerjs";
-import { Peer } from "peerjs";
-import { inject } from "vitest";
-import { connect, serve } from "../src/connect-serve.js";
+import type { DataConnection, Peer } from "peerjs";
 
 /**
- * Two PeerJS peers against a loopback broker, talking to each other.
- *
- * The broker is started by `peer-server-setup.ts` (Vitest global setup, Node
- * side) and its port arrives here through `inject`. Using a local broker
- * rather than the PeerJS cloud keeps the suite offline and removes a
- * third-party dependency from every run.
- *
- * `serialization: "raw"` is required: this adapter puts its own `emulateMux`
- * framing on the connection, so PeerJS must not also apply BinaryPack.
+ * Waiting helpers for the browser pairs. The broker is started by
+ * `peer-server-setup.ts` (Vitest global setup, Node side) and its port arrives
+ * through `inject`, so the suite needs no PeerJS cloud and no internet access.
  */
 
 /** Peer registration and the WebRTC handshake both go through the broker. */
@@ -70,45 +60,3 @@ export function waitConnOpen(conn: DataConnection): Promise<void> {
     conn.on("error", onError);
   });
 }
-
-export const makePeerJsPair: MakePair = async (tuning) => {
-  const port = inject("peerServerPort");
-  // Peer ids are global to the broker and the suite builds a fresh pair per
-  // test, so they have to be unique per pair or the second registration is
-  // rejected as taken.
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  const responderId = `webrun-responder-${suffix}`;
-  const options = { host: "127.0.0.1", port, path: "/webrun", secure: false, debug: 0 };
-
-  const responderPeer = new Peer(responderId, options);
-  const callerPeer = new Peer(`webrun-caller-${suffix}`, options);
-
-  try {
-    await Promise.all([
-      waitPeerOpen(responderPeer, "responder"),
-      waitPeerOpen(callerPeer, "caller"),
-    ]);
-  } catch (err) {
-    responderPeer.destroy();
-    callerPeer.destroy();
-    throw err;
-  }
-
-  return {
-    async connect() {
-      // Opened here rather than in the factory: the suite registers `serve`
-      // first, and the responder only starts listening for inbound
-      // connections at that point.
-      const conn = callerPeer.connect(responderId, { serialization: "raw", reliable: true });
-      await waitConnOpen(conn);
-      return connect({ conn, mux: tuning });
-    },
-    async serve(handler) {
-      return serve({ peer: responderPeer, mux: tuning }, handler);
-    },
-    async close() {
-      callerPeer.destroy();
-      responderPeer.destroy();
-    },
-  };
-};

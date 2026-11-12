@@ -1,6 +1,5 @@
 // Typed-JSON RPC tier (callPort/callBidi/ioSend/ioHandle) over any
 // MessageTarget — moved here from the deleted `webrun-streams-port` package.
-export { byteChannelFromMessagePort } from "./byte-channel.js";
 export * from "./call-bidi.js";
 export * from "./call-port.js";
 export * from "./cancel-channel.js";

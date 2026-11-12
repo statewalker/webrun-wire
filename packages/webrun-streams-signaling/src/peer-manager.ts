@@ -4,14 +4,18 @@
  * Wraps the low-level {@link PeerConnection} (relocated from
  * `@statewalker/vcs-port-webrtc`) with a multi-peer, id-keyed surface: dial a
  * peer with `connect(peerId)` or accept inbound dials via `onConnection`. Each
- * established connection yields a webrun-streams {@link ByteChannel}. The WebRTC
+ * established connection yields a {@link ByteChannel}. The WebRTC
  * offer/answer/ICE routing is the original logic; only the routing-by-peer-id
  * and the ByteChannel result are new.
  */
 
-import type { ByteChannel } from "@statewalker/webrun-streams";
 import { PeerConnection } from "./peer-connection.js";
-import type { SignalingMessage, SignalingTransport, WebRtcConnectionOptions } from "./types.js";
+import type {
+  ByteChannel,
+  SignalingMessage,
+  SignalingTransport,
+  WebRtcConnectionOptions,
+} from "./types.js";
 
 export type PeerManagerOptions = WebRtcConnectionOptions;
 

@@ -7,9 +7,10 @@ Async-iterator and `ReadableStream` primitives, plus the transport seam the
 (`collect`, `collectBytes`, `collectString`), text, line and JSONL codecs, a
 backpressure-aware callback-to-generator bridge, a chunk protocol for moving an
 iterator across any message channel, conversions between async iterators and
-WHATWG `ReadableStream<Uint8Array>`, serialisable errors, the `Duplex` /
-`Connect` / `Serve` types, and `emulateMux`, which multiplexes many concurrent
-`Duplex` calls over one message-oriented byte channel.
+WHATWG `ReadableStream<Uint8Array>`, serialisable errors, and the `Duplex` /
+`Connect` / `Serve` types with `TransportClosedError`. It implements no
+transport and no multiplexer: those live in the adapters and in
+`@statewalker/webrun-rpc`.
 
 ## Why it exists
 
@@ -31,9 +32,12 @@ the same small set of building blocks in every place:
    split/join/encode/decode.
 7. **One seam for transports.** Every adapter exposes the same `Duplex` shape,
    so code above the transport does not change when the transport does.
-   Message-oriented transports have no streams of their own; `emulateMux`
-   supplies them once, with credit-based flow control, instead of each adapter
-   writing its own.
+   Message-oriented transports have no streams of their own; they get them
+   from `@statewalker/webrun-rpc`'s port stack (`overPipe` with
+   `msgpackCodec` from `@statewalker/webrun-msgpack`, then `webrun-rpc`'s
+   `connect` / `serve`), which resolves to these same types. This package
+   holds only the types, so the seam does not depend on any one
+   implementation of it.
 
 ## How to use
 
@@ -63,12 +67,11 @@ runs in browsers, workers and Node.
 | `normalizeToUint8Array(value)` | Coerce a `ByteLike` (`Uint8Array`, `ArrayBuffer`, `ArrayBufferView`, `Blob`, `string`) to `Uint8Array`. Synchronous, except a `Blob`, which returns a `Promise<Uint8Array>`. |
 | `toChunks(size?)` | Curried. Returns a transform that splits `Uint8Array` chunks into pieces of at most `size` bytes (default 16384). |
 | `serializeError(error)` / `deserializeError(obj \| string)` | `Error` (or anything) to a plain `SerializedError` and back, keeping own enumerable fields. |
-| `emulateMux(channel, opts?)` | Many concurrent `Duplex` calls over one `ByteChannel`. Returns `{ call, serve, close }`. |
-| `newCreditLedger(initial?)` / `newCreditGrantor(window, threshold?)` | The sender and receiver halves of credit-based flow control, as pure state machines. |
+| `newCreditLedger(initial?)` / `newCreditGrantor(window, threshold?)` | **Dormant.** The sender and receiver halves of credit-based flow control, as pure state machines. Nothing in this repository uses them since `emulateMux` was removed (Plan C3); they stay exported and tested for per-stream windowing (spec D13). |
 | `TransportClosedError` | Error class raised when a transport closes with calls in flight. |
 
-Types: `Duplex`, `Connect<P>`, `Serve<P>`, `ByteChannel`, `ByteLike`,
-`EmulateMuxOptions`, `CreditLedger`, `CreditGrantor`, `IteratorChunk<T>`,
+Types: `Duplex`, `Connect<P>`, `Serve<P>`, `ByteLike`, `CreditLedger`,
+`CreditGrantor`, `IteratorChunk<T>`,
 `ChunkSender<T>`, `ChunkReceiver<T>`, `ReceiverInstaller<T>`,
 `SerializedError`.
 
@@ -98,7 +101,7 @@ API:
 
 **Caller obligation.** Either drain the returned generator or `.return()` it.
 Dropping the reference does neither: the consumer never acknowledges inbound
-data, the peer's outbound pump blocks waiting for credit, no end-of-stream is
+data, the peer's outbound pump blocks waiting for that acknowledgement, no end-of-stream is
 exchanged, and both peers hold the stream open. An unreferenced generator is
 not observable, so no transport can detect this for you.
 
@@ -251,141 +254,26 @@ restored instanceof Error; // true (a plain Error, not NotFoundError)
 restored.status;           // 404
 ```
 
-### `emulateMux`
-
-```ts
-import { type ByteChannel, collectBytes, emulateMux } from "@statewalker/webrun-streams";
-
-declare const clientChannel: ByteChannel; // e.g. one end of a WebSocket
-declare const serverChannel: ByteChannel; // the other end
-
-const client = emulateMux(clientChannel, { side: "initiator" });
-const server = emulateMux(serverChannel, { side: "responder" });
-
-const stop = server.serve(async function* echo(input) {
-  for await (const chunk of input) yield chunk;
-});
-
-const response = client.call([new TextEncoder().encode("ping")]);
-new TextDecoder().decode(await collectBytes(response)); // "ping"
-
-await stop();
-await client.close();
-await server.close();
-```
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `side` | `"initiator"` | Stream-id allocation: initiator uses even ids (2, 4, …), responder odd ids (1, 3, …). Give the two peers different sides so ids cannot collide. |
-| `maxStreams` | `256` | Concurrent streams. Further calls, and further OPENs from the peer, are refused. |
-| `mtu` | `65536` | Largest payload per DATA frame. Larger chunks are split. |
-| `maxStreamBuffer` | `8388608` (8 MiB) | The credit this side advertises per stream, in bytes, and the hard cap on inbound bytes one stream may hold undrained. Must be at least 1. |
-
 ## Internals
 
-### `emulateMux` frames
+### The credit pair is dormant
 
-A `ByteChannel` is `{ send(bytes), recv: AsyncIterable<Uint8Array>, closed: Promise<void>, close() }`
-and is message-oriented: each `send` arrives as one `recv` item. `emulateMux`
-puts one frame in each message:
+`newCreditLedger` and `newCreditGrantor` are credit-based flow control with no
+I/O: the receiver states what it can buffer, and the sender may put on the wire
+only what it has been granted. Their consumer, `emulateMux` (a byte-channel
+multiplexer that lived in this package), was removed in Plan C3; the port stack
+in `@statewalker/webrun-rpc` that replaced it keeps its own window. They stay
+exported and tested as the mechanism for per-stream windowing (spec D13) rather
+than be rewritten later.
 
-```
-+----------------+--------+------------------+
-| stream id      | type   | payload          |
-| varint, LEB128 | 1 byte | rest of message  |
-+----------------+--------+------------------+
-
-OPEN  0x01  payload: uint32 BE credit the opener grants
-DATA  0x02  payload: bytes (at most mtu, at most the credit held)
-ACK   0x03  payload: uint32 BE credit granted (answer to OPEN, or more later)
-END   0x04  sender finished this direction
-ERROR 0x05  payload: JSON of serializeError(err); tears the stream down
-CLOSE 0x06  receiver no longer wants this stream; tears it down
-```
-
-```
-caller                                     responder
-  | OPEN id=2, credit=8 MiB  ------------>  |  handler(input) starts
-  |  <----------------  ACK id=2, credit=8 MiB
-  | DATA id=2 ... (spends credit) ------->  |
-  |  <------------------- ACK id=2, credit=n   (after the consumer drained)
-  | END id=2  --------------------------->  |
-  |  <----------------------------- DATA / END
-```
-
-### Why credit flows from the receiver
-
-The sender cannot know how much the receiver can buffer unless the receiver
-says so. Each side therefore advertises its `maxStreamBuffer` in the frame it
-opens with (OPEN for the caller, the ACK that answers it for the responder),
-and a sender may only put on the wire what it has been granted. Both ledgers
-start at zero, so a caller pays one round trip per stream before its first DATA
-frame and none after that. A uint32 cannot carry more than `2^32 - 1`, so a
-larger window is advertised as `2^32 - 1` rather than wrapping (a wrapped
-`2^32` would advertise zero credit and hang the peer).
-
-The receiver grants more only for bytes its consumer actually took. Grants are
-batched until half the window has drained (`newCreditGrantor`'s default
-`threshold` of `0.5`) and flushed as soon as the receive queue is empty, so the
-receiver never sits on credit it owes. `reserve(upTo)` on the sender side
-resolves with whatever is available, at least 1 and at most `upTo`, and waiters
-are released strictly in order; a peer whose window is smaller than one `mtu`
-still makes progress, one short piece at a time.
-
-Backpressure is per stream: a stalled stream does not block the others, and it
-applies in both directions. Inbound frames are pushed to the stream's queue
-without waiting for the consumer, because the inbound loop must keep processing
-ACKs for this side's own senders; blocking it on a slow consumer would deadlock
-the two directions against each other.
-
-The unit is opaque to `newCreditLedger` and `newCreditGrantor`. `emulateMux`
-counts bytes; a value-oriented caller can count values.
-
-### Why there is no stall timeout
-
-A peer that never drains blocks that stream's producer indefinitely, as a TCP
-receiver that never reads blocks its sender. `maxStreams` and `maxStreamBuffer`
-bound the cost. The bound is per stream and there is no mux-wide budget, so the
-worst case is `maxStreams × maxStreamBuffer`: 2 GiB at the defaults. Lower
-`maxStreamBuffer` if memory matters more than throughput.
-
-### What a hostile or broken peer can and cannot do
-
-- A frame that cannot be parsed (truncated or over-long varint id, no type
-  byte) is **dropped**. Frames are discrete messages, so a corrupt one cannot
-  desync the next, and failing the connection would let one bad frame tear down
-  every stream sharing it.
-- A peer that ignores credit and floods DATA has that one stream torn down when
-  it holds more than `maxStreamBuffer` undrained bytes. The peer receives an
-  ERROR frame: `emulateMux: stream <id> buffered <n> bytes past maxStreamBuffer=<max> without being drained`.
-- An OPEN for a stream id that is already live is ignored. An OPEN past the
-  limit is answered with ERROR `emulateMux: maxStreams=<n> exceeded`; an OPEN
-  with no handler registered, with ERROR `emulateMux: no handler registered`.
-- An ACK without a 4-byte credit payload is ignored rather than granting an
-  arbitrary amount.
-
-### How streams end
-
-A stream holds a slot until both directions finish (END sent and END
-received), so a normally completed call releases its slot. Cancellation
-releases it at once:
-
-- The caller calling `.return()` on the response sends CLOSE and returns the
-  caller's input iterator, so the input's `finally` runs. The return is not
-  awaited: `.return()` on a generator parked in its own `next()` is queued
-  behind that `next()`, and awaiting it would hang teardown.
-- When a handler's output finishes before it has read all of its input, the
-  mux sends CLOSE for the request body. A handler must therefore consume
-  `input` within its generator's lifetime; reading it from a detached task
-  looks the same as not reading it.
-- When the channel's `recv` ends or `closed` resolves, every live stream fails
-  with `TransportClosedError` (message `transport closed`). `call` after
-  `close()` returns a generator that throws the same error. `call` past
-  `maxStreams` returns a generator that throws
-  `RangeError: emulateMux: maxStreams=<n> exceeded`.
-- `emulateMux` throws `RangeError: emulateMux: maxStreamBuffer must be at least 1, got <n>`
-  at construction, because a zero window authorises nothing and would stall the
-  first call forever.
+Their behaviour, for when they are used: `reserve(upTo)` on the ledger resolves
+with whatever is available, at least 1 and at most `upTo`, and waiters are
+released strictly in order, so a peer whose window is smaller than one request
+still makes progress, one short piece at a time. The grantor hands credit back
+only for units the consumer actually took, batched until `threshold` (default
+`0.5`) of the window has drained, and flushed as soon as the receive queue is
+empty, so the receiver never sits on credit it owes. The unit is opaque: count
+bytes or values.
 
 ### `newAsyncGenerator` is a backpressure queue
 
@@ -449,15 +337,15 @@ Both assume `Uint8Array` chunks.
   `RangeError: newCreditLedger: reserve(<upTo>) — upTo must be at least 1`;
   after `fail(err)`, every pending and future `reserve` rejects with `err`.
 
-### Who uses `emulateMux`
+### Who implements the seam
 
-The message-oriented adapters supply a `ByteChannel` and let `emulateMux` do
-the rest: `@statewalker/webrun-streams-ws`, `@statewalker/webrun-streams-peerjs`,
-`@statewalker/webrun-streams-livekit`, `@statewalker/webrun-streams-signaling`
-and `@statewalker/webrun-http-streams`. Transports with native multiplexing
-(`@statewalker/webrun-streams-webrtc`, `@statewalker/webrun-streams-libp2p`) do
-not use it. Nothing in this package names a concrete transport; `ByteChannel`
-is the only transport-facing type.
+`@statewalker/webrun-rpc`'s `connect` / `serve` implement `Connect` / `Serve`
+over ports. Message-oriented transports supply only a pipe of bytes for its
+port stack: `@statewalker/webrun-streams-ws`, `@statewalker/webrun-streams-peerjs`,
+`@statewalker/webrun-streams-livekit` and `@statewalker/webrun-streams-signaling`.
+Transports with native multiplexing (`@statewalker/webrun-streams-webrtc`,
+`@statewalker/webrun-streams-libp2p`) implement the seam directly, one call per
+native stream. Nothing in this package names a concrete transport.
 
 ### Dependencies
 

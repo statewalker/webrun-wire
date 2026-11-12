@@ -16,7 +16,7 @@ libp2p solves transport negotiation, NAT traversal, relaying and authenticated
 peer identity. What it gives an application is a `Stream`, not a request. This
 adapter binds a stream to the `Duplex` shape, so a handler written once runs
 over libp2p as it does over any other adapter. Because libp2p multiplexes
-natively, there is no `emulateMux`: one call is one real libp2p stream.
+natively, there is no multiplexer on top: one call is one real libp2p stream.
 
 What the adapter adds on top of a raw stream:
 
@@ -338,8 +338,8 @@ its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
 each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
-`skipHugeBody`, and L6's small window does not apply (there is no
-`emulateMux`), so L6 is an integrity check.
+`skipHugeBody`, and L6's small window does not apply (the pair has no credit
+window to shrink), so L6 is an integrity check.
 
 ### Dependencies
 
