@@ -80,3 +80,98 @@ describe("http-stubs", () => {
     expect(response.status).toBe(404);
   });
 });
+
+/**
+ * The stubs' bodies are iterated by a transport, which tears them down with `return()` from
+ * outside, often while a `next()` waits on an idle stream (an SSE stream between events). That
+ * `return()` must reach the stream at once, not wait behind the read for a next chunk.
+ */
+describe("http-stubs with an idle body", () => {
+  function idle() {
+    const cancels: unknown[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("data: hello\n\n"));
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    return { stream, cancels };
+  }
+
+  async function until(predicate: () => boolean, timeoutMs = 100): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms`);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  it("newHttpServerStub's response content cancels the body at once on return()", async () => {
+    const body = idle();
+    const stub = newHttpServerStub(async () => new Response(body.stream));
+    const result = await stub({
+      options: { url: "https://foo.bar/events", method: "GET", headers: [] },
+      content: (async function* () {})(),
+    });
+    const it = result.content[Symbol.asyncIterator]();
+    expect((await it.next()).done).toBe(false);
+    const inFlight = it.next();
+    const returned = it.return?.();
+    await until(() => body.cancels.length > 0);
+    await expect(inFlight).resolves.toEqual({ done: true, value: undefined });
+    await expect(returned).resolves.toEqual({ done: true, value: undefined });
+    expect(body.cancels).toHaveLength(1);
+  });
+
+  it("newHttpServerStub's response content does not cancel a body read to its end", async () => {
+    const cancels: unknown[] = [];
+    const stub = newHttpServerStub(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("ok"));
+              controller.close();
+            },
+            cancel(reason) {
+              cancels.push(reason);
+            },
+          }),
+        ),
+    );
+    const result = await stub({
+      options: { url: "https://foo.bar/", method: "GET", headers: [] },
+      content: (async function* () {})(),
+    });
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of result.content) chunks.push(chunk);
+    expect(new TextDecoder().decode(chunks[0])).toBe("ok");
+    expect(cancels).toEqual([]);
+  });
+
+  it("newHttpClientStub's request content cancels an idle upload at once on return()", async () => {
+    const upload = idle();
+    let inFlight: Promise<unknown> | undefined;
+    let returned: Promise<unknown> | undefined;
+    const stub = newHttpClientStub(async (envelope) => {
+      const it = envelope.content[Symbol.asyncIterator]();
+      await it.next();
+      inFlight = it.next();
+      returned = it.return?.();
+      return undefined;
+    });
+    await stub(
+      new Request("https://foo.bar/upload", {
+        method: "POST",
+        body: upload.stream,
+        duplex: "half",
+      } as RequestInit),
+    );
+    await until(() => upload.cancels.length > 0);
+    await expect(inFlight).resolves.toEqual({ done: true, value: undefined });
+    await expect(returned).resolves.toEqual({ done: true, value: undefined });
+    expect(upload.cancels).toHaveLength(1);
+  });
+});

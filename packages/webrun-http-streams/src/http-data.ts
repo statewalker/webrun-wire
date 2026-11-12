@@ -374,8 +374,10 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
   const codec = options.codec ?? defaultCodec;
   return (input) => {
     const abandoned = new AbortController();
-    return abortingOnReturn(exchange(input, { signal: abandoned.signal }), (reason) =>
-      abandoned.abort(reason ?? new Error(EXCHANGE_ABANDONED_MESSAGE)),
+    return abortingOnReturn(
+      exchange(input, { signal: abandoned.signal }),
+      abandoned,
+      () => new Error(EXCHANGE_ABANDONED_MESSAGE),
     );
   };
   async function* exchange(
@@ -435,18 +437,38 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
 }
 
 /**
- * `gen`, except that `return()` and `throw()` from its consumer call `abandon`
- * at once — before they are queued behind a `next()` still parked inside the
- * generator (the handler's `await`) — unless the generator already finished.
+ * `gen`, except that `return()` and `throw()` from its consumer abort `abandoned` at once —
+ * before they are queued behind a `next()` still parked inside the generator (the handler's
+ * `await`, a read of an idle response body) — unless the generator already finished. `return()`
+ * aborts with `returned()`, `throw(error)` with `error` (`returned()` if it has none).
+ *
+ * The abort is what unparks that `next()`: the response body is cancelled with the reason, and
+ * the generator fails with it. The consumer already left, so that failure is not its to see:
+ * the `next()` in flight settles as done instead of rejecting with the consumer's own reason.
  */
 function abortingOnReturn<T>(
   gen: AsyncGenerator<T>,
-  abandon: (reason?: unknown) => void,
+  abandoned: AbortController,
+  returned: () => unknown,
 ): AsyncGenerator<T> {
   let finished = false;
   const settle = (r: IteratorResult<T>) => {
     if (r.done) finished = true;
     return r;
+  };
+  const abandon = (reason: unknown) => {
+    if (finished) return;
+    finished = true;
+    abandoned.abort(reason);
+  };
+  const fromAbandon = (error: unknown): IteratorResult<T> => {
+    // By identity: `throw("x")` aborts with the primitive "x", so a failure of the generator's
+    // own that happens to be an identical primitive is taken for the abandonment and settles as
+    // done too. Harmless: it can only happen once the consumer has left, so nobody is told less.
+    if (abandoned.signal.aborted && error === abandoned.signal.reason) {
+      return { done: true, value: undefined };
+    }
+    throw error;
   };
   // An AsyncGenerator but for `Symbol.asyncDispose`, which `asyncDisposable` adds below where
   // the runtime has it (with Node's types, AsyncGenerator requires it). Typed as the members it
@@ -455,15 +477,13 @@ function abortingOnReturn<T>(
     AsyncGenerator<T>,
     "next" | "return" | "throw" | typeof Symbol.asyncIterator
   > = {
-    next: (...args: [] | [unknown]) => gen.next(...args).then(settle),
+    next: (...args: [] | [unknown]) => gen.next(...args).then(settle, fromAbandon),
     return(value) {
-      if (!finished) abandon();
-      finished = true;
-      return gen.return(value);
+      if (!finished) abandon(returned());
+      return gen.return(value).catch(fromAbandon);
     },
     throw(error) {
-      if (!finished) abandon(error);
-      finished = true;
+      abandon(error ?? returned());
       return gen.throw(error);
     },
     [Symbol.asyncIterator]() {

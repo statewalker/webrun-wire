@@ -4,6 +4,7 @@ import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { type FetchHandler, NULL_BODY_STATUSES } from "./http-stubs.js";
 import type { ByteSource } from "./message.js";
+import { readerIterator } from "./reader-iterator.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
 
 /**
@@ -35,54 +36,67 @@ function headersToArray(headers: Headers): [string, string][] {
   return out;
 }
 
-async function* readableToAsyncIterable(
+/** `stream` as an async iterable that `signal` tears down at once: see {@link readerIterator}. */
+function readableToAsyncIterable(
   stream: ReadableStream<Uint8Array> | null | undefined,
-): AsyncGenerator<Uint8Array> {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let consumed = false;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        consumed = true;
-        return;
-      }
-      if (value) yield value;
-    }
-  } finally {
-    if (!consumed) {
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
-    }
-    try {
-      reader.releaseLock();
-    } catch {
-      /* ignore */
-    }
-  }
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> | undefined {
+  return stream ? readerIterator(stream, signal) : undefined;
 }
 
-function asyncIterableToReadable(iter: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+/**
+ * `iter` as a stream. `signal` errors it at once with the signal's reason — a read waiting for a
+ * peer that sends nothing more rejects then — and lets `iter` go. A cancel lets `iter` go
+ * without waiting for it: its `return()` is queued behind a `next()` in flight, which a peer
+ * that sends nothing more never answers.
+ */
+function asyncIterableToReadable(
+  iter: AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): ReadableStream<Uint8Array> {
   const it = iter[Symbol.asyncIterator]();
+  let ended = false;
+  let onAbort: (() => void) | undefined;
+  const end = () => {
+    ended = true;
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    void Promise.resolve(it.return?.()).catch(() => {});
+  };
   return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (!signal) return;
+      onAbort = () => {
+        if (ended) return;
+        end();
+        try {
+          controller.error(abortReason(signal));
+        } catch {
+          /* already closed or errored */
+        }
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    },
     async pull(controller) {
       try {
         const { done, value } = await it.next();
+        if (ended) return; // aborted or cancelled while this read waited
         if (done) {
+          ended = true;
+          if (onAbort) signal?.removeEventListener("abort", onAbort);
           controller.close();
           return;
         }
         controller.enqueue(value);
       } catch (err) {
+        if (ended) return;
+        ended = true;
+        if (onAbort) signal?.removeEventListener("abort", onAbort);
         controller.error(err);
       }
     },
-    async cancel() {
-      await it.return?.();
+    cancel() {
+      if (!ended) end();
     },
   });
 }
@@ -107,7 +121,8 @@ export async function fetchOverDuplex(
   if (request.body != null) {
     // The streaming path stays first and unconditional: a runtime that has
     // request streams never reaches the fallback, and never buffers an upload.
-    body = readableToAsyncIterable(request.body);
+    // The request's signal cancels the upload at once, even while it waits for its next chunk.
+    body = readableToAsyncIterable(request.body, request.signal ?? undefined);
   } else if (!supportsRequestStreams()) {
     // Firefox. Without `request.body` there is nothing to stream from, so the
     // only way to see the payload at all is to buffer the whole of it. Two
@@ -176,7 +191,8 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
     if (env.method !== "GET" && env.method !== "HEAD") {
       if (supportsRequestStreams()) {
         upload = trackingEnd(body);
-        reqInit.body = asyncIterableToReadable(upload.source);
+        // An abandoned exchange fails the handler's read at once, even one waiting for the next chunk.
+        reqInit.body = asyncIterableToReadable(upload.source, exchange?.signal);
         (reqInit as RequestInit & { duplex?: string }).duplex = "half";
       } else {
         // Firefox again, and this is the half that fails *silently*. The
@@ -225,16 +241,21 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
       env.method === "OPTIONS" ||
       NULL_BODY_STATUSES.has(response.status)
     ) {
-      await response.body?.cancel();
+      // Started, not awaited: a tee branch's cancel (`response.clone()`) settles only once the
+      // other branch is cancelled too, which may be never.
+      void response.body?.cancel().catch(() => {});
       return { envelope: respEnv, body: undefined, settled };
     }
     return {
       envelope: respEnv,
-      body: response.body ? readableToAsyncIterable(response.body) : undefined,
+      // An abandoned exchange cancels the body at once, with the signal's reason: the transport's
+      // `return()` is queued behind the read in flight, which an idle body (an SSE stream between
+      // events) answers only with its next chunk.
+      body: readableToAsyncIterable(response.body, exchange?.signal),
       // A body the codec never started reading has no reader to cancel
       // through; cancel the stream itself. Once read, it is locked and this
-      // rejects, harmlessly: the reader's own cancellation has run.
-      release: () => response.body?.cancel(),
+      // rejects, harmlessly: the iterator's own cancellation has run.
+      release: () => response.body?.cancel(exchange?.signal.reason),
       settled,
     };
   }, options);
