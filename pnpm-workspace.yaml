@@ -41,6 +41,7 @@ catalog:
   webrun-rpc-0-5: npm:@statewalker/webrun-rpc@0.5.1
   webrun-rpc-0-7: npm:@statewalker/webrun-rpc@0.7.0
   webrun-rpc-0-8: npm:@statewalker/webrun-rpc@0.8.0
+  webrun-rpc-0-10: npm:@statewalker/webrun-rpc@0.10.2
 
 catalogs:
   peers:

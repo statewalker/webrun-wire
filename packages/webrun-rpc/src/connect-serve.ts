@@ -216,6 +216,8 @@ export interface OverPipeOptions {
   keepalive?: { intervalMs: number; misses?: number };
   /** Development aid: report ports dropped without `close()` — see `PortMuxOptions.onLeak`. */
   onLeak?: PortMuxOptions["onLeak"];
+  /** When a port this mux opens takes its window as agreed — see `PortMuxOptions.presumeAck`. */
+  presumeAck?: PortMuxOptions["presumeAck"];
 }
 
 /**
