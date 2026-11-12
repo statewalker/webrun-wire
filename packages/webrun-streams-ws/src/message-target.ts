@@ -17,7 +17,7 @@ export interface WebSocketMessageTarget {
     close(): Promise<void>;
     /** The socket's `bufferedAmount`: bytes sent and not yet written out. */
     readonly bufferedAmount: number;
-    /** Resolves once the socket has written out what it holds, or has closed. */
+    /** Resolves once `bufferedAmount` is at most {@link DRAIN_LOW_WATER}, or the socket has closed. */
     whenDrained(): Promise<void>;
   };
   /**
@@ -30,7 +30,12 @@ export interface WebSocketMessageTarget {
 
 /** How often `whenDrained` looks at `bufferedAmount`: a WebSocket has no drain event. */
 const DRAIN_POLL_MS = 5;
-export const DRAIN_LOW_WATER = 0;
+/**
+ * `whenDrained` resolves once `bufferedAmount` is at most this: the socket can
+ * take more. Waiting for zero would make a sender that waits before every
+ * frame (`overPipe`'s `frameSize`) pause a poll interval per frame.
+ */
+export const DRAIN_LOW_WATER = 256 * 1024;
 
 const encoder = new TextEncoder();
 
@@ -57,7 +62,15 @@ export function messageTargetOverWebSocket(ws: WebSocketLike): WebSocketMessageT
       `messageTargetOverWebSocket: WebSocket is in readyState ${ws.readyState}, expected OPEN (1)`,
     );
   }
-  if (ws.binaryType === "blob") ws.binaryType = "arraybuffer";
+  // "arraybuffer" (browsers) and "nodebuffer" (`ws`) arrive as bytes at once;
+  // anything else — "blob" (read asynchronously, so a later message could
+  // overtake it), `ws`'s "fragments" (an array of Buffers) — is switched.
+  if (
+    ws.binaryType !== undefined &&
+    ws.binaryType !== "arraybuffer" &&
+    ws.binaryType !== "nodebuffer"
+  )
+    ws.binaryType = "arraybuffer";
   const listeners = new Set<Listener>();
   const life = new AbortController();
 
@@ -75,6 +88,17 @@ export function messageTargetOverWebSocket(ws: WebSocketLike): WebSocketMessageT
     const bytes = toBytes(event.data);
     if (bytes) deliver(bytes);
     else if (typeof event.data === "string") deliver(encoder.encode(event.data));
+    else {
+      // Dropping it would lose a multiplexer envelope and hang its call: fail loudly.
+      end(
+        new TypeError(
+          `webrun-streams-ws: a message arrived as ${Object.prototype.toString.call(event.data)}; set binaryType to "arraybuffer" or "nodebuffer"`,
+        ),
+      );
+      try {
+        ws.close();
+      } catch {}
+    }
   };
   const end = (reason: Error): void => {
     if (life.signal.aborted) return;
@@ -122,8 +146,12 @@ export function messageTargetOverWebSocket(ws: WebSocketLike): WebSocketMessageT
       whenDrained() {
         return new Promise<void>((resolve) => {
           const check = (): void => {
-            if (life.signal.aborted || !(ws.bufferedAmount ?? 0)) resolve();
-            else setTimeout(check, DRAIN_POLL_MS);
+            if (life.signal.aborted || (ws.bufferedAmount ?? 0) <= DRAIN_LOW_WATER) resolve();
+            else {
+              // A peer that stops reading but never closes must not keep Node alive.
+              const timer = setTimeout(check, DRAIN_POLL_MS) as { unref?: () => void };
+              timer.unref?.();
+            }
           };
           check();
         });

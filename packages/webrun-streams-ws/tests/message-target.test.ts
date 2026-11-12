@@ -94,7 +94,8 @@ describe("messageTargetOverWebSocket", () => {
       const s = await server();
       const clientWs = await openWebSocket({ url: s.url, WebSocketCtor: NodeCtor });
       const serverWs = await s.next();
-      serverWs.binaryType = binaryType;
+      // "blob" is accepted by ws >= 8.17 at runtime, though its typings omit it
+      (serverWs as unknown as { binaryType: string }).binaryType = binaryType;
       const { target } = messageTargetOverWebSocket(serverWs as unknown as WebSocketLike);
       cleanups.push(() => target.close());
       const got: number[][] = [];
@@ -143,6 +144,28 @@ describe("messageTargetOverWebSocket", () => {
     await a.target.whenDrained();
     expect(a.target.bufferedAmount).toBeLessThanOrEqual(DRAIN_LOW_WATER);
     await expect.poll(() => received, { timeout: 10_000 }).toBe(4 * big.byteLength);
+  });
+
+  it("(review) whenDrained resolves at the low-water mark, not only at zero", async () => {
+    const fake = {
+      readyState: 1,
+      bufferedAmount: DRAIN_LOW_WATER,
+      send() {},
+      close() {},
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const { target } = messageTargetOverWebSocket(fake as unknown as WebSocketLike);
+    await target.whenDrained(); // at the mark: the socket can take more
+    fake.bufferedAmount = DRAIN_LOW_WATER + 1;
+    let done = false;
+    const p = target.whenDrained().then(() => {
+      done = true;
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(done).toBe(false);
+    fake.bufferedAmount = 1000;
+    await p;
   });
 
   it("a dead peer fails the calls in flight over the multiplexer, instead of parking them", async () => {

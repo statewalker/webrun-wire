@@ -1,6 +1,7 @@
 export { byteChannelFromWebSocket } from "./byte-channel.js";
 export { type ConnectWsParams, connect } from "./connect.js";
 export {
+  DRAIN_LOW_WATER,
   messageTargetOverWebSocket,
   type OpenWebSocketParams,
   openWebSocket,

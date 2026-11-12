@@ -41,7 +41,7 @@ entry point, `.`.
 | `messageTargetOverWebSocket(ws)` | **The port stack (Plan C2).** One open socket as `{ target, signal }`: `target` is a `MessageTarget` of bytes (one WebSocket message each) with `bufferedAmount` and `whenDrained()`, `signal` aborts when the socket closes. Hand both to `webrun-rpc`'s `overPipe` with `msgpackCodec`; see below. |
 | `openWebSocket(params)` | Opens a socket and resolves once it is `OPEN`; rejects if it fails or closes first. `params`: `url`, `protocols`, `WebSocketCtor`, as for `connect`. |
 | `byteChannelFromWebSocket(ws)` | Wraps one open socket as a `ByteChannel`, for driving `emulateMux` yourself or reusing a socket you already own. |
-| `WebSocketLike` | Structural socket type accepted everywhere: `readyState`, `send`, `close`, `addEventListener` / `removeEventListener` for `message`, `open`, `close`, `error`. Node's `ws` satisfies it as is; the DOM `WebSocket` satisfies it at runtime but needs a cast at the type level (see Internals). |
+| `WebSocketLike` | Structural socket type accepted everywhere: `readyState`, optional `bufferedAmount` and `binaryType`, `send`, `close`, `addEventListener` / `removeEventListener` for `message`, `open`, `close`, `error`. Node's `ws` satisfies it as is; the DOM `WebSocket` satisfies it at runtime but needs a cast at the type level (see Internals). |
 | `WS_READY_STATE` | `{ CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 }`. |
 | `ConnectWsParams`, `ServeWsParams` | Parameter types, below. |
 
@@ -150,7 +150,7 @@ const { call, close } = await connect({
   mux: overPipe(pipe.target, { codec: msgpackCodec, side: "initiator", signal: pipe.signal }),
 });
 
-// server, per accepted socket (`ws` package: set binaryType = "nodebuffer")
+// server, per accepted socket
 wss.on("connection", (socket) => {
   const { target, signal } = messageTargetOverWebSocket(socket);
   void serve({ mux: overPipe(target, { codec: msgpackCodec, side: "responder", signal }) }, handler);
@@ -158,9 +158,19 @@ wss.on("connection", (socket) => {
 ```
 
 Pass `signal`: a WebSocket that dies says so only through its `close` event,
-and without it the multiplexer's ports stay open forever. A WebSocket has no
-message size limit, so no `maxMessageSize` is set. Both ends must run the port
-stack; it does not interoperate with `emulateMux`.
+and without it the multiplexer's ports stay open forever. No `maxMessageSize`
+is reported, because WebSocket limits are deployment settings: the `ws` server
+closes with 1009 past its `maxPayload` (100 MiB by default), and browsers and
+proxies have their own. Without one, a chunk crosses as one message; set
+`overPipe`'s `maxMessageSize` (256 bytes under the real limit) or `frameSize`
+if your path has a smaller ceiling.
+
+Messages must arrive as bytes at once: a socket on `binaryType` "blob" or
+`ws`'s "fragments" is switched to "arraybuffer". A message of any other kind
+ends the pipe with a `TypeError` instead of being dropped, since a lost
+envelope would hang its call. `whenDrained()` resolves once `bufferedAmount`
+is at most `DRAIN_LOW_WATER` (256 KiB). Both ends must run the port stack; it
+does not interoperate with `emulateMux`.
 
 ### Driving `emulateMux` on a socket you own
 
@@ -253,8 +263,10 @@ window through `mux`), and over the port stack (`overPipe` + `msgpackCodec`),
 where L6 is an integrity check only, as on every port-stack pair until D17
 redefines it. `message-target.test.ts` pins the pipe's contract: bytes only
 (anything else is a `TypeError`), text frames as UTF-8 bytes, `signal` aborted
-by a dead peer, `whenDrained` waiting for `bufferedAmount` to reach zero, and a
-dead peer failing the calls in flight over the multiplexer.
+by a dead peer, `whenDrained` resolving at the low-water mark, sockets on
+"fragments" or "blob" delivering bytes in order, a dead peer failing the calls
+in flight over the multiplexer, and `serve`'s teardown failing a call in flight
+on each connection.
 `pnpm run test:bench` runs a separate measurement that compares a direct
 WebSocket round trip with one bridged through a `MessageChannel`. It reports
 numbers and does not gate on a threshold, because a timing threshold on
