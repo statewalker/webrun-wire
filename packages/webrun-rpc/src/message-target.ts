@@ -28,4 +28,11 @@ export interface MessageSink {
 export interface MessageTarget extends MessageSource, MessageSink {
   /** `reason`, where the target keeps one, becomes its close signal's reason. */
   close?(reason?: unknown): void | Promise<void>;
+  /**
+   * Optional: aborts when the transport under this target closes (a libp2p stream reset, a dead
+   * peer). `getPortCloseSignal` returns it when no signal was registered with
+   * `setPortCloseSignal`, so the stream tier fails a call whose port died instead of waiting.
+   * An adapter supplies it by shape, without importing this package.
+   */
+  readonly closeSignal?: AbortSignal;
 }

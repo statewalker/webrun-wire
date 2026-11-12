@@ -21,3 +21,13 @@ export {
   messageTargetOverStream,
   type StreamMessageTarget,
 } from "./message-target-over-stream.js";
+export {
+  DEFAULT_PORT_MAX_MESSAGE_SIZE,
+  DEFAULT_PORT_PROTOCOL,
+  type InboundPortInfo,
+  type Libp2pPortMux,
+  type Libp2pPortMuxOptions,
+  libp2pPortMux,
+  type StreamPort,
+  type ValueCodec,
+} from "./port-mux.js";

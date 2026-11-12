@@ -23,6 +23,7 @@ async function createNode(): Promise<Libp2p> {
  * the consumer holds a chunk, and capping yamux's window, did not bound it, so
  * the buffering is elsewhere in the stack. Until it is found, L6 checks only
  * that a stalled transfer below that point completes once the consumer resumes.
+ * The port stack over libp2p (`tests/port-mux.test.ts`) is bounded at one chunk.
  */
 export const makeLibp2pPair: MakePair = async () => {
   const serverNode = await createNode();

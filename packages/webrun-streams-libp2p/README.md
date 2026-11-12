@@ -57,6 +57,8 @@ runs (Node or browser).
 | `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
 | `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
 | `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
+| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits. See "MessagePorts over libp2p" below. |
+| `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
@@ -283,6 +285,52 @@ streams and that an unconfigured server stops at 32.
   A caller that sent its whole request and then stopped reading the response
   (`.return()` mid-stream) is ordinary and is not logged.
 
+### MessagePorts over libp2p, and the port stack on them
+
+`connect` / `serve` above stream each call's bytes straight onto a libp2p
+stream, and so inherit libp2p's buffering: a consumer that stops reading does
+not slow its producer (see Tests, L6). `webrun-rpc`'s port stack does: each
+call's chunk waits for the peer's confirmation that its consumer pulled the
+last one, so a producer is never more than a chunk ahead, whatever the
+transport buffers underneath. Two ways to put libp2p under it:
+
+```ts
+import { deserialize, msgpackCodec, serialize } from "@statewalker/webrun-msgpack";
+import { connect, overPipe, overPorts, serve } from "@statewalker/webrun-rpc";
+import { libp2pPortMux, messageTargetOverStream } from "@statewalker/webrun-streams-libp2p";
+
+// 1. native ports: one libp2p stream per port, multiplexed by yamux
+const codec = { encode: serialize, decode: deserialize };
+await serve({ mux: overPorts((onPort) => libp2pPortMux({ node, codec, onPort })) }, handler);
+const { call } = await connect({ mux: overPorts(() => libp2pPortMux({ node, codec, peer })) });
+
+// 2. emulated ports: one libp2p stream, multiplexPort inventing the ports on it
+const { target, signal } = messageTargetOverStream(await node.dialProtocol(peer, ["/my-mux/1.0.0"]));
+const pipe = await connect({ mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal }) });
+```
+
+Both pass the shared conformance suite, including L6 at a one-chunk bound
+(`tests/port-mux.test.ts`). Which to use:
+
+| | native (`libp2pPortMux`) | emulated (`overPipe` on one stream) |
+| --- | --- | --- |
+| multiplexing | yamux: per-stream windows, scheduling | `multiplexPort`'s id table |
+| a call costs | a stream open (a protocol negotiation) | nothing on the wire |
+| limits | libp2p's `maxInboundStreams` / `maxOutboundStreams` | `maxPorts` |
+| one slow call | holds its own stream only | shares the stream; `frameSize` interleaves |
+| who is calling | `onPort` gets `{ remotePeer, connection }` | the stream's connection, once |
+| 4 MiB echo, in-process TCP | 45 MB/s (64 KiB chunks), 68 MB/s (256 KiB) | 49 MB/s, 85 MB/s |
+
+Each native port carries `closeSignal`, aborted when its stream ends, the peer
+goes, or the port is closed here; `webrun-rpc`'s `getPortCloseSignal` reads it
+from the port, so a call on a dead stream fails instead of waiting, and this
+package still imports nothing from `webrun-rpc`. Ports are opened through the
+same early-stream gate as `connect()`. A port `onPort` refuses (returns
+`false`) is aborted, and the opener's signal aborts. `meta` is not sent: the
+protocol says what a port is for. Messages are values (objects holding
+`Uint8Array` chunks), so a port needs a value codec where `overPipe` needs a
+`PortCodec`.
+
 ### A multiplexer over one stream closes with it
 
 `multiplexPort` (from `@statewalker/webrun-rpc`) can run many ports over one
@@ -340,7 +388,7 @@ each; every channel must fail with an error within 1 s. The shared conformance s
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
 `skipHugeBody`.
 
-**L6 found no bound on run-ahead** (spec D17). A consumer that stops reading
+**L6 found no bound on run-ahead for `connect` / `serve`** (spec D17). A consumer that stops reading
 lets the producer get 22-24 MiB ahead within half a second, in either direction,
 until libp2p's 4 MiB read buffer (`maxReadBufferLength`) aborts the stream and
 the call fails with `PeerGoneError`. So a slow consumer is not throttled: its
@@ -348,7 +396,15 @@ stream is killed. Pausing the stream while the consumer holds a chunk (libp2p
 3's `pause()` / `resume()`, which yamux honours by withholding window updates)
 and capping yamux's `maxStreamWindowSize` at 1 MiB did not bound it, so the
 buffering is elsewhere in the stack. The pair declares no `runAheadBytes`
-until it is found, and L6 checks only that a stalled transfer completes.
+until it is found, and L6 checks only that a stalled transfer completes. The
+port stack over libp2p (native or emulated ports, above) is bounded at one
+chunk and passes L6 with `runAheadBytes: 4096`: use it where a slow consumer
+must throttle its producer.
+
+`messageTargetOverStream` (review of the port work) now also aborts its
+`signal` for a stream that ended before the target was attached: a peer that
+reset the stream during protocol negotiation left its `close` event unseen and
+the signal never aborted.
 
 ### Dependencies
 

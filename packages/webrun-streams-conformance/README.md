@@ -135,7 +135,8 @@ and one that duplicates a chunk and drops another.
 | loopback | 0 | 0 |
 | port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 4 KiB (one chunk) | 0: the next chunk is produced only once the consumer pulls past the last |
 | `-webrtc` | `RECEIVE_WINDOW` (4 MiB) + 16 KiB | 4 MiB exactly |
-| `-libp2p` | none declared | 22-24 MiB in half a second, until libp2p's 4 MiB read buffer aborts the stream |
+| `-libp2p` `connect` / `serve` | none declared | 22-24 MiB in half a second, until libp2p's 4 MiB read buffer aborts the stream |
+| `-libp2p` port stack (native `libp2pPortMux`, or `overPipe` on one stream) | 4 KiB (one chunk) | 0 |
 
 The level dies on what it should: sending port-stack chunks without waiting for
 their confirmation fails it, a WebRTC pair declaring half its window fails it at

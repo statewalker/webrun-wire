@@ -2,7 +2,7 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
-import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { deserialize, msgpackCodec, serialize } from "@statewalker/webrun-msgpack";
 import { connect, overPipe, overPorts, serve } from "@statewalker/webrun-rpc";
 import { collectBytes } from "@statewalker/webrun-streams";
 import { describeDuplexAdapter, type MakePair } from "@statewalker/webrun-streams-conformance";
@@ -15,17 +15,27 @@ const nodes: Libp2p[] = [];
 afterEach(async () => {
   await Promise.allSettled(nodes.splice(0).map((n) => n.stop()));
 });
-async function createNode(): Promise<Libp2p> {
+/** `slowUpgrade`: the node takes 200 ms to finish upgrading an inbound connection, so streams opened meanwhile are yamux "early streams". */
+async function createNode(slowUpgrade = false): Promise<Libp2p> {
   const node = await createLibp2p({
     addresses: { listen: ["/ip4/127.0.0.1/tcp/0"] },
     transports: [tcp()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
+    ...(slowUpgrade && {
+      connectionGater: {
+        denyInboundUpgradedConnection: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return false;
+        },
+      },
+    }),
   });
   nodes.push(node);
   return node;
 }
 const PROTOCOL = "/webrun-ports/test/1.0.0";
+const codec = { encode: serialize, decode: deserialize };
 
 /**
  * The port stack over libp2p with NATIVE ports: every port is its own libp2p
@@ -45,6 +55,7 @@ const makeNativePortPair: MakePair = async (tuning) => {
         mux: overPorts(() =>
           libp2pPortMux({
             node: client,
+            codec,
             peer: addr,
             protocol: PROTOCOL,
             maxMessageSize: tuning?.maxMessageSize,
@@ -58,6 +69,7 @@ const makeNativePortPair: MakePair = async (tuning) => {
           mux: overPorts((onPort) =>
             libp2pPortMux({
               node: server,
+              codec,
               protocol: PROTOCOL,
               onPort,
               maxMessageSize: tuning?.maxMessageSize,
@@ -140,13 +152,14 @@ describe("libp2pPortMux", () => {
     const accepted: unknown[] = [];
     await libp2pPortMux({
       node: server,
+      codec,
       protocol: PROTOCOL,
       onPort: (_port, meta) => {
         accepted.push(meta);
         return true;
       },
     });
-    const mux = await libp2pPortMux({ node: client, peer: addr, protocol: PROTOCOL });
+    const mux = await libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL });
     const p1 = await mux.openPort();
     const p2 = await mux.openPort();
     await expect.poll(() => accepted.length).toBe(2);
@@ -171,7 +184,11 @@ describe("libp2pPortMux", () => {
     const addr = server.getMultiaddrs()[0];
     if (!addr) throw new Error("no listen address");
     await serve(
-      { mux: overPorts((onPort) => libp2pPortMux({ node: server, protocol: PROTOCOL, onPort })) },
+      {
+        mux: overPorts((onPort) =>
+          libp2pPortMux({ node: server, codec, protocol: PROTOCOL, onPort }),
+        ),
+      },
       async function* (input) {
         for await (const _ of input);
         yield new Uint8Array([1]);
@@ -179,7 +196,7 @@ describe("libp2pPortMux", () => {
       },
     );
     const { call, close } = await connect({
-      mux: overPorts(() => libp2pPortMux({ node: client, peer: addr, protocol: PROTOCOL })),
+      mux: overPorts(() => libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL })),
     });
     const it = call([])[Symbol.asyncIterator]();
     await it.next();
@@ -194,15 +211,78 @@ describe("libp2pPortMux", () => {
     const client = await createNode();
     const addr = server.getMultiaddrs()[0];
     if (!addr) throw new Error("no listen address");
-    const serving = await libp2pPortMux({ node: server, protocol: PROTOCOL, onPort: () => true });
-    const mux = await libp2pPortMux({ node: client, peer: addr, protocol: PROTOCOL });
+    const serving = await libp2pPortMux({
+      node: server,
+      codec,
+      protocol: PROTOCOL,
+      onPort: () => true,
+    });
+    const mux = await libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL });
     const p = await mux.openPort();
     await mux.close();
     expect((p as { closeSignal?: AbortSignal }).closeSignal?.aborted).toBe(true);
     await serving.close();
     await expect(
-      (await libp2pPortMux({ node: client, peer: addr, protocol: PROTOCOL })).openPort(),
+      (await libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL })).openPort(),
     ).rejects.toThrow();
+  });
+});
+
+describe("libp2pPortMux (mutants)", () => {
+  async function pair(onPort: Parameters<typeof libp2pPortMux>[0]["onPort"], slowUpgrade = false) {
+    const server = await createNode(slowUpgrade);
+    const client = await createNode();
+    const addr = server.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    await libp2pPortMux({ node: server, codec, protocol: PROTOCOL, onPort });
+    return libp2pPortMux({ node: client, codec, peer: addr, protocol: PROTOCOL });
+  }
+
+  it("a port the serving side refuses is aborted: the opener's close signal aborts", async () => {
+    const mux = await pair(() => false);
+    const port = await mux.openPort();
+    await expect.poll(() => port.closeSignal.aborted, { timeout: 5000 }).toBe(true);
+  });
+
+  it("25 ports opened at once on a fresh connection all work (the early-stream gate: yamux allows 10 early streams)", async () => {
+    const mux = await pair((port) => {
+      port.addEventListener("message", (e) => port.postMessage(e.data));
+      return true;
+    }, true);
+    const answers = await Promise.all(
+      Array.from({ length: 25 }, async (_, i) => {
+        const port = await mux.openPort();
+        const got = new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+        port.postMessage({ i });
+        return got;
+      }),
+    );
+    expect(answers).toEqual(Array.from({ length: 25 }, (_, i) => ({ i })));
+  });
+
+  it("removeEventListener stops delivery to that listener", async () => {
+    const mux = await pair((port) => {
+      port.addEventListener("message", (e) => port.postMessage(e.data));
+      return true;
+    });
+    const port = await mux.openPort();
+    const seen: unknown[] = [];
+    const listener = (e: MessageEvent) => {
+      seen.push(e.data);
+    };
+    port.addEventListener("message", listener);
+    const second = new Promise((r) => {
+      const other = (e: MessageEvent) => {
+        if ((e.data as { n: number }).n === 2) r(e.data);
+      };
+      port.addEventListener("message", other);
+    });
+    port.postMessage({ n: 1 });
+    await expect.poll(() => seen.length).toBe(1);
+    port.removeEventListener("message", listener);
+    port.postMessage({ n: 2 });
+    await second;
+    expect(seen).toEqual([{ n: 1 }]);
   });
 });
 
