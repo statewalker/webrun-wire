@@ -715,6 +715,12 @@ export function multiplexPort(
       // already read a `credit`: that is what shows this end's own codec
       // reads them, and the peer's posts them. A responder over a codec that
       // drops credit would otherwise wedge its own port after one window.
+      // It does not show that the opener's codec reads them: an opener whose
+      // codec drops credit on read never sees the ack, never agrees
+      // `pipeline`, and its streams refuse this end's first pipelined chunk
+      // ("pipelining was not agreed"). 0.10 fails the same way once the
+      // opener's first grant arrives; here, from the second port on, on the
+      // first chunk.
       const credit = open.get(envelope.id)?.credit;
       const listed = sharedCaps(caps, envelope.caps);
       if (credit) {

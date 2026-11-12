@@ -353,19 +353,24 @@ for the ack sent a POST's end only after its first chunk's confirmation. Two sho
 answer as given where the peer has already shown it reads credit, and nothing new goes on the wire:
 
 - **The responder** holds back from the `open` on, before the answer, when the `open` lists `caps`
-  (only a mux that grants credit lists them, from 0.9 on) and this mux has read a `credit` before,
-  from any port: that shows this end's own codec reads them and the peer's posts them. A
-  responder over a codec that drops credit never gets that far, and keeps waiting for an answer
-  that never comes, unwindowed as above.
+  (only a mux that grants credit lists them: 0.9 and later, first published as 0.10) and this mux
+  has read a `credit` before, from any port: that shows this end's own codec reads them and the
+  peer's posts them. A responder over a codec that drops credit never gets that far, and keeps
+  waiting for an answer that never comes, unwindowed as above. It does not show that the
+  *opener's* codec reads credit: an opener over a codec that drops credit on read never sees the
+  ack, so never agrees `pipeline`, and its streams fail on the responder's first pipelined chunk
+  with `webrun-rpc: peer sent a pipelined chunk where pipelining was not agreed`. That is not new:
+  0.10 with 0.10 fails the same way once the opener's first grant reaches the responder. What
+  changes is when: from the second port on, it fails on the responder's first chunk.
 - **The opener** may presume the ack (`presumeAck`). With `"learned"`, the default, every port
   after one whose ack listed `pipeline` presumes the same ack: the peer's mux acks every `open` of
   this one alike (the same window, the same `open`), so this presumes only what that peer has
   already said. With `"always"` it presumes from the first port, which suits a pipe whose peer is
-  known to be webrun-rpc 0.9 or later (by a protocol id, say): a peer from before 0.9 ignores
+  known to be webrun-rpc 0.10 or later (by a protocol id, say): a peer from before it ignores
   pipelined chunks, and one without a window never acks. `"never"` waits for every ack. A presuming
   port holds back by the window at once, agrees `pipeline` (`end` is settled by the ack before it
   is needed), and posts its answer to the ack right behind its `open`, so a responder that waits
-  for the answer (0.9, 0.10) holds back, and pipelines, from the start too.
+  for the answer (0.10) holds back, and pipelines, from the start too.
 
 So from the second port on (from the first with `"always"`) a request and its response take one
 round trip, head and body together, also for a streamed upload, and against a 0.10 responder as

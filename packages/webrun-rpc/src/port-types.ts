@@ -142,22 +142,22 @@ export interface PortMuxOptions {
    * to its ack holds its response to the same confirmed pace.
    *
    * - `"learned"` (default): once a responder's ack on this mux has listed
-   *   `pipeline` (a peer from 0.9 on), every later port presumes the same
+   *   `pipeline` (a peer from 0.10 on), every later port presumes the same
    *   ack. That peer's mux acks every `open` of this one alike, so this
    *   presumes only what it has already been told. The first port runs the
    *   full handshake.
    * - `"always"`: presume from the first port that the responder acks with
    *   `pipeline` and this end's own sizing (`exact` when this codec counts
-   *   bytes), as every webrun-rpc from 0.9 on does. Only for a pipe whose
-   *   peer is known to be one, for instance by a protocol id: a peer from
-   *   before 0.9 ignores pipelined chunks, and one without a window never
+   *   bytes), as every published webrun-rpc from 0.10 on does. Only for a
+   *   pipe whose peer is known to be one, for instance by a protocol id: a peer from
+   *   before 0.10 ignores pipelined chunks, and one without a window never
    *   acks at all.
    * - `"never"`: always wait for the ack, as 0.10 did.
    *
    * A presuming port holds back by the window, as on the ack, and agrees
    * `pipeline` (not `end`, which the ack settles before it is needed); it
    * posts its answer to the ack right behind its `open`, so a responder that
-   * waits for that answer (0.9, 0.10) pipelines from the start too. The
+   * waits for that answer (0.10) pipelines from the start too. The
    * window is the opener's own, so the ack can contradict only the sizing or
    * the capabilities: then no later port on this mux presumes, and the port
    * fails (closes with reason `"protocol"`) if it already posted anything,
@@ -224,10 +224,13 @@ export interface PortInfo {
   /** `Date.now()` of the last message in either direction. */
   lastActivity: number;
   /**
-   * The window in force, once the peer acknowledged it. Absent on a port that
-   * asked for one from a peer that never answers credit (an older version).
-   * A port that presumed the ack (`presumeAck`) holds back by the window
-   * before then, but reports it only once the ack arrived.
+   * The window in force: on a port this side opened, once the responder's
+   * ack arrived (a port that presumed the ack, `presumeAck`, holds back by
+   * the window before then, but reports it only from the ack); on a port the
+   * peer opened, once the opener answered the ack, or from the `open` on
+   * when it listed `caps` and this mux had already read a `credit`. Absent on
+   * a port that asked for one from a peer that never answers credit (an
+   * older version).
    */
   window?: number;
   /** With a window: bytes waiting in this port's send queue. */

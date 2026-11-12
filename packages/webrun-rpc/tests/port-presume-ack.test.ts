@@ -737,3 +737,73 @@ describe("refusals and contradictions", () => {
     expect(new TextDecoder().decode(later.received[0])).toBe("300");
   });
 });
+
+describe("a presuming opener that closes a port before its ack", () => {
+  for (const [name, responder] of [
+    ["new", NEW],
+    ["0.10.2", OLD],
+  ] as const) {
+    it(`frees the id on both ends against a ${name} responder, and the next port works`, async () => {
+      const link = virtualLink();
+      const { client, server } = pair(
+        link,
+        { kit: NEW, options: { presumeAck: "always" } },
+        { kit: responder },
+        countBytes,
+      );
+      const port = await client.openPort();
+      // Something posted while presumed, then closed before anything is back.
+      port.postMessage(bytes(100, 1));
+      await port.close?.();
+      expect(client.ports()).toEqual([]);
+      await link.drain();
+      expect(client.ports()).toEqual([]);
+      expect(server.ports?.()).toEqual([]);
+      const next = await run(link, NEW, client, upload(3, 100));
+      expect(next.error).toBeUndefined();
+      expect(new TextDecoder().decode(next.received[0])).toBe("300");
+      expect(next.end).toBe(RTT);
+      expect(client.ports()).toEqual([]);
+      expect(server.ports?.()).toEqual([]);
+    });
+  }
+});
+
+describe("an opener whose codec drops credit on read (today's behaviour, pinned)", () => {
+  // Such an opener never sees an ack, so it never agrees `pipeline`; its
+  // peer, which reads the opener's grants, does pipeline, and the opener's
+  // stream refuses the first pipelined chunk. 0.10 with 0.10 fails the same
+  // way once the opener's first grant arrives; a new responder that has
+  // read credit on an earlier port pipelines from the `open`, so from the
+  // second port on the stream fails on the responder's first chunk.
+  const dropsCreditOnRead: PortCodec = {
+    post: (port, envelope, transfer) => NEW.structuredCodec.post(port, envelope, transfer),
+    read: (event) => {
+      const envelope = NEW.structuredCodec.read(event);
+      return envelope?.type === "credit" ? undefined : envelope;
+    },
+  };
+  for (const [name, responder, ends] of [
+    // The first port fails once the opener's first grant reached the
+    // responder; later ones on the responder's first chunk, which comes as
+    // soon as the request's end is in.
+    ["new", NEW, [3 * RTT, 2 * RTT, 2 * RTT]],
+    // 0.10 holds back only on a credit for that port: every port as the first.
+    ["0.10.2", OLD, [3 * RTT, 3 * RTT, 3 * RTT]],
+  ] as const) {
+    it(`against a ${name} responder, the stream fails on a pipelined chunk`, async () => {
+      const link = virtualLink();
+      const { client } = pair(
+        link,
+        { kit: NEW, options: { codec: dropsCreditOnRead } },
+        { kit: responder },
+        readAllThenAnswer,
+      );
+      for (const end of ends) {
+        const exchange = await run(link, NEW, client, request());
+        expect(String(exchange.error)).toMatch(/pipelined chunk where pipelining was not agreed/);
+        expect(exchange.end).toBe(end);
+      }
+    });
+  }
+});
