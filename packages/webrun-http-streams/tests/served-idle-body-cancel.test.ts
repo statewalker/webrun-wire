@@ -89,13 +89,106 @@ describe("an idle served response body", () => {
     const { cancels, call, output } = idleServer();
     await opened(call);
     const failure = new Error("transport died");
+    const inFlight = output()?.next();
     void output()
       ?.throw(failure)
       .catch(() => {});
     await until(() => cancels.length > 0);
     expect(cancels[0]).toBe(failure);
+    await expect(inFlight).resolves.toEqual({ done: true, value: undefined });
     await settle();
     expect(cancels).toHaveLength(1);
+  });
+
+  it("lets go of a tee branch whose other branch nobody reads, without waiting for its cancel", async () => {
+    // A tee branch's cancel settles only once the other branch is cancelled too, which a branch
+    // nobody reads never is (`res.clone()`, `stream.tee()[0]`): the teardown must not wait on it.
+    const source = idleBody();
+    const [served] = source.stream.tee();
+    let output: AsyncGenerator<Uint8Array> | undefined;
+    const server = serveFetchOverDuplex(async () => new Response(served));
+    const call: Duplex = (input) => {
+      output = server(input);
+      return output;
+    };
+    await opened(call);
+    const inFlight = output?.next();
+    const returned = output?.return(undefined);
+    let outcome: unknown;
+    void Promise.all([inFlight, returned]).then((results) => {
+      outcome = results;
+    });
+    await until(() => outcome !== undefined);
+    expect(outcome).toEqual([
+      { done: true, value: undefined },
+      { done: true, value: undefined },
+    ]);
+  });
+
+  it("settles a teardown whose body cancel() throws", async () => {
+    const cancels: unknown[] = [];
+    let output: AsyncGenerator<Uint8Array> | undefined;
+    const server = serveFetchOverDuplex(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("data: hello\n\n"));
+            },
+            cancel(reason) {
+              cancels.push(reason);
+              throw new Error("cancel failed");
+            },
+          }),
+        ),
+    );
+    const call: Duplex = (input) => {
+      output = server(input);
+      return output;
+    };
+    await opened(call);
+    const inFlight = output?.next();
+    const returned = output?.return(undefined);
+    await until(() => cancels.length > 0);
+    await expect(inFlight).resolves.toEqual({ done: true, value: undefined });
+    await expect(returned).resolves.toEqual({ done: true, value: undefined });
+    expect(cancels).toHaveLength(1);
+  });
+
+  it("settles a teardown that comes at the same moment as the body's end, cancelling at most once", async () => {
+    const cancels: unknown[] = [];
+    let close: () => void = () => {};
+    let output: AsyncGenerator<Uint8Array> | undefined;
+    const server = serveFetchOverDuplex(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("data: hello\n\n"));
+              close = () => controller.close();
+            },
+            cancel(reason) {
+              cancels.push(reason);
+            },
+          }),
+        ),
+    );
+    const call: Duplex = (input) => {
+      output = server(input);
+      return output;
+    };
+    await opened(call);
+    const inFlight = output?.next().catch((error: unknown) => error);
+    close();
+    const returned = output?.return(undefined);
+    let outcome: unknown;
+    void Promise.all([inFlight, returned]).then((results) => {
+      outcome = results;
+    });
+    await until(() => outcome !== undefined);
+    await settle();
+    expect(cancels.length).toBeLessThanOrEqual(1);
+    expect((outcome as unknown[])[1]).toEqual({ done: true, value: undefined });
   });
 
   it("is cancelled at once when the caller aborts its fetch", async () => {
@@ -110,11 +203,13 @@ describe("an idle served response body", () => {
     expect(cancels).toHaveLength(1);
   });
 
-  it("is cancelled at once when the caller cancels the response body", async () => {
+  it("is cancelled within the cancel grace when the caller cancels the response body", async () => {
     const { cancels, call } = idleServer();
     const { reader } = await opened(call);
     await reader.cancel();
-    await until(() => cancels.length > 0, 1_500);
+    // The caller's read in flight is answered by nothing: the call is abandoned after
+    // `CANCEL_GRACE_MS` (1 s), and that abandonment is what reaches the served body.
+    await until(() => cancels.length > 0, 2_000);
     await settle();
     expect(cancels).toHaveLength(1);
   });
