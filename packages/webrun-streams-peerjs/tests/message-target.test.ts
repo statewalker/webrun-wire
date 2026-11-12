@@ -119,6 +119,16 @@ describe("messageTargetOverPeerJs", () => {
     const { conn, target } = make();
     conn.dataChannel.bufferedAmount = DRAIN_LOW_WATER;
     await target.whenDrained(); // at the mark, with nothing queued: it can take more
+    conn.dataChannel.bufferedAmount = 0;
+    conn.bufferSize = 1; // PeerJS holds a message back in its own queue
+    let early = false;
+    const queued = target.whenDrained().then(() => {
+      early = true;
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(early).toBe(false);
+    conn.bufferSize = 0;
+    await queued;
     conn.dataChannel.bufferedAmount = DRAIN_LOW_WATER + 5000;
     conn.bufferSize = 2;
     expect(target.bufferedAmount).toBe(DRAIN_LOW_WATER + 5000);

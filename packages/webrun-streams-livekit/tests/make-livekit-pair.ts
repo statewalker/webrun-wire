@@ -22,7 +22,7 @@ const PEER_TIMEOUT_MS = 20_000;
  * remote by identity, and a data packet sent to a participant LiveKit has not
  * announced yet is dropped rather than queued.
  */
-function waitForPeer(room: Room, identity: string): Promise<void> {
+export function waitForPeer(room: Room, identity: string): Promise<void> {
   const alreadyHere = Array.from(room.remoteParticipants.values()).some(
     (p) => p.identity === identity,
   );

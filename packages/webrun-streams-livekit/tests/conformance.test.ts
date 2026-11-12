@@ -20,6 +20,8 @@ if (isBrowser) {
   const { makeLiveKitPair } = await import("./make-livekit-pair.js");
   const { describeDuplexAdapter } = await import("@statewalker/webrun-streams-conformance");
   describeDuplexAdapter("webrun-streams-livekit", makeLiveKitPair);
+  const { makeLiveKitPortPair } = await import("./make-livekit-port-pair.js");
+  describeDuplexAdapter("webrun-streams-livekit over multiplexPort", makeLiveKitPortPair);
 } else {
   describe.skip("webrun-streams-livekit (browser-only conformance)", () => {
     it("skipped — run via pnpm test:browser", () => {});
