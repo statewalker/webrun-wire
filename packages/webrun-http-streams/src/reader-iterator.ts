@@ -17,11 +17,21 @@
  *    the first `next()` and removed however the iteration ends, so an iterator nobody reads
  *    leaves nothing on a long-lived signal.
  *
+ * A stream that fails on its own fails the `next()` that reads the failure; every later one is
+ * done, as on a generator that threw.
+ *
  * The stream is cancelled at most once, and never once it was read to its end or failed on its
  * own. The cancel is started, not awaited: a tee branch's cancel settles only once the other
  * branch is cancelled too, which a branch nobody reads (`response.clone()`) never is. A cancel
  * that fails is ignored. `return()` before the first `next()` cancels too — where a generator in
  * suspended start would ignore it.
+ *
+ * The reader's lock is released however the iteration ends, as a generator's `finally` would:
+ * read to its end, failed, or torn down. On a teardown it is released right after the cancel is
+ * started — the cancel closes the stream at once, answering the read in flight with done, so no
+ * read is pending any more when the lock goes (`releaseLock()` with a read pending rejects that
+ * read, in some runtimes). Should a read still be pending and be rejected by the release, the
+ * `next()` that waits on it answers from the teardown all the same.
  */
 export function readerIterator(
   stream: ReadableStream<Uint8Array>,
@@ -43,6 +53,14 @@ export function readerIterator(
       void (reader ? reader.cancel(reason) : stream.cancel(reason)).catch(() => {});
     } catch {
       /* a stream locked elsewhere: not ours to cancel */
+    }
+    release();
+  };
+  const release = () => {
+    try {
+      reader?.releaseLock();
+    } catch {
+      /* a runtime that refuses to release with a read pending: the lock goes with the reader */
     }
   };
   function onAbort() {
@@ -68,13 +86,14 @@ export function readerIterator(
         result = await reader.read();
       } catch (error) {
         if (over) return answer();
-        finish({ failure: { reason: error } });
+        finish({}); // thrown once, here; later calls are done
+        release();
         throw error;
       }
       if (over) return answer(); // torn down while this read waited
       if (result.done) {
         finish({});
-        reader.releaseLock();
+        release();
         return DONE;
       }
       return { done: false, value: result.value };
