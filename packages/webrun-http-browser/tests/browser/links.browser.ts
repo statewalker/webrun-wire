@@ -121,7 +121,10 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
           page,
           `
       const url = new URL("./page/stream", location.href).href;
-      const { read } = await window.command("A", { cmd: "read-up", url, n: 60 });
+      const answer = await window.command("A", { cmd: "read-up", url, n: 60 });
+      // The worker answers { ok: false, text } on any error: fail with it, not with "undefined".
+      if (!answer.ok) throw new Error("read-up failed in the worker: " + answer.text);
+      const { read } = answer;
       const produced = window.pageStats.produced;
       for (let i = 0; i < 50 && window.pageStats.cancelled === 0; i++) {
         await new Promise((r) => setTimeout(r, 20));
