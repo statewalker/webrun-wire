@@ -177,6 +177,131 @@ if (isBrowser) {
       serverPc.close();
     });
 
+    it("(review) a caller mux and a serving mux on one connection: two-way calls work", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const echo = async function* (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
+        for await (const chunk of input) yield chunk;
+      };
+      // the server side both serves and calls on the same connection
+      await serve(
+        { mux: overPorts((onPort) => webrtcPortMux({ pc: serverPc, codec, onPort })) },
+        echo,
+      );
+      const back = await connect({ mux: overPorts(() => webrtcPortMux({ pc: serverPc, codec })) });
+      await serve(
+        { mux: overPorts((onPort) => webrtcPortMux({ pc: clientPc, codec, onPort })) },
+        echo,
+      );
+      const { call, close } = await connect({
+        mux: overPorts(() => webrtcPortMux({ pc: clientPc, codec })),
+      });
+      expect([...(await collectBytes(call([new Uint8Array([7, 8])])))]).toEqual([7, 8]);
+      expect([...(await collectBytes(back.call([new Uint8Array([9])])))]).toEqual([9]);
+      await close();
+      await back.close();
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(review) two serving muxes on one connection: each port is answered once", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      let handled = 0;
+      const echo = async function* (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
+        handled++;
+        for await (const chunk of input) yield chunk;
+      };
+      await serve(
+        { mux: overPorts((onPort) => webrtcPortMux({ pc: serverPc, codec, onPort })) },
+        echo,
+      );
+      await serve(
+        { mux: overPorts((onPort) => webrtcPortMux({ pc: serverPc, codec, onPort })) },
+        echo,
+      );
+      const { call, close } = await connect({
+        mux: overPorts(() => webrtcPortMux({ pc: clientPc, codec })),
+      });
+      expect([...(await collectBytes(call([new Uint8Array([7, 8])])))]).toEqual([7, 8]);
+      expect(handled).toBe(1);
+      await close();
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(review) held messages reach every listener added in the same tick", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (port) => {
+          port.postMessage({ greeting: 1 });
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      await new Promise((r) => setTimeout(r, 300));
+      const a = new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+      const b = new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+      expect(await Promise.all([a, b])).toEqual([{ greeting: 1 }, { greeting: 1 }]);
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(review) on a connection already failed, openPort rejects instead of waiting", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      Object.defineProperty(clientPc, "connectionState", {
+        get: () => "failed",
+        configurable: true,
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      await expect(mux.openPort()).rejects.toBeDefined();
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(review) openPort honours its signal: aborted already, or while the channel opens", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      await webrtcPortMux({ pc: serverPc, codec, onPort: () => true });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      await expect(mux.openPort(undefined, { signal: AbortSignal.abort() })).rejects.toBeDefined();
+      const life = new AbortController();
+      const opening = mux.openPort(undefined, { signal: life.signal });
+      life.abort();
+      await expect(opening).rejects.toBeDefined();
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(review) another user's channel stays open, and this package's serve() leaves port channels alone", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const { serve: rawServe } = await import("../src/connect-serve.js");
+      let rawCalls = 0;
+      await rawServe({ pc: serverPc }, async function* () {
+        rawCalls++;
+      });
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (p) => {
+          p.addEventListener("message", (e) => p.postMessage(e.data));
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const other = clientPc.createDataChannel("someone-else");
+      await new Promise((r) => other.addEventListener("open", r));
+      const port = await mux.openPort();
+      const got = new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+      port.postMessage({ x: 1 });
+      expect(await got).toEqual({ x: 1 });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(other.readyState).toBe("open");
+      expect(rawCalls).toBe(1); // only the foreign channel reached serve()
+      clientPc.close();
+      serverPc.close();
+    });
+
     it("close() stops accepting and closes the ports it opened", async () => {
       const { clientPc, serverPc } = await connectedPeers();
       const serving = await webrtcPortMux({ pc: serverPc, codec, onPort: () => true });
