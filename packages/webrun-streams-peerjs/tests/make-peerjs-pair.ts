@@ -19,7 +19,7 @@ import { connect, serve } from "../src/connect-serve.js";
 /** Peer registration and the WebRTC handshake both go through the broker. */
 const OPEN_TIMEOUT_MS = 15_000;
 
-function waitPeerOpen(peer: Peer, label: string): Promise<void> {
+export function waitPeerOpen(peer: Peer, label: string): Promise<void> {
   if (peer.open) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -46,7 +46,7 @@ function waitPeerOpen(peer: Peer, label: string): Promise<void> {
   });
 }
 
-function waitConnOpen(conn: DataConnection): Promise<void> {
+export function waitConnOpen(conn: DataConnection): Promise<void> {
   if (conn.open) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {

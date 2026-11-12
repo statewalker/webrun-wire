@@ -45,6 +45,8 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@roamhq/wrtc": "catalog:",
+    "@statewalker/webrun-msgpack": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "@vitest/browser-playwright": "catalog:",
