@@ -66,7 +66,8 @@ export type PortCap = "pipeline" | "end";
 /**
  * What two ends have agreed for one windowed port so far. `caps`: what both
  * speak, and so what the peer may send; empty until the handshake settles it
- * (the opener learns it from the ack, the responder from the `open`).
+ * (the opener learns it from the ack, or presumes `pipeline` before it with
+ * `presumeAck`; the responder learns it from the `open`).
  * `enforced`: the window holds this end's own sends — what this end needs
  * before it relies on the window instead of a confirmation per message.
  */

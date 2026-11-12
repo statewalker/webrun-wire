@@ -52,7 +52,8 @@
     "vitest": "catalog:",
     "webrun-rpc-0-5": "catalog:",
     "webrun-rpc-0-7": "catalog:",
-    "webrun-rpc-0-8": "catalog:"
+    "webrun-rpc-0-8": "catalog:",
+    "webrun-rpc-0-10": "catalog:"
   },
   "sideEffects": false,
   "publishConfig": {

@@ -126,9 +126,46 @@ export interface PortMuxOptions {
    *
    * Safe against an older peer: neither end holds back until the other has
    * shown it reads credit (the responder's zero-byte ack, then the opener's
-   * answer to it), so a peer that never sends credit runs unwindowed.
+   * answer to it), so a peer that never sends credit runs unwindowed. Two
+   * shortcuts save those round trips where the peer is known to read credit:
+   * a responder holds back from the `open` on when the `open` lists `caps`
+   * and this mux has read a `credit` before, and an opener may presume the
+   * ack (`presumeAck`).
    */
   window?: number;
+  /**
+   * When a windowed port this mux opens takes its window as agreed: at once,
+   * or only once the responder's ack arrives, a round trip later. Until then
+   * a stream on the port (`duplexOverPort`) sends each chunk as a call the
+   * peer confirms, so an upload's end waits a round trip for its first
+   * chunk's confirmation; and a responder that waits for the opener's answer
+   * to its ack holds its response to the same confirmed pace.
+   *
+   * - `"learned"` (default): once a responder's ack on this mux has listed
+   *   `pipeline` (a peer from 0.9 on), every later port presumes the same
+   *   ack. That peer's mux acks every `open` of this one alike, so this
+   *   presumes only what it has already been told. The first port runs the
+   *   full handshake.
+   * - `"always"`: presume from the first port that the responder acks with
+   *   `pipeline` and this end's own sizing (`exact` when this codec counts
+   *   bytes), as every webrun-rpc from 0.9 on does. Only for a pipe whose
+   *   peer is known to be one, for instance by a protocol id: a peer from
+   *   before 0.9 ignores pipelined chunks, and one without a window never
+   *   acks at all.
+   * - `"never"`: always wait for the ack, as 0.10 did.
+   *
+   * A presuming port holds back by the window, as on the ack, and agrees
+   * `pipeline` (not `end`, which the ack settles before it is needed); it
+   * posts its answer to the ack right behind its `open`, so a responder that
+   * waits for that answer (0.9, 0.10) pipelines from the start too. The
+   * window is the opener's own, so the ack can contradict only the sizing or
+   * the capabilities: then no later port on this mux presumes, and the port
+   * fails (closes with reason `"protocol"`) if it already posted anything,
+   * or takes the ack as it is if not. A refused port (`maxPorts`, `onPort`)
+   * closes as before; until the refusal arrives it may have sent up to one
+   * window, which the responder drops.
+   */
+  presumeAck?: "learned" | "always" | "never";
   /**
    * Fair framing, in bytes (off when unset). Every port's messages leave in
    * turn, one item per port, whenever the pipe has room (its `whenDrained`),
@@ -189,6 +226,8 @@ export interface PortInfo {
   /**
    * The window in force, once the peer acknowledged it. Absent on a port that
    * asked for one from a peer that never answers credit (an older version).
+   * A port that presumed the ack (`presumeAck`) holds back by the window
+   * before then, but reports it only once the ack arrived.
    */
   window?: number;
   /** With a window: bytes waiting in this port's send queue. */

@@ -62,7 +62,7 @@ Stream tier and adapter:
 | `serve(params: PortParams, handler)` | Registers a `Duplex` handler. Resolves an idempotent teardown that abandons live streams, then closes the mux. |
 | `PortParams` | `{ mux: PortMuxFactory; timeout?: number }`. |
 | `PortMuxFactory`, `OnPort` | `(onPort?: OnPort) => PortMux \| Promise<PortMux>`; `(port, meta?) => boolean \| undefined`, `false` rejects. |
-| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`, `window`, `frameSize`. |
+| `overPipe(pipe, options: OverPipeOptions)` | A factory over one pipe via `multiplexPort`. Options: `codec`, `side`, `maxPorts`, `maxMessageSize`, `signal`, `window`, `frameSize`, `maxReassembledBytes`, `keepalive`, `onLeak`, `presumeAck`. |
 | `overPorts(factory)` | Pass-through, for a mux this package knows nothing about. |
 | `duplexOverPort(port, options?)` | A `Duplex` running one stream on `port`. |
 | `serveDuplexOverPort(port, handler, options?)` | The serving half. Returns an idempotent teardown that abandons the stream and notifies the peer. |
@@ -301,6 +301,7 @@ port cannot grow memory here.
 | `maxReassembledBytes` | Ceiling on what the peer's framed messages hold past their ports' windows, summed over all ports, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what a port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
 | `onLeak` | Development aid, off when unset: called with a port's `PortInfo` when its consumer dropped it without `close()`, and the port is freed. See "A port lives until its transport or its user lets go" below. |
+| `presumeAck` | `"learned"` (default), `"always"` or `"never"`: when a windowed port this mux opens takes its window as agreed, before the responder's ack or only on it. See "An exchange takes one round trip" below. |
 
 ### A port with a window holds only its own bytes
 
@@ -344,15 +345,51 @@ each end counts bytes but holds nothing back, so a port to an older peer, or ove
 keeps running without flow control, as it always did; `ports()` reports `window` only once it is
 in force. A peer's `window` that is not a positive integer is ignored.
 
+**An exchange takes one round trip.** Waiting for that handshake would cost a round trip in each
+direction: a stream (`duplexOverPort`) sends each chunk as a confirmed call until its end holds
+back by the window, so a responder that waited for the opener's answer (1.5 round trips in) sent a
+GET's head as a call and its body only after the head's confirmation, and an opener that waited
+for the ack sent a POST's end only after its first chunk's confirmation. Two shortcuts take the
+answer as given where the peer has already shown it reads credit, and nothing new goes on the wire:
+
+- **The responder** holds back from the `open` on, before the answer, when the `open` lists `caps`
+  (only a mux that grants credit lists them, from 0.9 on) and this mux has read a `credit` before,
+  from any port: that shows this end's own codec reads them and the peer's posts them. A
+  responder over a codec that drops credit never gets that far, and keeps waiting for an answer
+  that never comes, unwindowed as above.
+- **The opener** may presume the ack (`presumeAck`). With `"learned"`, the default, every port
+  after one whose ack listed `pipeline` presumes the same ack: the peer's mux acks every `open` of
+  this one alike (the same window, the same `open`), so this presumes only what that peer has
+  already said. With `"always"` it presumes from the first port, which suits a pipe whose peer is
+  known to be webrun-rpc 0.9 or later (by a protocol id, say): a peer from before 0.9 ignores
+  pipelined chunks, and one without a window never acks. `"never"` waits for every ack. A presuming
+  port holds back by the window at once, agrees `pipeline` (`end` is settled by the ack before it
+  is needed), and posts its answer to the ack right behind its `open`, so a responder that waits
+  for the answer (0.9, 0.10) holds back, and pipelines, from the start too.
+
+So from the second port on (from the first with `"always"`) a request and its response take one
+round trip, head and body together, also for a streamed upload, and against a 0.10 responder as
+well. A 0.10 opener paired with a newer responder gets the responder's half: a GET's head and body
+together from the second port on, its own uploads still two round trips. The window is the
+opener's own, so the ack can contradict a presumption only in its sizing (`exact`) or its
+capabilities. Then no later port on that mux presumes, and the port fails, closing with reason
+`"protocol"`, if it posted anything already (a pipelined chunk the peer ignores, or bytes counted
+the other way), or takes the ack as it is if it posted nothing. A port refused without an ack
+(`maxPorts`) or after one (`onPort`) closes as always; until the refusal arrives, a presuming
+opener may have sent up to one window of it, which the responder drops without buffering.
+`tests/port-presume-ack.test.ts` measures all of this over a link with a fixed delay in virtual
+time, against the published 0.10.2 and 0.8.0 too.
+
 **A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
 `caps: ["pipeline", "end"]` (`end` only over a codec that declares it, below), what this mux
 speaks on the port, and the responder's ack answers with the
 subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
 could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
 control is one chunk, or the window where both ends pipeline" below); nothing else changes
-meaning. The responder still holds its own sends back only once the opener has answered its ack,
-as above: a responder over a codec that drops credit envelopes would otherwise wedge its own port
-after one window.
+meaning. The responder holds its own sends back only once the opener has answered its ack, or
+once it has read a `credit` on this mux before (see "An exchange takes one round trip" above): a
+responder over a codec that drops credit envelopes would otherwise wedge its own port after one
+window.
 
 **Where `end` is agreed, each direction of a port can end on its own.** An `end` envelope leaves
 behind everything already posted on that port: it is a size-0 item in the port's window queue, so
@@ -619,9 +656,10 @@ machine cannot fail the suite) measures ping p99 beside a stalled reader with a 
 and with none, in one run, median of 3 each, and fails when the window's p99 is above twice the
 other's plus 1 ms.
 
-Until the agreement is known (the opener learns it from the ack; the responder's own sends wait
-for the opener's answer) chunks go as confirmed calls, so the handshake adds no round trip to the
-first chunk. Chunks, results and errors are the same either way, an error still in the last
+Until the agreement is known (the opener learns it from the ack, or presumes it; the responder's
+own sends wait for the opener's answer, or for nothing once its mux has read credit; see "An
+exchange takes one round trip") chunks go as confirmed calls, so the handshake adds no round trip
+to the first chunk. Chunks, results and errors are the same either way, an error still in the last
 chunk. Over `overPipe` without `window`, over `transferPortMux` and with a peer that answers no
 capabilities, every chunk is a confirmed call.
 

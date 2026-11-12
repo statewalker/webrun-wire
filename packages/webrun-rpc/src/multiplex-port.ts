@@ -99,6 +99,7 @@ export function multiplexPort(
     frameSize,
     keepalive,
     onLeak,
+    presumeAck = "learned",
   } = options;
   const maxReassembledBytes = options.maxReassembledBytes ?? DEFAULT_MAX_REASSEMBLED_BYTES;
   const misses = keepalive?.misses ?? 3;
@@ -120,6 +121,11 @@ export function multiplexPort(
   if (frameSize != null && !(Number.isSafeInteger(frameSize) && frameSize > 0)) {
     throw new RangeError(`webrun-rpc: frameSize must be a positive integer, got ${frameSize}`);
   }
+  if (presumeAck !== "learned" && presumeAck !== "always" && presumeAck !== "never") {
+    throw new RangeError(
+      `webrun-rpc: presumeAck must be "learned", "always" or "never", got ${String(presumeAck)}`,
+    );
+  }
   if (!(Number.isSafeInteger(maxReassembledBytes) && maxReassembledBytes > 0)) {
     throw new RangeError(
       `webrun-rpc: maxReassembledBytes must be a positive integer, got ${maxReassembledBytes}`,
@@ -134,13 +140,26 @@ export function multiplexPort(
   interface Credit {
     window: number;
     /**
-     * The peer applies the window. Until it says so (the responder's
-     * zero-byte `credit`), bytes are counted but nothing waits: an older peer
-     * never sends credit, and its ports must run as they did before.
+     * The window holds this end's sends. Until the peer has shown it reads
+     * credit, bytes are counted but nothing waits: an older peer never sends
+     * credit, and its ports must run as they did before. What shows it: on
+     * the opener, the responder's ack, or what this mux presumes of it (see
+     * `presumed`); on the responder, the opener's answer to the ack, or an
+     * `open` listing `caps` on a mux that has already read credit.
      */
     enforced: boolean;
     /** This side opened the port; the other answers its window with an ack. */
     opener: boolean;
+    /** The opener has not had the responder's ack yet: the next credit is it. */
+    awaitingAck: boolean;
+    /**
+     * The opener took the window as agreed when the port opened, without
+     * waiting for the ack (`presumeAck`): enforced, `pipeline` agreed, and
+     * this sizing. Checked against the ack when it arrives, then cleared.
+     */
+    presumed?: { exact: boolean };
+    /** Something was posted on the port while `presumed` held. */
+    sentPresumed: boolean;
     /**
      * Both ends count encoded bytes (`PortCodec.encode` / `decode`), and so
      * may split a large message into frames (`frameSize`). If either cannot,
@@ -242,6 +261,22 @@ export function multiplexPort(
   const exactCodec = codec.encode != null && codec.decode != null;
   /** What this end offers on a windowed port. */
   const caps = ownCaps(codec);
+  /**
+   * This mux has read a `credit` envelope: its codec reads them, and the
+   * peer's codec posts them. Only then does a responder hold its own sends
+   * back from an `open` on (with `caps`), before the opener's answer.
+   */
+  let creditRead = false;
+  /**
+   * What a port this mux opens takes as the responder's ack before it
+   * arrives (`presumeAck`): with `"always"`, the ack every responder that
+   * speaks capabilities sends; with `"learned"`, the one this peer sent on an
+   * earlier port, once one listed `pipeline`. `undefined`: presume nothing.
+   * An ack that contradicts it turns presumption off for this mux.
+   */
+  let presumable: { exact: boolean } | undefined =
+    presumeAck === "always" ? { exact: exactCodec } : undefined;
+  let presumeOff = presumeAck === "never";
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
     if (muxClosed) return;
@@ -392,6 +427,7 @@ export function multiplexPort(
     portWindow: unknown,
     opener: boolean,
     exact: boolean,
+    presume?: { exact: boolean },
   ): VirtualPortHandle => {
     // A peer's window must be a positive integer; anything else means none.
     const c: Credit | undefined =
@@ -400,11 +436,15 @@ export function multiplexPort(
             window: portWindow,
             // Nobody holds back until the other end has shown it reads credit:
             // the responder's ack proves that to the opener, and the opener's
-            // answer to the ack proves it to the responder.
-            enforced: false,
+            // answer to the ack proves it to the responder. An opener that
+            // presumes the ack holds back from the start, as on the ack.
+            enforced: presume != null,
             opener,
-            exact,
-            caps: new Set(),
+            awaitingAck: opener,
+            ...(presume ? { presumed: presume } : {}),
+            sentPresumed: false,
+            exact: presume ? exact && presume.exact : exact,
+            caps: new Set<PortCap>(presume ? ["pipeline"] : []),
             outstanding: 0,
             queue: [],
             queued: 0,
@@ -422,6 +462,7 @@ export function multiplexPort(
         // This side's direction has ended: nothing more goes out on it.
         if (c?.ending) return;
         touch(id);
+        if (c?.presumed) c.sentPresumed = true;
         const envelope: PortEnvelope = { type: "message", id, payload };
         // Without a window nothing frames or waits: post at once, so the
         // payload is read now, while the caller still expects it to be.
@@ -570,6 +611,71 @@ export function multiplexPort(
     return self;
   };
 
+  /**
+   * The responder's ack of a port this side opened. It settles the sizing and
+   * the capabilities; `false` when it closed the port instead.
+   */
+  const onAck = (
+    ack: Extract<PortEnvelope, { type: "credit" }>,
+    entry: Entry,
+    c: Credit,
+  ): boolean => {
+    const listed = sharedCaps(caps, ack.caps);
+    const presumed = c.presumed;
+    if (presumed) {
+      c.presumed = undefined;
+      // The answer to the ack already left, right behind the `open`.
+      const exact = exactCodec && ack.exact === true;
+      if (listed?.has("pipeline") && exact === presumed.exact) {
+        c.caps = listed;
+        return true;
+      }
+      // Not the ack presumed: this peer acks otherwise, so no later port
+      // presumes. A port that sent nothing yet has relied on nothing, and
+      // takes the ack as it is; one that did may have sent what the peer
+      // does not read (a pipelined chunk, a frame) or counted its bytes
+      // otherwise than the peer does, so it fails now rather than wedge.
+      presumable = undefined;
+      presumeOff = true;
+      if (c.sentPresumed) {
+        failPort(
+          entry.id,
+          entry,
+          new Error(
+            `webrun-rpc: the peer acknowledged port ${entry.id} with ${JSON.stringify({ exact: ack.exact === true, caps: ack.caps ?? null })}, not the exact sizing (${presumed.exact}) and pipeline this side presumed (presumeAck); the port is closed`,
+          ),
+          "protocol",
+        );
+        return false;
+      }
+      c.exact = exact;
+      c.caps = listed ?? new Set();
+      return true;
+    }
+    // It settles the sizing: if the responder cannot count exact bytes, both
+    // ends fall back to the estimate, and what was counted exactly before the
+    // ack no longer matches what comes back.
+    if (c.exact && ack.exact !== true) {
+      c.exact = false;
+      c.outstanding = 0;
+    }
+    c.caps = listed ?? new Set();
+    // Show the responder its codec reads credit, so it may hold back too.
+    post({ type: "credit", id: entry.id, bytes: 0 });
+    // What later ports may presume: this peer's ack, the same for every port
+    // this mux opens (the same window and `open`). Only a peer that speaks
+    // capabilities, so one that reads pipelined chunks after an `open`.
+    if (presumeAck === "learned" && !presumeOff && listed?.has("pipeline")) {
+      if (presumable && presumable.exact !== c.exact) {
+        presumable = undefined;
+        presumeOff = true;
+      } else {
+        presumable = { exact: c.exact };
+      }
+    }
+    return true;
+  };
+
   const handleEnvelope = (envelope: PortEnvelope, event: MessageEvent): void => {
     if (muxClosed) return;
     // Anything from the peer shows it is alive.
@@ -600,16 +706,25 @@ export function multiplexPort(
       // reaches the opener after the ack, so both ends count it the same way
       // (exact bytes or the estimate). A rejection's close follows the ack.
       // Only an opener that listed capabilities hears them answered; they
-      // hold from here for what it sends. This end's own sends still wait for
-      // the opener's answer to the ack before the window holds them: that
-      // answer is what shows this end's codec reads credit at all.
+      // hold from here for what it sends.
+      //
+      // This end's own sends wait for the window once the opener has shown
+      // it reads credit. Its answer to the ack shows that, one round trip
+      // after the ack; sooner, an `open` that lists capabilities does (only a
+      // version that grants credit lists them), but only on a mux that has
+      // already read a `credit`: that is what shows this end's own codec
+      // reads them, and the peer's posts them. A responder over a codec that
+      // drops credit would otherwise wedge its own port after one window.
       const credit = open.get(envelope.id)?.credit;
       const listed = sharedCaps(caps, envelope.caps);
       if (credit) {
         const ack: PortEnvelope = credit.exact
           ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
           : { type: "credit", id: envelope.id, bytes: 0 };
-        if (listed) credit.caps = listed;
+        if (listed) {
+          credit.caps = listed;
+          if (creditRead) credit.enforced = true;
+        }
         post(listed ? { ...ack, caps: [...listed] } : ack);
       }
       let accepted = false;
@@ -633,19 +748,12 @@ export function multiplexPort(
     const entry = open.get(envelope.id);
 
     if (envelope.type === "credit") {
+      creditRead = true;
       const c = entry?.credit;
       if (!c || !(envelope.bytes >= 0)) return;
-      if (!c.enforced && c.opener) {
-        // The ack. It also settles the sizing: if the responder cannot count
-        // exact bytes, both ends fall back to the estimate, and what was
-        // counted exactly before the ack no longer matches what comes back.
-        if (c.exact && envelope.exact !== true) {
-          c.exact = false;
-          c.outstanding = 0;
-        }
-        c.caps = sharedCaps(caps, envelope.caps) ?? new Set();
-        // Show the responder its codec reads credit, so it may hold back too.
-        post({ type: "credit", id: envelope.id, bytes: 0 });
+      if (c.awaitingAck) {
+        c.awaitingAck = false;
+        if (!onAck(envelope, entry as Entry, c)) return;
       }
       c.enforced = true;
       c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
@@ -865,7 +973,8 @@ export function multiplexPort(
       while (open.has(nextId)) nextId += 2;
       const id = nextId;
       nextId += 2;
-      const handle = attach(id, meta, window, true, exactCodec);
+      const presume = presumeOff ? undefined : presumable;
+      const handle = attach(id, meta, window, true, exactCodec, presume);
       post(
         window
           ? exactCodec
@@ -873,6 +982,10 @@ export function multiplexPort(
             : { type: "open", id, meta, window, caps: [...caps] }
           : { type: "open", id, meta },
       );
+      // Presumed: the answer to the ack goes now, right behind the `open`,
+      // so a responder that waits for it holds back (and so pipelines) from
+      // the start too. It is the envelope an answer always was, only sooner.
+      if (presume && open.get(id)?.credit) post({ type: "credit", id, bytes: 0 });
       if (portSignal) {
         // Through the mux's record, not the port: a long-lived signal must not
         // keep a dropped port reachable, and must still free it once dropped.
@@ -897,7 +1010,8 @@ export function multiplexPort(
         credit
           ? {
               ...info,
-              ...(credit.enforced ? { window: credit.window } : {}),
+              // Acknowledged: a presuming opener holds back before its ack.
+              ...(credit.enforced && !credit.awaitingAck ? { window: credit.window } : {}),
               queued: credit.queued,
               outstanding: credit.outstanding,
               unconsumed: credit.unconsumed,
