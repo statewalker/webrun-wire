@@ -53,6 +53,12 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
 export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 
 /**
+ * Default for {@link DuplexOverStreamOptions.readHighWaterBytes}: received bytes
+ * held for a consumer that is not reading before the stream is paused.
+ */
+export const DEFAULT_READ_HIGH_WATER_BYTES = 64 * 1024;
+
+/**
  * The stream ended before the call finished: the peer died, the connection
  * dropped, or the stream was reset or refused before both sides ended it.
  * Distinct from a clean end on purpose — a response cut short must never read
@@ -98,6 +104,17 @@ export interface DuplexOverStreamOptions {
    * the peer. Defaults to {@link DEFAULT_DRAIN_TIMEOUT_MS}.
    */
   drainTimeoutMs?: number;
+  /**
+   * Received bytes held for a consumer that is not reading before the stream
+   * is paused (and resumed once half of them are read). A paused yamux stream
+   * stops granting its peer receive window, so the peer's `send()` reports a
+   * full buffer and its producer waits: run-ahead is bounded by this plus the
+   * window granted before the pause — the receiving node's yamux
+   * `streamOptions.maxStreamWindowSize`, 16 MiB by default; 1 MiB bounds it at
+   * about 1.1 MiB with no loss of throughput on fast links measured so far.
+   * Defaults to {@link DEFAULT_READ_HIGH_WATER_BYTES}.
+   */
+  readHighWaterBytes?: number;
 }
 
 /**
@@ -212,7 +229,9 @@ export async function* duplexOverStream(
     // interleave. Inserting an await above would break that.
     let peerError: Error | undefined;
     try {
-      for await (const frame of parseFrames(stream)) {
+      for await (const frame of parseFrames(
+        pacedSource(stream, opts.readHighWaterBytes ?? DEFAULT_READ_HIGH_WATER_BYTES),
+      )) {
         if (frame.type === TYPE_DATA) {
           yield frame.payload;
         } else if (frame.type === TYPE_ERROR) {
@@ -410,6 +429,97 @@ async function* framedOutbound(
     void Promise.resolve((iterator as AsyncIterator<Uint8Array>).return?.(undefined)).catch(
       () => undefined,
     );
+  }
+}
+
+/**
+ * The stream's inbound bytes, read at the consumer's pace. libp2p's own
+ * iterator moves every message into an unbounded queue as it arrives, and
+ * yamux grants its peer more receive window on arrival, not on consumption: a
+ * consumer that stopped reading let the producer run 22-24 MiB ahead until
+ * libp2p's read buffer killed the stream (L6). Here the queue is bounded: past
+ * `highWater` bytes the stream is paused (yamux then withholds window updates,
+ * libp2p keeps what still arrives in its read buffer, undispatched), and it is
+ * resumed once the consumer has read the queue down to half.
+ *
+ * Ends as libp2p's iterator does: on the peer's `remoteCloseWrite`, or on
+ * `close` (throwing its error, if any). Subscribes on the first pull, like it.
+ */
+async function* pacedSource(stream: Stream, highWater: number): AsyncGenerator<Uint8Array> {
+  if (stream.readStatus !== "readable" && stream.readStatus !== "paused") return;
+  // While paused, libp2p holds what the peer may still send — the receive
+  // window granted before the pause — and aborts the stream past
+  // `maxReadBufferLength`. yamux's default window (16 MiB) exceeds libp2p's
+  // default buffer (4 MiB), so a slow consumer's stream would be killed: the
+  // buffer is raised to the window this stream's muxer can grant (read where
+  // the muxer exposes it, as yamux does), plus what is queued here.
+  const window = (stream as { maxStreamWindowSize?: unknown }).maxStreamWindowSize;
+  if (typeof window === "number" && stream.maxReadBufferLength < window + highWater) {
+    stream.maxReadBufferLength = window + highWater;
+  }
+  const queue: Uint8Array[] = [];
+  let queued = 0;
+  let ended = false;
+  let error: unknown;
+  let wake: (() => void) | undefined;
+  const notify = (): void => {
+    const w = wake;
+    wake = undefined;
+    w?.();
+  };
+  const onMessage = (evt: { data: unknown }): void => {
+    const chunk = normalizeChunk(evt.data);
+    if (chunk.byteLength === 0) return;
+    queue.push(chunk);
+    queued += chunk.byteLength;
+    if (queued >= highWater && stream.readStatus === "readable") {
+      try {
+        stream.pause();
+      } catch {
+        /* closing: nothing more will be granted anyway */
+      }
+    }
+    notify();
+  };
+  const onClose = (evt: StreamCloseEvent): void => {
+    ended = true;
+    error ??= evt.error;
+    notify();
+  };
+  const onRemoteCloseWrite = (): void => {
+    ended = true;
+    notify();
+  };
+  stream.addEventListener("message", onMessage);
+  stream.addEventListener("close", onClose);
+  stream.addEventListener("remoteCloseWrite", onRemoteCloseWrite);
+  try {
+    for (;;) {
+      const chunk = queue.shift();
+      if (chunk) {
+        queued -= chunk.byteLength;
+        if (queued <= highWater / 2 && stream.readStatus === "paused") {
+          try {
+            stream.resume(); // may dispatch what libp2p held meanwhile, synchronously
+          } catch {
+            /* closing */
+          }
+        }
+        yield chunk;
+        continue;
+      }
+      if (ended) {
+        if (error) throw error;
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+  } finally {
+    stream.removeEventListener("message", onMessage);
+    stream.removeEventListener("close", onClose);
+    stream.removeEventListener("remoteCloseWrite", onRemoteCloseWrite);
   }
 }
 

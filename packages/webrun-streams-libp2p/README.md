@@ -390,18 +390,44 @@ each; every channel must fail with an error within 1 s. The shared conformance s
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
 `skipHugeBody`.
 
-**L6 found no bound on run-ahead for `connect` / `serve`** (spec D17). A consumer that stops reading
-lets the producer get 22-24 MiB ahead within half a second, in either direction,
-until libp2p's 4 MiB read buffer (`maxReadBufferLength`) aborts the stream and
-the call fails with `PeerGoneError`. So a slow consumer is not throttled: its
-stream is killed. Pausing the stream while the consumer holds a chunk (libp2p
-3's `pause()` / `resume()`, which yamux honours by withholding window updates)
-and capping yamux's `maxStreamWindowSize` at 1 MiB did not bound it, so the
-buffering is elsewhere in the stack. The pair declares no `runAheadBytes`
-until it is found, and L6 checks only that a stalled transfer completes. The
-port stack over libp2p (native or emulated ports, above) is bounded at one
-chunk and passes L6 with `runAheadBytes: 4096`: use it where a slow consumer
-must throttle its producer.
+**Run-ahead is bounded for `connect` / `serve`** (spec D17, L6;
+`tests/run-ahead.test.ts`, always on). L6 first found none: a consumer that
+stopped reading let the producer run 22-24 MiB ahead until libp2p's 4 MiB read
+buffer killed the stream. Two things buffered without limit:
+
+- **libp2p's stream iterator** moves every message into an unbounded queue as
+  it arrives, and **yamux grants its peer receive window on arrival**, not on
+  consumption. The inbound side now reads through its own queue: past
+  `readHighWaterBytes` (default 64 KiB) the stream is paused, which makes yamux
+  withhold window updates, and it is resumed once the consumer has read half.
+- **`serve` pushed every request chunk to the handler's input queue** without
+  waiting. Past the same 64 KiB it now waits until the handler has read the
+  queue back down; once the handler's output has ended, input nobody will read
+  is dropped instead of waited for.
+
+The bound is then the window the receiving node granted before the pause plus
+those queues: **1.06 MiB measured with a 1 MiB window**, 16.05-16.12 MiB with
+yamux's default (16 MiB). Cap the window on nodes that serve or call with large
+bodies: `yamux({ streamOptions: { maxStreamWindowSize: 1024 * 1024 } })` (the
+option sits under `streamOptions`; set at the top level it is ignored, which is
+why an earlier attempt to cap it "did not bound it"). yamux's default window
+exceeds libp2p's default read buffer, so a paused stream raises its
+`maxReadBufferLength` to the window plus the high-water mark rather than be
+killed for buffering what it was allowed to receive.
+
+One-way throughput is unchanged (64 MiB over in-process TCP, 64 KiB chunks: up
+105-113, down 129-163 MiB/s before and after; 256 KiB chunks: 156-179 /
+184-219). An echo of 64 KiB chunks is slower (about 45 vs 65 MiB/s): it
+profited from the server reading the whole request ahead, which is the
+buffering removed. The port stack over libp2p (native or emulated ports,
+above) stays bounded at one chunk.
+
+Mutants, each killed by `tests/run-ahead.test.ts`: the reader never pauses (L6
+past the bound), never resumes (the stalled transfer never completes), no
+read-buffer raise (yamux's default window: the stream is aborted, once the
+window has grown — a test that stalls at once never grows it), `serve` not
+waiting on the handler's queue (L6 request), no drop once the handler's output
+ended (a handler that never reads its input hangs the call).
 
 `messageTargetOverStream` (review of the port work) now also aborts its
 `signal` for a stream that ended before the target was attached: a peer that
