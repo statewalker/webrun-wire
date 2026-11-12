@@ -35,15 +35,42 @@ function headersToArray(headers: Headers): [string, string][] {
   return out;
 }
 
+/**
+ * `stream` as an async iterable, read through one reader. Left early — `return()`, `throw()`,
+ * a failure downstream — the stream is cancelled; read to its end, it is not.
+ *
+ * `signal` cancels it at once, with the signal's reason, whatever the iteration is doing. That
+ * is the only way to reach a read in flight: the generator's own `return()` is queued behind the
+ * `next()` that waits on `reader.read()`, and a stream with no chunk pending (an SSE stream
+ * between events, a long poll) settles that read only with its next chunk, which may be never.
+ * `reader.cancel(reason)` settles it now, and the iteration then fails with the reason rather
+ * than ending: a body cut short must not read as complete (the chunked encoder would write its
+ * terminator). The listener is added once the iteration starts and removed however it ends.
+ */
 async function* readableToAsyncIterable(
   stream: ReadableStream<Uint8Array> | null | undefined,
+  signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   if (!stream) return;
   const reader = stream.getReader();
+  let cancelled: { reason: unknown; done: Promise<void> } | undefined;
+  const cancel = (reason?: unknown): Promise<void> => {
+    cancelled ??= { reason, done: reader.cancel(reason).catch(() => {}) };
+    return cancelled.done;
+  };
+  const failIfCancelled = () => {
+    if (cancelled) throw cancelled.reason;
+  };
+  // The signal's own reason, as is: a consumer that tore the iteration down knows it as its own.
+  const onAbort = () => void cancel((signal as unknown as { reason?: unknown }).reason);
   let consumed = false;
   try {
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
     while (true) {
+      failIfCancelled();
       const { done, value } = await reader.read();
+      failIfCancelled();
       if (done) {
         consumed = true;
         return;
@@ -51,13 +78,8 @@ async function* readableToAsyncIterable(
       if (value) yield value;
     }
   } finally {
-    if (!consumed) {
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
-    }
+    signal?.removeEventListener("abort", onAbort);
+    if (!consumed) await cancel();
     try {
       reader.releaseLock();
     } catch {
@@ -66,23 +88,59 @@ async function* readableToAsyncIterable(
   }
 }
 
-function asyncIterableToReadable(iter: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+/**
+ * `iter` as a stream. `signal` errors it at once with the signal's reason — a read waiting for a
+ * peer that sends nothing more rejects then — and lets `iter` go. A cancel lets `iter` go
+ * without waiting for it: its `return()` is queued behind a `next()` in flight, which a peer
+ * that sends nothing more never answers.
+ */
+function asyncIterableToReadable(
+  iter: AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): ReadableStream<Uint8Array> {
   const it = iter[Symbol.asyncIterator]();
+  let ended = false;
+  let onAbort: (() => void) | undefined;
+  const end = () => {
+    ended = true;
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    void Promise.resolve(it.return?.()).catch(() => {});
+  };
   return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (!signal) return;
+      onAbort = () => {
+        if (ended) return;
+        end();
+        try {
+          controller.error(abortReason(signal));
+        } catch {
+          /* already closed or errored */
+        }
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    },
     async pull(controller) {
       try {
         const { done, value } = await it.next();
+        if (ended) return; // aborted or cancelled while this read waited
         if (done) {
+          ended = true;
+          if (onAbort) signal?.removeEventListener("abort", onAbort);
           controller.close();
           return;
         }
         controller.enqueue(value);
       } catch (err) {
+        if (ended) return;
+        ended = true;
+        if (onAbort) signal?.removeEventListener("abort", onAbort);
         controller.error(err);
       }
     },
-    async cancel() {
-      await it.return?.();
+    cancel() {
+      if (!ended) end();
     },
   });
 }
@@ -107,7 +165,8 @@ export async function fetchOverDuplex(
   if (request.body != null) {
     // The streaming path stays first and unconditional: a runtime that has
     // request streams never reaches the fallback, and never buffers an upload.
-    body = readableToAsyncIterable(request.body);
+    // The request's signal cancels the upload at once, even while it waits for its next chunk.
+    body = readableToAsyncIterable(request.body, request.signal ?? undefined);
   } else if (!supportsRequestStreams()) {
     // Firefox. Without `request.body` there is nothing to stream from, so the
     // only way to see the payload at all is to buffer the whole of it. Two
@@ -176,7 +235,8 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
     if (env.method !== "GET" && env.method !== "HEAD") {
       if (supportsRequestStreams()) {
         upload = trackingEnd(body);
-        reqInit.body = asyncIterableToReadable(upload.source);
+        // An abandoned exchange fails the handler's read at once, even one waiting for the next chunk.
+        reqInit.body = asyncIterableToReadable(upload.source, exchange?.signal);
         (reqInit as RequestInit & { duplex?: string }).duplex = "half";
       } else {
         // Firefox again, and this is the half that fails *silently*. The
@@ -230,11 +290,15 @@ export function serveFetchOverDuplex(handler: FetchHandler, options: HttpDataOpt
     }
     return {
       envelope: respEnv,
-      body: response.body ? readableToAsyncIterable(response.body) : undefined,
+      // An abandoned exchange cancels the body at once, with the signal's reason: the transport's
+      // `return()` is queued behind the read in flight, which an idle body (an SSE stream between
+      // events) answers only with its next chunk.
+      body: response.body ? readableToAsyncIterable(response.body, exchange?.signal) : undefined,
       // A body the codec never started reading has no reader to cancel
-      // through; cancel the stream itself. Once read, it is locked and this
-      // rejects, harmlessly: the reader's own cancellation has run.
-      release: () => response.body?.cancel(),
+      // through; cancel the stream itself. Once read, it is cancelled or
+      // closed already and this does nothing more.
+      release: () =>
+        response.body?.cancel((exchange?.signal as { reason?: unknown } | undefined)?.reason),
       settled,
     };
   }, options);

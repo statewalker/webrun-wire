@@ -15,7 +15,8 @@ import { fetchOverDuplex, serveFetchOverDuplex } from "../src/fetch.js";
  *
  * The same holds for the two other streams this package reads from on someone
  * else's behalf: the request body a served handler reads (a caller that stops
- * sending), and the upload a caller streams (a peer that stops reading).
+ * sending, then goes away), and the upload a caller streams (a fetch aborted
+ * while the upload waits for its next chunk).
  */
 
 /** A body that sends one chunk and then waits for good, noting its cancellations. */
