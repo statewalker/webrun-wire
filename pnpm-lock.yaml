@@ -617,6 +617,12 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.5.15
+      '@statewalker/webrun-msgpack':
+        specifier: workspace:^
+        version: link:../webrun-msgpack
+      '@statewalker/webrun-rpc':
+        specifier: workspace:^
+        version: link:../webrun-rpc
       '@statewalker/webrun-streams-conformance':
         specifier: workspace:^
         version: link:../webrun-streams-conformance
