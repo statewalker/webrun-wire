@@ -136,14 +136,13 @@ and one that duplicates a chunk and drops another.
 | port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 4 KiB (one chunk) | 0: the next chunk is produced only once the consumer pulls past the last |
 | `-webrtc` `connect` / `serve` | `RECEIVE_WINDOW` (4 MiB) + 16 KiB | 4 MiB exactly |
 | `-webrtc` port stack (`webrtcPortMux`) | 4 KiB (one chunk) | 0 |
-| `-libp2p` `connect` / `serve` | none declared | 22-24 MiB in half a second, until libp2p's 4 MiB read buffer aborts the stream |
+| `-libp2p` `connect` / `serve` | 2 × the receiving node's yamux window + 256 KiB | 1.06-1.13 MiB with a 1 MiB window (2.00 MiB reading and stalling by turns), 16.05-16.12 MiB with yamux's default 16 MiB (before the paced reader: 22-24 MiB, until libp2p's read buffer aborted the stream) |
 | `-libp2p` port stack (native `libp2pPortMux`, or `overPipe` on one stream) | 4 KiB (one chunk) | 0 |
 
 The level dies on what it should: sending port-stack chunks without waiting for
 their confirmation fails it, a WebRTC pair declaring half its window fails it at
-exactly 4 MiB ahead, and a libp2p pair declaring 1 MiB fails it 2.1 MB ahead.
-`-libp2p` declares no bound until its buffering is found (see that package's
-README), so for it L6 checks that a stalled 1 MiB transfer completes.
+exactly 4 MiB ahead, and a libp2p pair whose reader never pauses fails it (its
+`tests/run-ahead.test.ts`, with the other mutants listed in that package).
 
 ### What L5 deliberately does not assert
 

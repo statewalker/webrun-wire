@@ -8,7 +8,12 @@ import type {
 } from "@libp2p/interface";
 import type { Multiaddr } from "@multiformats/multiaddr";
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
-import { closeStream, duplexOverStream, PeerGoneError } from "./duplex-over-stream.js";
+import {
+  closeStream,
+  DEFAULT_READ_HIGH_WATER_BYTES,
+  duplexOverStream,
+  PeerGoneError,
+} from "./duplex-over-stream.js";
 import { openGatedStream } from "./stream-gate.js";
 
 export const DEFAULT_PROTOCOL = "/webrun-streams/1.0.0";
@@ -23,6 +28,11 @@ export interface ConnectLibp2pParams {
    * peer; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes).
    */
   drainTimeoutMs?: number;
+  /**
+   * Response bytes held while the caller is not reading before the stream is
+   * paused; see `DuplexOverStreamOptions.readHighWaterBytes` (default 64 KiB).
+   */
+  readHighWaterBytes?: number;
   /**
    * How many outgoing streams for this protocol libp2p allows to be open at
    * the same time on one connection; passed through to `node.dialProtocol`.
@@ -50,6 +60,11 @@ export interface ServeLibp2pParams {
    * closing, since the caller-side `.return`/abort escape does not exist here.
    */
   drainTimeoutMs?: number;
+  /**
+   * Request bytes held while the handler is not reading before the stream is
+   * paused; see `DuplexOverStreamOptions.readHighWaterBytes` (default 64 KiB).
+   */
+  readHighWaterBytes?: number;
   /**
    * How many incoming streams for this protocol libp2p allows to be open at
    * the same time on one connection; passed through to `node.handle`. Left
@@ -103,6 +118,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
   peer,
   protocol,
   drainTimeoutMs,
+  readHighWaterBytes,
   maxOutboundStreams,
   runOnLimitedConnection,
 }) => {
@@ -141,6 +157,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
       try {
         yield* duplexOverStream(stream, input, {
           drainTimeoutMs,
+          readHighWaterBytes,
           onSourceCompleted: () => {
             sourceCompleted = true;
           },
@@ -224,6 +241,7 @@ export async function serveConnections(
     node,
     protocol,
     drainTimeoutMs,
+    readHighWaterBytes,
     maxInboundStreams,
     maxOutboundStreams,
     runOnLimitedConnection,
@@ -243,17 +261,24 @@ export async function serveConnections(
     let requestComplete = false;
     void (async () => {
       const handler = makeHandler({ remotePeer: connection.remotePeer });
-      const inputQueue = makeInputQueue();
-      const output = handler(inputQueue.iter());
+      const inputQueue = makeInputQueue(readHighWaterBytes ?? DEFAULT_READ_HIGH_WATER_BYTES);
+      // once the handler's output has ended, input it never started to read is
+      // dropped instead of waited for (input it is reading, perhaps in the
+      // background, keeps flowing at its pace)
+      const output = endsWith(handler(inputQueue.iter()), () => inputQueue.abandon());
       try {
         for await (const chunk of duplexOverStream(stream, output, {
           drainTimeoutMs,
+          readHighWaterBytes,
           onPeerInputEnd: (err) => {
             if (err === undefined) requestComplete = true;
             inputQueue.done(err);
           },
         })) {
-          inputQueue.push(chunk);
+          // past readHighWaterBytes queued for the handler, the next chunk is
+          // read only once it took this one: a handler that stops reading
+          // pauses the stream (see readHighWaterBytes)
+          await inputQueue.push(chunk);
         }
       } finally {
         inputQueue.done();
@@ -287,20 +312,61 @@ export async function serveConnections(
   };
 }
 
-interface InputQueue {
-  iter(): AsyncGenerator<Uint8Array>;
-  push(chunk: Uint8Array): void;
-  done(err?: Error): void;
+/** `source`, calling `onEnd` once when it ends, fails or is returned. */
+function endsWith(
+  source: AsyncIterable<Uint8Array>,
+  onEnd: () => void,
+): AsyncGenerator<Uint8Array> {
+  return (async function* () {
+    try {
+      yield* source;
+    } finally {
+      onEnd();
+    }
+  })();
 }
 
-function makeInputQueue(): InputQueue {
+interface InputQueue {
+  iter(): AsyncGenerator<Uint8Array>;
+  /**
+   * resolves at once while the bytes queued for the handler stay within the
+   * limit, else once the handler has read them back down to it (or will never
+   * read on)
+   */
+  push(chunk: Uint8Array): Promise<void>;
+  done(err?: Error): void;
+  /**
+   * the handler's output ended: if it never started reading its input, pending
+   * and later chunks are dropped (an iterator started already is left to its
+   * reader, which may go on reading after the output ended)
+   */
+  abandon(): void;
+}
+
+function makeInputQueue(limit: number): InputQueue {
   type Slot = { type: "value"; value: Uint8Array } | { type: "done"; err?: Error };
   const slots: Slot[] = [];
   let wake: (() => void) | null = null;
   let closed = false;
+  let pulled = false;
+  let queued = 0;
+  // the one push waiting for room (the serving loop awaits each push)
+  let room: (() => void) | null = null;
+  const makeRoom = (): void => {
+    const r = room;
+    room = null;
+    r?.();
+  };
+  const release = (): void => {
+    slots.length = 0;
+    queued = 0;
+    makeRoom();
+  };
   return {
     iter(): AsyncGenerator<Uint8Array> {
       return (async function* () {
+        if (closed) return; // abandoned before anyone read: the input was dropped
+        pulled = true;
         try {
           while (true) {
             if (slots.length === 0) {
@@ -315,21 +381,35 @@ function makeInputQueue(): InputQueue {
               if (s.err) throw s.err;
               return;
             }
+            queued -= s.value.byteLength;
+            if (queued <= limit) makeRoom();
             yield s.value;
           }
         } finally {
           closed = true;
+          release();
         }
       })();
     },
-    push(chunk: Uint8Array): void {
-      if (closed) return;
+    push(chunk: Uint8Array): Promise<void> {
+      if (closed) return Promise.resolve();
       slots.push({ type: "value", value: chunk });
+      queued += chunk.byteLength;
       wake?.();
+      if (queued <= limit) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        room = resolve;
+      });
     },
     done(err?: Error): void {
       if (closed) return;
       slots.push({ type: "done", err });
+      wake?.();
+    },
+    abandon(): void {
+      if (pulled) return;
+      closed = true;
+      release();
       wake?.();
     },
   };
