@@ -25,17 +25,18 @@ export async function createNode(
 }
 
 /**
- * Run-ahead past a consumer that stopped reading (L6, spec D17): the window
- * the receiving node granted before its stream paused, plus what is queued on
- * the receiving side — the paced reader's high-water mark and, on the serving
- * side, the handler's input queue (64 KiB each) — plus a frame in flight.
- * Measured: 1.06 MiB for a 1 MiB window, 16.05-16.12 MiB for yamux's default.
+ * Run-ahead past a consumer that stopped reading (L6, spec D17): two windows —
+ * a resume hands over what libp2p held while paused (up to the window the
+ * receiving node granted) and grants a new one — plus what is queued on the
+ * receiving side (the paced reader's high-water mark, the serving side's
+ * input queue, a frame being parsed). Measured: 1.06 MiB for a 1 MiB window
+ * when the consumer stalls at once, 2.00 MiB when it reads and stalls by turns.
  */
-export const runAheadFor = (window: number): number => window + 3 * 64 * 1024;
+export const runAheadFor = (window: number): number => 2 * window + 256 * 1024;
 
 /**
  * Two TCP nodes granting {@link PAIR_STREAM_WINDOW} per stream, so a stalled
- * consumer bounds its producer at about 1.2 MiB (`runAheadFor`).
+ * consumer bounds its producer at about 2.25 MiB (`runAheadFor`).
  */
 export const makeLibp2pPair: MakePair = async () => makePairWith(PAIR_STREAM_WINDOW);
 

@@ -262,8 +262,9 @@ export async function serveConnections(
     void (async () => {
       const handler = makeHandler({ remotePeer: connection.remotePeer });
       const inputQueue = makeInputQueue(readHighWaterBytes ?? DEFAULT_READ_HIGH_WATER_BYTES);
-      // once the handler's output has ended, nothing will read its input: what
-      // still arrives is dropped instead of waited for
+      // once the handler's output has ended, input it never started to read is
+      // dropped instead of waited for (input it is reading, perhaps in the
+      // background, keeps flowing at its pace)
       const output = endsWith(handler(inputQueue.iter()), () => inputQueue.abandon());
       try {
         for await (const chunk of duplexOverStream(stream, output, {
@@ -334,7 +335,11 @@ interface InputQueue {
    */
   push(chunk: Uint8Array): Promise<void>;
   done(err?: Error): void;
-  /** the handler will not read on: pending and later chunks are dropped */
+  /**
+   * the handler's output ended: if it never started reading its input, pending
+   * and later chunks are dropped (an iterator started already is left to its
+   * reader, which may go on reading after the output ended)
+   */
   abandon(): void;
 }
 
@@ -343,6 +348,7 @@ function makeInputQueue(limit: number): InputQueue {
   const slots: Slot[] = [];
   let wake: (() => void) | null = null;
   let closed = false;
+  let pulled = false;
   let queued = 0;
   // the one push waiting for room (the serving loop awaits each push)
   let room: (() => void) | null = null;
@@ -359,6 +365,8 @@ function makeInputQueue(limit: number): InputQueue {
   return {
     iter(): AsyncGenerator<Uint8Array> {
       return (async function* () {
+        if (closed) return; // abandoned before anyone read: the input was dropped
+        pulled = true;
         try {
           while (true) {
             if (slots.length === 0) {
@@ -399,6 +407,7 @@ function makeInputQueue(limit: number): InputQueue {
       wake?.();
     },
     abandon(): void {
+      if (pulled) return;
       closed = true;
       release();
       wake?.();

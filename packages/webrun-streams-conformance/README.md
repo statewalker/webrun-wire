@@ -136,7 +136,7 @@ and one that duplicates a chunk and drops another.
 | port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 4 KiB (one chunk) | 0: the next chunk is produced only once the consumer pulls past the last |
 | `-webrtc` `connect` / `serve` | `RECEIVE_WINDOW` (4 MiB) + 16 KiB | 4 MiB exactly |
 | `-webrtc` port stack (`webrtcPortMux`) | 4 KiB (one chunk) | 0 |
-| `-libp2p` `connect` / `serve` | the receiving node's yamux window + 192 KiB | 1.06-1.13 MiB with a 1 MiB window, 16.05-16.12 MiB with yamux's default 16 MiB (before the paced reader: 22-24 MiB, until libp2p's read buffer aborted the stream) |
+| `-libp2p` `connect` / `serve` | 2 × the receiving node's yamux window + 256 KiB | 1.06-1.13 MiB with a 1 MiB window (2.00 MiB reading and stalling by turns), 16.05-16.12 MiB with yamux's default 16 MiB (before the paced reader: 22-24 MiB, until libp2p's read buffer aborted the stream) |
 | `-libp2p` port stack (native `libp2pPortMux`, or `overPipe` on one stream) | 4 KiB (one chunk) | 0 |
 
 The level dies on what it should: sending port-stack chunks without waiting for
