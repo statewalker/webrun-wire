@@ -15,6 +15,8 @@ if (isBrowser) {
   const { makePeerJsPair } = await import("./make-peerjs-pair.js");
   const { describeDuplexAdapter } = await import("@statewalker/webrun-streams-conformance");
   describeDuplexAdapter("webrun-streams-peerjs", makePeerJsPair);
+  const { makePeerJsPortPair } = await import("./make-peerjs-port-pair.js");
+  describeDuplexAdapter("webrun-streams-peerjs over multiplexPort", makePeerJsPortPair);
 } else {
   describe.skip("webrun-streams-peerjs (browser-only)", () => {
     it("skipped — run via pnpm test:browser", () => {});
