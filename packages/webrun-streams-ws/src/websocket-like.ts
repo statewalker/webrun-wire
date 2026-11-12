@@ -5,6 +5,10 @@
  */
 export interface WebSocketLike {
   readonly readyState: number;
+  /** Bytes queued by `send` and not yet written out. */
+  readonly bufferedAmount?: number;
+  /** How binary messages arrive: "blob" or "arraybuffer" in browsers, "nodebuffer" in `ws`. */
+  binaryType?: string;
   send(data: string | ArrayBuffer | Blob | Uint8Array): void;
   close(): void;
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;

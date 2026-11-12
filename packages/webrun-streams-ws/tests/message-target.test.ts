@@ -10,7 +10,10 @@ import { makeWsPortPair } from "./make-ws-port-pair.js";
 
 describeDuplexAdapter("webrun-streams-ws over multiplexPort", makeWsPortPair);
 
-const NodeCtor = NodeWebSocket as unknown as new (u: string, p?: string | string[]) => WebSocketLike;
+const NodeCtor = NodeWebSocket as unknown as new (
+  u: string,
+  p?: string | string[],
+) => WebSocketLike;
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
@@ -58,8 +61,9 @@ async function pipePair() {
   return { a, b, clientWs, serverWs };
 }
 
-const nextMessage = (t: { addEventListener: (k: "message", l: (e: MessageEvent) => void) => void }) =>
-  new Promise<unknown>((r) => t.addEventListener("message", (e) => r(e.data)));
+const nextMessage = (t: {
+  addEventListener: (k: "message", l: (e: MessageEvent) => void) => void;
+}) => new Promise<unknown>((r) => t.addEventListener("message", (e) => r(e.data)));
 
 describe("messageTargetOverWebSocket", () => {
   it("carries bytes both ways, one message per post, as Uint8Array", async () => {
@@ -72,6 +76,13 @@ describe("messageTargetOverWebSocket", () => {
     const back = nextMessage(a.target);
     b.target.postMessage(new Uint8Array([9]).buffer);
     expect([...((await back) as Uint8Array)]).toEqual([9]);
+  });
+
+  it("a text frame from the peer arrives as its UTF-8 bytes", async () => {
+    const { a, serverWs } = await pipePair();
+    const got = nextMessage(a.target);
+    serverWs.send("héllo");
+    expect(new TextDecoder().decode((await got) as Uint8Array)).toBe("héllo");
   });
 
   it("refuses anything but bytes: a codec breaking its contract is not papered over", async () => {

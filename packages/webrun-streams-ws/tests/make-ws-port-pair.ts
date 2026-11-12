@@ -5,7 +5,10 @@ import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 import { messageTargetOverWebSocket, openWebSocket } from "../src/message-target.js";
 import type { WebSocketLike } from "../src/websocket-like.js";
 
-const NodeCtor = NodeWebSocket as unknown as new (u: string, p?: string | string[]) => WebSocketLike;
+const NodeCtor = NodeWebSocket as unknown as new (
+  u: string,
+  p?: string | string[],
+) => WebSocketLike;
 
 /**
  * The port stack over a WebSocket: each socket is one pipe of bytes
