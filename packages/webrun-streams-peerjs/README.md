@@ -62,9 +62,9 @@ import { messageTargetOverPeerJs } from "@statewalker/webrun-streams-peerjs";
 import { Peer } from "peerjs";
 
 const peer = new Peer("my-server-id");
-await new Promise((resolve) => peer.on("open", resolve));
+await new Promise<void>((resolve) => peer.on("open", () => resolve()));
 
-async function* echo(input: AsyncIterable<Uint8Array>) {
+async function* echo(input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
   for await (const chunk of input) yield chunk;
 }
 
@@ -93,10 +93,10 @@ import { messageTargetOverPeerJs } from "@statewalker/webrun-streams-peerjs";
 import { Peer } from "peerjs";
 
 const peer = new Peer();
-await new Promise((resolve) => peer.on("open", resolve));
+await new Promise<void>((resolve) => peer.on("open", () => resolve()));
 
 const conn = peer.connect("my-server-id", { serialization: "raw", reliable: true });
-await new Promise((resolve) => conn.on("open", resolve));
+await new Promise<void>((resolve) => conn.on("open", () => resolve()));
 
 const { target, signal, maxMessageSize } = messageTargetOverPeerJs(conn);
 const { call, close } = await connect({

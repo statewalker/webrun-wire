@@ -3,9 +3,12 @@ import type { ByteChannel } from "./types.js";
 type Listener = (event: MessageEvent) => void | Promise<void>;
 
 /**
- * The payload ceiling for a channel over an `RTCDataChannel`: 16 KiB, the
- * message size every browser pair delivers, less the 256 bytes the port stack's
- * framing needs (spec D10).
+ * The payload ceiling for a channel over an `RTCDataChannel` (`PeerManager`,
+ * `QrSignaling`, `PeerConnection`): 16 KiB, the message size every browser
+ * pair delivers, less the 256 bytes the port stack's framing needs (spec D10).
+ * For a `byteChannelFromRoom` channel pass `maxMessageSize: 12 * 1024`, as
+ * `webrun-streams-livekit` uses: an older LiveKit client dropped larger
+ * reliable packets silently.
  */
 export const DEFAULT_MAX_MESSAGE_SIZE = 16 * 1024 - 256;
 
@@ -38,7 +41,9 @@ export interface ByteChannelMessageTarget {
  * ```
  *
  * It starts reading the channel at once, so attach listeners in the same tick;
- * a message with no listener is dropped, as on a `MessagePort`.
+ * a message with no listener is dropped, as on a `MessagePort`. It must be the
+ * channel's only reader: a second reader of `recv` would take messages from it.
+ * Messages already received when the channel closes are still delivered.
  */
 export function messageTargetOverByteChannel(
   channel: ByteChannel,
@@ -46,13 +51,16 @@ export function messageTargetOverByteChannel(
 ): ByteChannelMessageTarget {
   const listeners = new Set<Listener>();
   const life = new AbortController();
+  let closedHere = false;
   const end = (reason: Error): void => {
     if (!life.signal.aborted) life.abort(reason);
   };
   void channel.closed.then(() => end(new Error("webrun-streams-signaling: the channel closed")));
   void (async () => {
     for await (const bytes of channel.recv) {
-      if (life.signal.aborted) break;
+      // The channel closing ends `recv` after what it already holds; only a
+      // close on this side stops delivery at once.
+      if (closedHere) break;
       const event = new MessageEvent("message", { data: bytes.slice() });
       for (const listener of [...listeners]) {
         try {
@@ -93,6 +101,7 @@ export function messageTargetOverByteChannel(
       },
       async close() {
         listeners.clear();
+        closedHere = true;
         end(new Error("webrun-streams-signaling: closed locally"));
         try {
           channel.close();

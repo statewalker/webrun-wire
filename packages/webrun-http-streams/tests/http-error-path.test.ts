@@ -167,11 +167,11 @@ describe("peer-error response body is actually drained", () => {
     // one stream-table slot, forever, until the mux itself is closed — an
     // availability bug independent of body size.
     //
-    // That leak was `emulateMux`'s, whose stream slot lived until its
-    // generator was returned. On the port stack that replaced it, a port also
-    // closes when the stream ends, so this now passes without the `return()`
-    // too (measured): it pins that the port stack frees each port, and the
-    // `return()` stays for any other `Duplex` that holds a resource until it.
+    // Measured on the port stack (review of #107): removing the `return()` in
+    // `throwIfPeerError` alone does not fail this, because draining the body
+    // through `releasingOnExit` already returns `output` first; removing both
+    // fails it with "maxPorts (2) reached". So it guards the leak through
+    // either path, not the `throwIfPeerError` line by itself.
     // The port stack over one MessageChannel, at most two ports open at once.
     const channel = new MessageChannel();
     const stopServing = await serve(

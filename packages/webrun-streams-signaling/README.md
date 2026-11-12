@@ -43,8 +43,8 @@ pass an `rtc` factory from a WebRTC implementation.
 | `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
 | `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
 | `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`. |
-| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. |
-| `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel). |
+| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. It closes when the room disconnects, the participant leaves, or a reliable publish fails, so whatever runs on it learns the other end is gone. |
+| `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel; pass `maxMessageSize: 12 * 1024` for a `byteChannelFromRoom` channel). It must be the channel's only reader. |
 | `ByteChannel` | The channel type. It used to come from `@statewalker/webrun-streams`; it is declared here since `emulateMux` was removed. |
 | `generateSessionId()`, `createCompressedSignal(...)`, `parseCompressedSignal(signal)`, `encodeSignal(signal)`, `decodeSignal(text)` | The pure QR payload functions. |
 

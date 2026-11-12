@@ -4,7 +4,7 @@
  * connection as a Web `MessagePort` (via the out-of-scope `datachannel-port` /
  * `livekit-port` byte bridges); here the established primitive is wrapped
  * *directly* as a {@link ByteChannel} so the byte transport +
- * multiplexing (`emulateMux`) can run on top.
+ * multiplexing (`webrun-rpc`'s port stack, via `messageTargetOverByteChannel`) can run on top.
  */
 
 import { makeByteQueue, toBytes } from "./byte-queue.js";
@@ -70,30 +70,44 @@ export function byteChannelFromRoom(room: RoomLike, peerId: string): ByteChannel
   const closed = new Promise<void>((r) => {
     closedResolve = r;
   });
+  let ended = false;
 
   const onData = (...args: unknown[]): void => {
     const payload = args[0];
     const participant = args[1] as { identity?: string } | undefined;
-    if (participant && participant.identity !== peerId) return;
+    // A packet with no participant is the server's, not the peer's.
+    if (participant?.identity !== peerId) return;
     if (payload != null) queue.push(toBytes(payload));
+  };
+  const onParticipantDisconnected = (...args: unknown[]): void => {
+    if ((args[0] as { identity?: string } | undefined)?.identity === peerId) end();
+  };
+  // The channel ends with the room or with the peer: otherwise nothing above
+  // it would ever learn the other end is gone.
+  const end = (): void => {
+    if (ended) return;
+    ended = true;
+    room.off(ROOM_EVENT.dataReceived, onData);
+    room.off(ROOM_EVENT.participantDisconnected, onParticipantDisconnected);
+    room.off(ROOM_EVENT.disconnected, end);
+    queue.done();
+    closedResolve();
   };
 
   room.on(ROOM_EVENT.dataReceived, onData);
+  room.on(ROOM_EVENT.participantDisconnected, onParticipantDisconnected);
+  room.on(ROOM_EVENT.disconnected, end);
 
   return {
     send(bytes) {
+      if (ended) return;
       void room.localParticipant
         .publishData(bytes, { reliable: true, destinationIdentities: [peerId] })
-        .catch(() => {
-          /* room closed */
-        });
+        // A reliable publish that fails lost a message: the stream above is broken.
+        .catch(end);
     },
     recv: queue.recv,
     closed,
-    close() {
-      room.off(ROOM_EVENT.dataReceived, onData);
-      queue.done();
-      closedResolve();
-    },
+    close: end,
   };
 }

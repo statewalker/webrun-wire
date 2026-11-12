@@ -186,5 +186,6 @@ export interface RoomManagerOptions {
 export const ROOM_EVENT = {
   participantConnected: "participantConnected",
   participantDisconnected: "participantDisconnected",
+  disconnected: "disconnected",
   dataReceived: "dataReceived",
 } as const;
