@@ -97,10 +97,10 @@ Typed-JSON RPC:
 | `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call. |
 | `ListenPortOptions`, `PortHandler`, `BidiHandler`, `IoSendOptions`, `RecieveOptions`, `SendOptions` | Supporting types. |
 | `postCancelChannel(port, channelName)` / `listenCancelChannel(port, channelName, onCancel)` / `CANCEL_CHANNEL_TYPE` | The `"cancel-channel"` message `ioSend` posts when its consumer stops early. |
-| `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. |
+| `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. A port may also carry it as `closeSignal` (an adapter needing no import, e.g. `webrun-streams-libp2p`'s `libp2pPortMux`); a registered signal wins. |
 
 Message passing (types only): `MessageTarget` (`MessageSource` + `MessageSink` + optional
-`close()`), `MessageSource` (`addEventListener` / `removeEventListener` for `"message"`, optional
+`close()` and `closeSignal`), `MessageSource` (`addEventListener` / `removeEventListener` for `"message"`, optional
 `start()`), `MessageSink` (`postMessage(message, transfer?)`), `MessageListener`. A `MessagePort`
 satisfies `MessageTarget` structurally.
 

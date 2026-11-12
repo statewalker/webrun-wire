@@ -27,6 +27,8 @@ export interface StreamMessageTarget {
      * closed; at once when it can now.
      */
     whenDrained(): Promise<void>;
+    /** `signal` again, on the target: `webrun-rpc`'s `getPortCloseSignal` reads it from a port. */
+    readonly closeSignal: AbortSignal;
   };
   /**
    * Aborts when the stream is over, after every message the peer sent has
@@ -75,7 +77,9 @@ export function messageTargetOverStream(
 ): StreamMessageTarget {
   const listeners = new Set<Listener>();
   const life = new AbortController();
-  let peerClosedWrite = false;
+  // The peer may have finished, or reset the stream, before this target was attached (during
+  // protocol negotiation): its events are gone then, and only the stream's state tells.
+  let peerClosedWrite = stream.remoteWriteStatus === "closed";
 
   const onRemoteCloseWrite = (): void => {
     // The read loop may still hold the peer's last messages; it aborts
@@ -89,6 +93,9 @@ export function messageTargetOverStream(
   };
   stream.addEventListener("remoteCloseWrite", onRemoteCloseWrite);
   stream.addEventListener("close", onClose, { once: true });
+  // A stream reset or closed before this target was attached (a peer refusing it during protocol
+  // negotiation) fired its `close` unseen: report it now, as a dead peer.
+  if (stream.status !== undefined && stream.status !== "open") life.abort(new PeerGoneError());
 
   const deliver = (data: Uint8Array): void => {
     const event = new MessageEvent("message", { data });
@@ -147,6 +154,7 @@ export function messageTargetOverStream(
   return {
     signal: life.signal,
     target: {
+      closeSignal: life.signal,
       addEventListener: (_type, listener) => {
         listeners.add(listener);
       },
