@@ -191,8 +191,11 @@ const { call } = await connect({ mux: overPorts(() => webrtcPortMux({ pc: other,
 ```
 
 Ports are ordered, reliable channels labelled `webrun-port/…`; a mux ignores
-inbound channels without that label, so it shares a connection with this
-package's `connect` / `serve` or anyone else's channels. Each message is one
+inbound channels without that label, and this package's `serve()` ignores
+channels with it, so ports share a connection with `connect` / `serve` and with
+anyone else's channels. On one connection, a mux without `onPort` (a caller's)
+leaves inbound ports to the serving mux, so both directions can call; of
+several serving muxes, the first takes each port. Each message is one
 data channel message, so `maxMessageSize` defaults to 16 KiB − 256 (Firefox to
 Chrome cuts off at 16 KiB; the port stack's framing needs the margin), and a
 message past `maxFrameBytes` fails the port with a `RangeError` instead of
@@ -200,7 +203,9 @@ being dropped. Each port carries `closeSignal`, aborted when its channel closes
 or errs, the connection becomes `failed` or `closed`, or the port is closed
 here. A refused port (`onPort` returning `false`) is closed, so the opener's
 call fails. Messages that arrive before a port's first listener are held for
-it. `whenDrained()` waits on `bufferedamountlow` (256 KiB). The suite runs a
+it, delivered after that tick to every listener added by then. A connection
+that has failed already makes `openPort` reject, as does an aborted `signal`.
+`whenDrained()` waits on `bufferedamountlow` (256 KiB). The suite runs a
 second conformance pair over these ports (`tests/port-mux.test.ts`), with L6 at
 a one-chunk bound.
 

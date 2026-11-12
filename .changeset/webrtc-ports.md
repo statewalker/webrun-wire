@@ -9,3 +9,5 @@ New `webrtcPortMux(options)`: native MessagePorts over WebRTC. Each port is its 
 - A port carries `closeSignal`, aborted on channel close or error, or on connection failure.
 - A refused port is closed, so the call fails.
 - Messages that arrive before a port's first listener are held for it.
+- On one connection, a caller mux leaves inbound ports to the serving mux, so both directions can call, and of several serving muxes the first takes each port.
+- This package's `serve()` now ignores port channels.
