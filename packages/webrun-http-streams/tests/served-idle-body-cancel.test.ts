@@ -155,7 +155,7 @@ describe("an idle served response body", () => {
     expect(cancels).toHaveLength(1);
   });
 
-  it("settles a teardown that comes at the same moment as the body's end, cancelling at most once", async () => {
+  it("settles a teardown that comes at the same moment as the body's end, without cancelling it", async () => {
     const cancels: unknown[] = [];
     let close: () => void = () => {};
     let output: AsyncGenerator<Uint8Array> | undefined;
@@ -187,7 +187,10 @@ describe("an idle served response body", () => {
     });
     await until(() => outcome !== undefined);
     await settle();
-    expect(cancels.length).toBeLessThanOrEqual(1);
+    // `controller.close()` closes the stream synchronously, before the `return()`: whatever the
+    // teardown then cancels — the closed stream, or nothing — never reaches the source's
+    // `cancel()`, which a closed stream does not call.
+    expect(cancels).toEqual([]);
     expect((outcome as unknown[])[1]).toEqual({ done: true, value: undefined });
   });
 
