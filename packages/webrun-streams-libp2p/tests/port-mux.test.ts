@@ -398,12 +398,14 @@ describe("throughput: a 4 MiB body (measurement)", () => {
           for await (const chunk of input) yield chunk;
         });
         const { call, close } = await pair.connect();
+        // the first call sets up TCP, Noise, yamux and the early-stream gate: not timed
+        await collectBytes(call([new Uint8Array(1)]));
         const t0 = performance.now();
         const back = await collectBytes(call([body]));
         const ms = performance.now() - t0;
         expect(back.byteLength).toBe(body.byteLength);
         console.log(
-          `${label} ${maxMessageSize / 1024} KiB chunks: ${(8 / (ms / 1000)).toFixed(1)} MB/s echo`,
+          `${label} ${maxMessageSize / 1024} KiB chunks: ${(8 / (ms / 1000)).toFixed(1)} MiB/s echo (4 MiB each way)`,
         );
         await close();
         await pair.close();

@@ -316,17 +316,19 @@ Both pass the shared conformance suite, including L6 at a one-chunk bound
 | --- | --- | --- |
 | multiplexing | yamux: per-stream windows, scheduling | `multiplexPort`'s id table |
 | a call costs | a stream open (a protocol negotiation) | nothing on the wire |
-| limits | libp2p's `maxInboundStreams` / `maxOutboundStreams` | `maxPorts` |
+| limits | a stream per concurrent call: `maxInboundStreams` / `maxOutboundStreams`, 1024 by default here (libp2p's own default, 32, would reset the 33rd call) | `maxPorts` |
 | one slow call | holds its own stream only | shares the stream; `frameSize` interleaves |
 | who is calling | `onPort` gets `{ remotePeer, connection }` | the stream's connection, once |
-| 4 MiB echo, in-process TCP | 45 MB/s (64 KiB chunks), 68 MB/s (256 KiB) | 49 MB/s, 85 MB/s |
+| 4 MiB echo, in-process TCP, setup excluded (three runs) | 35–38 MiB/s (64 KiB chunks), 71–88 MiB/s (256 KiB) | 37–48 MiB/s, 79–87 MiB/s |
 
 Each native port carries `closeSignal`, aborted when its stream ends, the peer
 goes, or the port is closed here; `webrun-rpc`'s `getPortCloseSignal` reads it
 from the port, so a call on a dead stream fails instead of waiting, and this
 package still imports nothing from `webrun-rpc`. Ports are opened through the
 same early-stream gate as `connect()`. A port `onPort` refuses (returns
-`false`) is aborted, and the opener's signal aborts. `meta` is not sent: the
+`false`) is aborted: the opener's signal aborts with `PeerGoneError` and a call
+on it fails. A frame the port's codec cannot decode (a peer speaking another
+codec) aborts the port rather than vanish. `meta` is not sent: the
 protocol says what a port is for. Messages are values (objects holding
 `Uint8Array` chunks), so a port needs a value codec where `overPipe` needs a
 `PortCodec`.

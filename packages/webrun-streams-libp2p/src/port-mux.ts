@@ -33,6 +33,12 @@ export interface ValueCodec {
 
 type Listener = (event: MessageEvent) => void | Promise<void>;
 
+/**
+ * The stream limits a port mux asks libp2p for unless told otherwise: every concurrent call is a
+ * stream, and libp2p's own default (32 per protocol) would reset the 33rd.
+ */
+export const DEFAULT_PORT_STREAM_LIMIT = 1024;
+
 /** One port: a libp2p stream as a `MessageTarget` of values, with its close signal on it. */
 export type StreamPort = Omit<
   StreamMessageTarget["target"],
@@ -66,7 +72,9 @@ export interface Libp2pPortMuxOptions {
   maxMessageSize?: number;
   /** The largest frame accepted on a port's stream (see `messageTargetOverStream`). */
   maxMessageBytes?: number;
+  /** Default {@link DEFAULT_PORT_STREAM_LIMIT}. */
   maxInboundStreams?: number;
+  /** Default {@link DEFAULT_PORT_STREAM_LIMIT}. */
   maxOutboundStreams?: number;
   runOnLimitedConnection?: boolean;
 }
@@ -97,16 +105,9 @@ export interface Libp2pPortMux {
  * `connect()`. `meta` is not sent: the protocol says what a port is for.
  */
 export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp2pPortMux> {
-  const {
-    node,
-    peer,
-    codec,
-    onPort,
-    maxMessageBytes,
-    maxInboundStreams,
-    maxOutboundStreams,
-    runOnLimitedConnection,
-  } = options;
+  const { node, peer, codec, onPort, maxMessageBytes, runOnLimitedConnection } = options;
+  const maxInboundStreams = options.maxInboundStreams ?? DEFAULT_PORT_STREAM_LIMIT;
+  const maxOutboundStreams = options.maxOutboundStreams ?? DEFAULT_PORT_STREAM_LIMIT;
   const protocol = options.protocol ?? DEFAULT_PORT_PROTOCOL;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
   const live = new Set<StreamPort>();
@@ -133,8 +134,15 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
           let data: unknown;
           try {
             data = codec.decode(event.data as Uint8Array);
-          } catch {
-            return; // not a message of this codec
+          } catch (err) {
+            // a peer speaking another codec, or a corrupt frame: fail the port, as a malformed
+            // frame fails the stream, rather than drop the message and leave its call waiting
+            stream.abort(
+              new Error("webrun-streams-libp2p: a frame the port's codec cannot decode", {
+                cause: err,
+              }),
+            );
+            return;
           }
           return listener(new MessageEvent("message", { data }));
         };
@@ -160,9 +168,7 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
 
   let handled = false;
   if (onPort) {
-    const handleOptions: StreamHandlerOptions = {};
-    if (maxInboundStreams !== undefined) handleOptions.maxInboundStreams = maxInboundStreams;
-    if (maxOutboundStreams !== undefined) handleOptions.maxOutboundStreams = maxOutboundStreams;
+    const handleOptions: StreamHandlerOptions = { maxInboundStreams, maxOutboundStreams };
     if (runOnLimitedConnection !== undefined)
       handleOptions.runOnLimitedConnection = runOnLimitedConnection;
     await node.handle(
@@ -191,8 +197,7 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
     handled = true;
   }
 
-  const dialOptions: DialProtocolOptions = {};
-  if (maxOutboundStreams !== undefined) dialOptions.maxOutboundStreams = maxOutboundStreams;
+  const dialOptions: DialProtocolOptions = { maxOutboundStreams };
   if (runOnLimitedConnection !== undefined)
     dialOptions.runOnLimitedConnection = runOnLimitedConnection;
 
@@ -210,7 +215,17 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
         throw new Error("webrun-streams-libp2p: port mux closed");
       }
       const port = wrap(stream);
-      opts?.signal?.addEventListener("abort", () => void port.close(), { once: true });
+      const signal = opts?.signal;
+      if (signal) {
+        const onAbort = () => void port.close();
+        signal.addEventListener("abort", onAbort, { once: true });
+        // the caller's signal may outlive many ports: let go of this one when it closes
+        port.closeSignal.addEventListener(
+          "abort",
+          () => signal.removeEventListener("abort", onAbort),
+          { once: true },
+        );
+      }
       return port;
     },
     async close() {

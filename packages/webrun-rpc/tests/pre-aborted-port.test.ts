@@ -18,28 +18,28 @@ const within = <T>(p: Promise<T>, ms = 2000) =>
 
 describe("(review of #110) a port closed before the stream tier gets it", () => {
   it("a call on it fails at once instead of waiting for ever", async () => {
-    const failure = await within(collectBytes(duplexOverPort(deadPort())([new Uint8Array([1])]))).catch(
-      (e) => e as Error,
-    );
+    const failure = await within(
+      collectBytes(duplexOverPort(deadPort())([new Uint8Array([1])])),
+    ).catch((e) => e as Error);
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).not.toBe("hung");
   });
 
-  it("serving on it ends the handler instead of leaving it waiting for input", async () => {
-    let ended!: () => void;
-    const done = new Promise<void>((r) => {
-      ended = r;
-    });
+  it("serving on it leaves nothing waiting: the handler is never started, or it ends", async () => {
+    let started = false;
+    let ended = false;
     serveDuplexOverPort(deadPort(), (input) =>
       (async function* () {
+        started = true;
         try {
           for await (const _ of input);
         } finally {
-          ended();
+          ended = true;
         }
         yield new Uint8Array(0);
       })(),
     );
-    await within(done);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(!started || ended).toBe(true);
   });
 });

@@ -93,6 +93,9 @@ export function messageTargetOverStream(
   };
   stream.addEventListener("remoteCloseWrite", onRemoteCloseWrite);
   stream.addEventListener("close", onClose, { once: true });
+  // A stream reset or closed before this target was attached (a peer refusing it during protocol
+  // negotiation) fired its `close` unseen: report it now, as a dead peer.
+  if (stream.status !== undefined && stream.status !== "open") life.abort(new PeerGoneError());
 
   const deliver = (data: Uint8Array): void => {
     const event = new MessageEvent("message", { data });
@@ -139,9 +142,6 @@ export function messageTargetOverStream(
     if (peerClosedWrite) {
       life.abort(new Error("webrun-streams-libp2p: the peer closed the stream"));
       await closeStream(stream);
-    } else if (stream.status !== "open") {
-      // the stream ended with no event seen here (it closed before this target listened)
-      life.abort(new PeerGoneError());
     }
   })().catch((err: unknown) => {
     // A reset ends the loop with an error, which `close` reports through

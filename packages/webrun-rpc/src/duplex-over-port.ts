@@ -719,7 +719,11 @@ function receiveChunks(
     void deliver?.({ done: true, error: abortReason });
     resolveEnded();
   };
-  controller.signal.addEventListener("abort", onAbort, { once: true });
+  // An `abort` listener added to a signal that has already aborted never fires: a port whose
+  // transport closed before the stream tier got it (`abortOnPortClose` aborts synchronously)
+  // would leave this stream waiting for ever.
+  if (controller.signal.aborted) onAbort();
+  else controller.signal.addEventListener("abort", onAbort, { once: true });
 
   const stream = recieveIterator<Uint8Array>((d) => {
     if (aborted) {
