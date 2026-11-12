@@ -43,7 +43,8 @@ if (isBrowser) {
       }
       a.destroy();
       b.destroy();
-      expect(report.length).toBeGreaterThan(0);
+      // The cross-browser default rests on 16 KiB arriving whole; the rest is a measurement.
+      expect(report[0]).toMatch(/^size=16384 received=\[16384\] thrown=- errors=- open=true$/);
     }, 60_000);
   });
 } else {

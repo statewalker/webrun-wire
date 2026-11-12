@@ -20,6 +20,7 @@ class FakeConn {
     for (const fn of [...(this.handlers.get(ev) ?? [])]) fn(...a);
   }
   serialization = "raw";
+  reliable = true;
   open = true;
   bufferSize = 0;
   dataChannel = { bufferedAmount: 0 };
@@ -93,7 +94,43 @@ describe("messageTargetOverPeerJs", () => {
     expect(signal.aborted).toBe(true);
     expect(signal.reason).toBeInstanceOf(RangeError);
     expect(conn.open).toBe(false);
-    target.postMessage(new Uint8Array(DEFAULT_MAX_FRAME_BYTES)); // exactly the limit: allowed shape
+  });
+
+  it("(review) a frame of exactly maxFrameBytes is sent; the guard starts one byte past it", () => {
+    const { conn, target, signal } = make();
+    target.postMessage(new Uint8Array(DEFAULT_MAX_FRAME_BYTES));
+    expect(conn.sent).toHaveLength(1);
+    expect(signal.aborted).toBe(false);
+  });
+
+  it("(review) sends a copy: the caller may reuse its buffer while PeerJS queues the message", () => {
+    const { conn, target } = make();
+    const buf = new Uint8Array([1, 2, 3]);
+    target.postMessage(buf);
+    buf[0] = 9;
+    expect([...(conn.sent[0] as Uint8Array)]).toEqual([1, 2, 3]);
+  });
+
+  it("(review) refuses a connection that is not open, or not reliable (unordered delivery reorders envelopes)", () => {
+    const closed = new FakeConn();
+    closed.open = false;
+    // biome-ignore lint/suspicious/noExplicitAny: a structural fake
+    expect(() => messageTargetOverPeerJs(closed as any)).toThrow(/open/);
+    const unordered = new FakeConn();
+    unordered.reliable = false;
+    // biome-ignore lint/suspicious/noExplicitAny: a structural fake
+    expect(() => messageTargetOverPeerJs(unordered as any)).toThrow(/reliable/);
+  });
+
+  it("(review) close() lets PeerJS write out what it holds before closing the connection", async () => {
+    const { conn, target } = make();
+    conn.bufferSize = 1;
+    const closing = target.close();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(conn.open).toBe(true);
+    conn.bufferSize = 0;
+    await closing;
+    expect(conn.open).toBe(false);
   });
 
   it("aborts its signal when the connection closes or errors, then posting is a no-op", () => {

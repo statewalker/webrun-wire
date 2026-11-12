@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLOSE_TOPIC,
   DEFAULT_MAX_FRAME_BYTES,
   DEFAULT_MAX_MESSAGE_SIZE,
+  DEFAULT_TOPIC,
   DRAIN_LOW_WATER,
   messageTargetOverLiveKit,
 } from "../src/message-target.js";
@@ -10,10 +12,21 @@ type Handler = (...a: unknown[]) => void;
 /** The slice of a LiveKit `Room` the adapter touches. */
 class FakeRoom {
   private handlers = new Map<string, Set<Handler>>();
-  published: Array<{ data: Uint8Array; options: unknown; settle: (err?: Error) => void }> = [];
+  published: Array<{
+    data: Uint8Array;
+    options: { topic?: string };
+    settle: (err?: Error) => void;
+  }> = [];
+  remoteParticipants = new Map([["bob", { identity: "bob" }]]);
+  goodbyes: unknown[] = [];
   localParticipant = {
-    publishData: (data: Uint8Array, options: unknown) =>
+    publishData: (data: Uint8Array, options: { topic?: string }) =>
       new Promise<void>((resolve, reject) => {
+        if ((options as { topic?: string }).topic === CLOSE_TOPIC) {
+          this.goodbyes.push(options);
+          resolve();
+          return;
+        }
         this.published.push({ data, options, settle: (err) => (err ? reject(err) : resolve()) });
       }),
   };
@@ -46,9 +59,11 @@ describe("messageTargetOverLiveKit", () => {
       got.push(e.data as Uint8Array);
     });
     const payload = new Uint8Array([1, 2]);
-    room.emit("dataReceived", payload, { identity: "bob" });
-    room.emit("dataReceived", new Uint8Array([9]), { identity: "carol" });
-    room.emit("dataReceived", new Uint8Array([8]), undefined);
+    room.emit("dataReceived", payload, { identity: "bob" }, 0, DEFAULT_TOPIC);
+    room.emit("dataReceived", new Uint8Array([9]), { identity: "carol" }, 0, DEFAULT_TOPIC);
+    room.emit("dataReceived", new Uint8Array([8]), undefined, 0, DEFAULT_TOPIC);
+    room.emit("dataReceived", new Uint8Array([7]), { identity: "bob" }, 0, "chat");
+    room.emit("dataReceived", new Uint8Array([6]), { identity: "bob" });
     payload[0] = 99; // LiveKit may reuse its buffer: what was delivered must not change
     expect(got.map((g) => [...g])).toEqual([[1, 2]]);
   });
@@ -57,12 +72,16 @@ describe("messageTargetOverLiveKit", () => {
     const { room, target } = make();
     target.postMessage(new Uint8Array([5]));
     expect(room.published).toHaveLength(1);
-    expect(room.published[0]?.options).toEqual({ reliable: true, destinationIdentities: ["bob"] });
+    expect(room.published[0]?.options).toEqual({
+      reliable: true,
+      destinationIdentities: ["bob"],
+      topic: DEFAULT_TOPIC,
+    });
     expect(() => target.postMessage("x")).toThrow(TypeError);
   });
 
-  it("reports 12 KiB by default under a 15 KiB frame limit, overridable", () => {
-    expect(DEFAULT_MAX_FRAME_BYTES).toBe(15 * 1024);
+  it("reports 12 KiB by default under livekit-client's 64,000-byte packet cap, overridable", () => {
+    expect(DEFAULT_MAX_FRAME_BYTES).toBe(64_000);
     expect(DEFAULT_MAX_MESSAGE_SIZE).toBe(12 * 1024);
     expect(make().maxMessageSize).toBe(12 * 1024);
     expect(make({ maxMessageSize: 4000 }).maxMessageSize).toBe(4000);
@@ -75,6 +94,46 @@ describe("messageTargetOverLiveKit", () => {
     );
     expect(room.published).toHaveLength(0);
     expect(signal.reason).toBeInstanceOf(RangeError);
+  });
+
+  it("(review) a packet of exactly maxFrameBytes is published; the guard starts one byte past it", () => {
+    const { room, target, signal } = make();
+    target.postMessage(new Uint8Array(DEFAULT_MAX_FRAME_BYTES));
+    expect(room.published).toHaveLength(1);
+    expect(signal.aborted).toBe(false);
+  });
+
+  it("(review) publishes a copy: livekit-client serializes after an await", () => {
+    const { room, target } = make();
+    const buf = new Uint8Array([1, 2, 3]);
+    target.postMessage(buf);
+    buf[0] = 9;
+    expect([...(room.published[0]?.data ?? [])]).toEqual([1, 2, 3]);
+  });
+
+  it("(review) refuses a participant who is not in the room: packets to them vanish", () => {
+    const room = new FakeRoom();
+    // biome-ignore lint/suspicious/noExplicitAny: a structural fake
+    expect(() => messageTargetOverLiveKit(room as any, "nobody")).toThrow(/not in the room/);
+  });
+
+  it("(review) ending locally tells the peer: a goodbye on CLOSE_TOPIC, which ends the peer's pipe", async () => {
+    const a = make();
+    await a.target.close();
+    expect(a.room.goodbyes).toEqual([
+      { reliable: true, destinationIdentities: ["bob"], topic: CLOSE_TOPIC },
+    ]);
+    const b = make();
+    expect(() => b.target.postMessage(new Uint8Array(DEFAULT_MAX_FRAME_BYTES + 1))).toThrow(
+      RangeError,
+    );
+    expect(b.room.goodbyes).toHaveLength(1);
+    const c = make();
+    c.room.emit("dataReceived", new Uint8Array(0), { identity: "carol" }, 0, CLOSE_TOPIC);
+    expect(c.signal.aborted).toBe(false);
+    c.room.emit("dataReceived", new Uint8Array(0), { identity: "bob" }, 0, CLOSE_TOPIC);
+    expect(c.signal.aborted).toBe(true);
+    expect(c.room.goodbyes).toHaveLength(0); // the peer already knows
   });
 
   it("aborts its signal when the room disconnects or the peer leaves; others leaving do not", () => {
