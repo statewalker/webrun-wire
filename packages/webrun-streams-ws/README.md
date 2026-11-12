@@ -238,9 +238,8 @@ leaves the promise pending.
 
 `pnpm test` runs the shared conformance suite (L0 to L6) against an
 in-process `ws` server over the port stack (`overPipe` + `msgpackCodec`).
-The pair ignores `PairTuning`, as every port-stack pair does, so L6 is an
-integrity check only until D17 redefines it; flow control on this stack is
-covered by `webrun-rpc`'s own backpressure tests. `message-target.test.ts`
+L6 asserts the port stack's bound in both directions: a consumer that stops
+reading lets the producer get at most one 4 KiB chunk ahead (measured 0). `message-target.test.ts`
 pins the pipe's contract: bytes only (anything else is a `TypeError`), text
 frames as UTF-8 bytes, `signal` aborted by a dead peer, `whenDrained`
 resolving at the low-water mark, sockets on "fragments" or "blob" delivering

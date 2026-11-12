@@ -1,6 +1,7 @@
 import { collectBytes, type Duplex } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import type { MakePair } from "./loopback.js";
+import { measureRunAhead } from "./run-ahead.js";
 
 export interface DescribeDuplexAdapterOptions {
   /** Number of concurrent calls for L1. Default 10. */
@@ -214,53 +215,34 @@ export function describeDuplexAdapter(
     });
 
     describe("L6: flow control", () => {
-      it("delivers a body many times the advertised window to a slow consumer", async () => {
-        // A 16 KiB window against a 256 KiB body: the sender must exhaust its
-        // credit and wait for grants sixteen times over. An adapter that
-        // ignores the tuning runs this at its own defaults, where it degrades
-        // to an integrity check — that is stated in the README, not hidden.
-        //
-        // What the assertions below check is completion and integrity. That
-        // this level also proves *stalling and replenishment* is an
-        // elimination argument that lives in the mutations, not in this body:
-        // delete the grant `ACK` and replenishment dies, so the transfer hangs
-        // and this times out; bypass `reserve()` and stalling dies, so the
-        // sender floods the window and the receiver's cap tears the stream
-        // down. Both are measured in the plan's Task 5 Step 4 table. Keep the
-        // small window and the slow drain — at the adapters' defaults nothing
-        // stalls, no grant is emitted, and this level passes with credit
-        // deleted entirely. An earlier draft shipped exactly that while
-        // claiming otherwise.
-        const pair = await makePair({ mtu: 4096, maxStreamBuffer: 16 * 1024 });
+      it("delivers a 256 KiB body, crossing as many messages, to a slow consumer", async () => {
+        const pair = await makePair({ maxMessageSize: 4096 });
         try {
           await pair.serve(echoHandler);
           const size = 256 * 1024;
           const body = new Uint8Array(size);
           for (let i = 0; i < size; i++) body[i] = i & 0xff;
-
           const { call, close } = await pair.connect();
-          const out = call([body]);
-          let received = 0;
-          let first = -1;
-          let last = -1;
-          for await (const chunk of out) {
-            if (chunk.byteLength === 0) continue;
-            if (first < 0) first = chunk[0] as number;
-            last = chunk[chunk.byteLength - 1] as number;
-            received += chunk.byteLength;
-            // Drain deliberately slowly, so the sender is stalled on credit
-            // for most of the transfer rather than streaming through.
+          const received: Uint8Array[] = [];
+          for await (const chunk of call([body])) {
+            received.push(chunk);
             await delay(1);
           }
-
-          expect(received).toBe(size);
-          expect(first).toBe(0);
-          expect(last).toBe((size - 1) & 0xff);
+          expect(bytesEqual(concat(received), body)).toBe(true);
           await close();
         } finally {
           await pair.close();
         }
       });
+
+      for (const direction of ["response", "request"] as const) {
+        it(`${direction} run-ahead: a producer facing a consumer that stopped reading stays within the pair's declared bound (none declared: completion only), and every byte arrives in place once it resumes`, async () => {
+          const r = await measureRunAhead(makePair, direction);
+          if (r.bound !== undefined) expect(r.ahead).toBeLessThanOrEqual(r.bound);
+          expect(r.complete).toBe(true);
+          expect(r.intact).toBe(true);
+        }, 60_000);
+      }
     });
   });
 }
@@ -288,4 +270,14 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function concat(chunks: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }

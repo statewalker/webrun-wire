@@ -8,3 +8,4 @@ export {
   makeLoopbackPair,
   type PairTuning,
 } from "./loopback.js";
+export { measureRunAhead, type RunAheadMeasurement } from "./run-ahead.js";
