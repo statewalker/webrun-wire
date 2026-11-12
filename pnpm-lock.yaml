@@ -601,6 +601,12 @@ importers:
       '@roamhq/wrtc':
         specifier: 'catalog:'
         version: 0.10.0
+      '@statewalker/webrun-msgpack':
+        specifier: workspace:^
+        version: link:../webrun-msgpack
+      '@statewalker/webrun-rpc':
+        specifier: workspace:^
+        version: link:../webrun-rpc
       '@statewalker/webrun-streams-conformance':
         specifier: workspace:^
         version: link:../webrun-streams-conformance
