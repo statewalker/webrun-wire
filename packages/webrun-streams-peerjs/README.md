@@ -115,8 +115,12 @@ const { call, close } = await connect({
 });
 ```
 
-The responder does the same per inbound connection with `side: "responder"` and
-`webrun-rpc`'s `serve`. Pass all three: `signal` closes the multiplexer when the
+The responder does the same per inbound connection, once it is open, with
+`side: "responder"` and `webrun-rpc`'s `serve`. The connection must be open,
+raw and `reliable` (PeerJS's default `reliable: false` means unordered delivery,
+which would reorder envelopes); anything else throws. `close()` waits up to 5 s
+for PeerJS and the data channel to write out what they hold, since
+`conn.close()` discards it. Pass all three: `signal` closes the multiplexer when the
 connection dies, and `maxMessageSize` chunks bodies under the frame limit.
 
 **The message ceiling (measured).** PeerJS hands a raw message to the data

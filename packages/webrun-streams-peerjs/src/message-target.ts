@@ -31,6 +31,8 @@ const DRAIN_POLL_MS = 5;
  * Waiting for zero would pause a sender that waits before every frame.
  */
 export const DRAIN_LOW_WATER = 256 * 1024;
+/** How long `close()` waits for queued messages to be written out. */
+const CLOSE_FLUSH_MS = 5000;
 
 export interface MessageTargetOverPeerJsOptions {
   /**
@@ -81,8 +83,9 @@ export interface PeerJsMessageTarget {
  * });
  * ```
  *
- * The connection must use `serialization: "raw"` (PeerJS hands each message to
- * the data channel unchanged) and should be `reliable`. Inbound messages arrive
+ * The connection must be open, use `serialization: "raw"` (PeerJS hands each
+ * message to the data channel unchanged) and be `reliable` (ordered); anything
+ * else throws. Inbound messages arrive
  * as `Uint8Array` copies. Anything else (a `Blob`, a string) ends the pipe
  * with a `TypeError`: dropping it would lose an envelope and hang its call.
  */
@@ -94,6 +97,20 @@ export function messageTargetOverPeerJs(
   if (serialization !== "raw") {
     throw new TypeError(
       `messageTargetOverPeerJs: DataConnection serialization is '${serialization}', expected 'raw'`,
+    );
+  }
+  // PeerJS's default `reliable: false` means `ordered: false`: envelopes would
+  // arrive out of order and corrupt every stream without an error.
+  if ((conn as unknown as { reliable?: boolean }).reliable !== true) {
+    throw new TypeError(
+      "messageTargetOverPeerJs: DataConnection must be opened with `reliable: true` (ordered delivery)",
+    );
+  }
+  // Not yet open, posts would be dropped; already closed, `close` has fired and
+  // the signal would never abort. Either way calls would hang.
+  if (!conn.open) {
+    throw new Error(
+      "messageTargetOverPeerJs: DataConnection is not open; wait for its `open` event",
     );
   }
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
@@ -175,10 +192,22 @@ export function messageTargetOverPeerJs(
           closeConn();
           throw err;
         }
-        conn.send(bytes);
+        // A copy: PeerJS may queue the message past its own buffer threshold.
+        conn.send(bytes.slice());
       },
       async close() {
         listeners.clear();
+        // `conn.close()` tears the peer connection down at once, discarding what
+        // PeerJS and the data channel still hold — the multiplexer's last close
+        // envelopes among it. Let that go out first, for at most CLOSE_FLUSH_MS.
+        const deadline = Date.now() + CLOSE_FLUSH_MS;
+        while (
+          !life.signal.aborted &&
+          Date.now() < deadline &&
+          ((internals.bufferSize ?? 0) > 0 || (internals.dataChannel?.bufferedAmount ?? 0) > 0)
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
+        }
         end(new Error("webrun-streams-peerjs: closed locally"));
         closeConn();
       },

@@ -35,7 +35,8 @@ One entry point, `.`, ESM only.
 | `LiveKitParams` | `{ room: Room; peerIdentity: string; mux?: EmulateMuxOptions }`. |
 | `byteChannelFromLiveKit(room, peerIdentity)` | The `ByteChannel` both use, for driving `emulateMux` yourself. |
 | `messageTargetOverLiveKit(room, peerIdentity, options?)` | **The port stack (Plan C2).** One remote participant as `{ target, signal, maxMessageSize }`: a `MessageTarget` of bytes (one reliable packet each) with `bufferedAmount` / `whenDrained()`, a signal that aborts when the room disconnects, the participant leaves or a publish fails, and the payload ceiling to give `overPipe`. See below. |
-| `DEFAULT_MAX_FRAME_BYTES`, `DEFAULT_MAX_MESSAGE_SIZE`, `DRAIN_LOW_WATER` | 15 KiB, 12 KiB, 256 KiB: the defaults of the above. |
+| `DEFAULT_MAX_FRAME_BYTES`, `DEFAULT_MAX_MESSAGE_SIZE`, `DRAIN_LOW_WATER` | 64,000 bytes, 12 KiB, 256 KiB: the defaults of the above. |
+| `DEFAULT_TOPIC`, `CLOSE_TOPIC` | The data topic (`webrun/port-stack`) and the goodbye's (`webrun/port-stack/close`); `options.topic` changes both. |
 
 `mux` is forwarded to `emulateMux`: `mtu` (default here 12 KiB, see below), `maxStreamBuffer`
 (per-stream inbound cap and advertised credit; `webrun-streams` default 8 MiB), `maxStreams`
@@ -109,12 +110,22 @@ const { call, close } = await connect({
 
 The other participant does the same with `side: "responder"` and `webrun-rpc`'s
 `serve`. Pass all three: `signal` closes the multiplexer when the room or the
-participant goes, and `maxMessageSize` (12 KiB) chunks bodies under the packet
-limit. A post past `maxFrameBytes` (15 KiB) ends the pipe with a `RangeError`,
-because LiveKit drops such a packet silently. A failed reliable publish also
-ends it: the stream above has lost a message. `bufferedAmount` counts bytes
-whose `publishData` has not settled, and `whenDrained()` resolves once that is
-at most 256 KiB. `close()` detaches from the room and leaves it connected.
+participant goes, and `maxMessageSize` (12 KiB, as this adapter has always used
+against a real SFU) chunks bodies.
+
+- The participant must already be in the room, or this throws: LiveKit drops
+  packets to a participant it has not announced, and nothing would end the pipe.
+- Packets carry their own topic, and inbound packets on any other topic (an
+  application's own `publishData`) are ignored.
+- A post past `maxFrameBytes` (64,000 bytes, livekit-client's own cap, which it
+  enforces by throwing) ends the pipe with a `RangeError`; a failed reliable
+  publish ends it too, since the stream above has lost a message.
+- Ending on this side (`close()`, an oversized post, a failed publish) sends a
+  goodbye on the close topic, which ends the peer's pipe: the room stays
+  connected, so no LiveKit event would tell it.
+- `bufferedAmount` counts bytes whose `publishData` has not settled, and
+  `whenDrained()` resolves once that is at most 256 KiB. `close()` detaches from
+  the room and leaves it connected.
 
 ### Driving the mux yourself
 

@@ -95,6 +95,10 @@ export interface PortMuxOptions {
    * per chunk, the port id's integer width adds up to 4, and the payload's
    * length header widens at 64 KiB.
    *
+   * An error a stream ends with is sent whole, not chunked, so `duplexOverPort`
+   * fits it to this size first (stack, then the largest extra fields, then the
+   * message's tail are dropped, and the error is marked `truncated: true`).
+   *
    * So set this **at least 256 bytes below** the transport's real limit. Set to
    * the limit exactly, a full-size chunk overruns it — which on LiveKit
    * delivered a body as zero bytes with no error on either side.

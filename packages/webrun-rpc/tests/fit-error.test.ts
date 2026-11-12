@@ -23,6 +23,13 @@ describe("fitSerializedError (review of #106: errors were sent whole, past maxMe
     expect(encodedSizeEstimate(fitted)).toBeLessThanOrEqual(1000);
   });
 
+  it("the stack goes before a larger field: what identifies the failure outlives the trace", () => {
+    const e = { message: "m", stack: "s".repeat(400), detail: "d".repeat(600) };
+    const fitted = fitSerializedError(e, 700);
+    expect(fitted.stack).toBeUndefined();
+    expect(fitted.detail).toBe(e.detail);
+  });
+
   it("truncates the message last, keeping its start", () => {
     const fitted = fitSerializedError({ message: "x".repeat(20_000) }, 1000);
     expect(fitted.message.startsWith("xxxx")).toBe(true);
@@ -34,6 +41,7 @@ describe("fitSerializedError (review of #106: errors were sent whole, past maxMe
     expect(encodedSizeEstimate("é")).toBeGreaterThanOrEqual(2);
     expect(encodedSizeEstimate(new Uint8Array(500))).toBeGreaterThanOrEqual(500);
     const fitted = fitSerializedError({ message: "é".repeat(3000) }, 1000);
-    expect(encodedSizeEstimate(fitted)).toBeLessThanOrEqual(1000);
+    // measured independently of the estimator under test
+    expect(new TextEncoder().encode(fitted.message).byteLength).toBeLessThanOrEqual(1000);
   });
 });

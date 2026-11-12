@@ -3,16 +3,25 @@ import type { Room } from "livekit-client";
 type Listener = (event: MessageEvent) => void | Promise<void>;
 
 /**
- * The largest reliable data packet LiveKit carries. Larger packets are
- * dropped rather than fragmented: a 1 MiB body was seen to arrive as zero
- * bytes, with no error on either side. A post past it ends the pipe instead.
+ * The largest data packet livekit-client (2.x) publishes: `RTCEngine` refuses
+ * a larger one with a `PublishDataError`. A post past it ends the pipe with a
+ * `RangeError` before it gets that far.
  */
-export const DEFAULT_MAX_FRAME_BYTES = 15 * 1024;
+export const DEFAULT_MAX_FRAME_BYTES = 64_000;
+
+/** The topic this pipe's packets carry; packets on other topics are someone else's. */
+export const DEFAULT_TOPIC = "webrun/port-stack";
+
+/**
+ * The topic of the goodbye a pipe sends when it ends on its own side. The room
+ * stays connected, so without it the peer would never learn the pipe is gone.
+ */
+export const CLOSE_TOPIC = "webrun/port-stack/close";
 
 /**
  * The payload ceiling to give `overPipe`: 12 KiB, as this adapter has always
- * used, which leaves the port stack's framing (at most 134 bytes, spec D10)
- * well inside the frame limit.
+ * used against a real SFU (an older client dropped larger reliable packets
+ * silently), well inside the packet cap with the port stack's framing.
  */
 export const DEFAULT_MAX_MESSAGE_SIZE = 12 * 1024;
 
@@ -27,6 +36,12 @@ export interface MessageTargetOverLiveKitOptions {
   maxFrameBytes?: number;
   /** The payload ceiling to report. Default {@link DEFAULT_MAX_MESSAGE_SIZE}. */
   maxMessageSize?: number;
+  /**
+   * The data topic, default {@link DEFAULT_TOPIC}; the goodbye uses it with
+   * `/close` appended. Both ends must agree. Use another to run two pipes to
+   * the same participant.
+   */
+  topic?: string;
 }
 
 /** What `messageTargetOverLiveKit` gives: a pipe of bytes to one participant, its life, and its payload ceiling. */
@@ -68,10 +83,12 @@ export interface LiveKitMessageTarget {
  * });
  * ```
  *
- * Packets go out reliable (ordered, retransmitted) and addressed to that
- * participant only; inbound packets from anyone else are ignored. Both rooms
- * must already see each other: LiveKit drops a packet addressed to a
- * participant it has not announced.
+ * Packets go out reliable (ordered, retransmitted), addressed to that
+ * participant only and on their own topic; inbound packets from anyone else,
+ * or on another topic, are ignored. The participant must already be in the
+ * room (LiveKit drops packets to one it has not announced), or this throws.
+ * When the pipe ends on this side — `close()`, an oversized post, a failed
+ * publish — a goodbye on the close topic ends the peer's pipe too.
  */
 export function messageTargetOverLiveKit(
   room: Room,
@@ -80,6 +97,21 @@ export function messageTargetOverLiveKit(
 ): LiveKitMessageTarget {
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_MAX_MESSAGE_SIZE;
+  const topic = options.topic ?? DEFAULT_TOPIC;
+  const closeTopic = `${topic}/close`;
+  // Packets to a participant LiveKit does not know are dropped by the server,
+  // and no event would ever end the pipe.
+  const remotes = (room as unknown as { remoteParticipants?: Map<string, unknown> })
+    .remoteParticipants;
+  const present = remotes
+    ? remotes.has(peerIdentity) ||
+      [...remotes.values()].some((p) => (p as { identity?: string }).identity === peerIdentity)
+    : true;
+  if (!present) {
+    throw new Error(
+      `messageTargetOverLiveKit: "${peerIdentity}" is not in the room; wait for it to join`,
+    );
+  }
   const listeners = new Set<Listener>();
   const life = new AbortController();
   const roomApi = room as unknown as {
@@ -89,7 +121,7 @@ export function messageTargetOverLiveKit(
   const publisher = room.localParticipant as unknown as {
     publishData(
       data: Uint8Array,
-      options: { reliable: boolean; destinationIdentities: string[] },
+      options: { reliable: boolean; destinationIdentities: string[]; topic: string },
     ): Promise<void>;
   };
   let inFlight = 0;
@@ -101,8 +133,18 @@ export function messageTargetOverLiveKit(
   };
 
   const onData = (...args: unknown[]): void => {
-    const [payload, participant] = args as [Uint8Array, { identity?: string } | undefined];
+    const [payload, participant, , packetTopic] = args as [
+      Uint8Array,
+      { identity?: string } | undefined,
+      unknown,
+      string | undefined,
+    ];
     if (life.signal.aborted || participant?.identity !== peerIdentity) return;
+    if (packetTopic === closeTopic) {
+      end(new Error(`webrun-streams-livekit: "${peerIdentity}" closed the pipe`), false);
+      return;
+    }
+    if (packetTopic !== topic) return;
     const event = new MessageEvent("message", { data: new Uint8Array(payload) });
     for (const listener of [...listeners]) {
       try {
@@ -111,18 +153,28 @@ export function messageTargetOverLiveKit(
     }
   };
   const onDisconnected = (): void =>
-    end(new Error("webrun-streams-livekit: the room disconnected"));
+    end(new Error("webrun-streams-livekit: the room disconnected"), false);
   const onParticipantDisconnected = (...args: unknown[]): void => {
     if ((args[0] as { identity?: string } | undefined)?.identity !== peerIdentity) return;
-    end(new Error(`webrun-streams-livekit: "${peerIdentity}" left the room`));
+    end(new Error(`webrun-streams-livekit: "${peerIdentity}" left the room`), false);
   };
-  const end = (reason: Error): void => {
+  /** `tellPeer`: the pipe ended on this side, and the room is still there to say so. */
+  const end = (reason: Error, tellPeer = true): void => {
     if (life.signal.aborted) return;
     roomApi.off("dataReceived", onData);
     roomApi.off("disconnected", onDisconnected);
     roomApi.off("participantDisconnected", onParticipantDisconnected);
     life.abort(reason);
     wakeDrainWaiters();
+    if (tellPeer) {
+      publisher
+        .publishData(new Uint8Array(0), {
+          reliable: true,
+          destinationIdentities: [peerIdentity],
+          topic: closeTopic,
+        })
+        .catch(() => undefined);
+    }
   };
   roomApi.on("dataReceived", onData);
   roomApi.on("disconnected", onDisconnected);
@@ -148,7 +200,7 @@ export function messageTargetOverLiveKit(
         if (life.signal.aborted) return; // `signal` says so
         if (bytes.byteLength > maxFrameBytes) {
           const err = new RangeError(
-            `webrun-streams-livekit: a ${bytes.byteLength}-byte packet exceeds maxFrameBytes (${maxFrameBytes}); LiveKit would drop it silently`,
+            `webrun-streams-livekit: a ${bytes.byteLength}-byte packet exceeds maxFrameBytes (${maxFrameBytes})`,
           );
           end(err);
           throw err;
@@ -156,7 +208,12 @@ export function messageTargetOverLiveKit(
         const size = bytes.byteLength;
         inFlight += size;
         publisher
-          .publishData(bytes, { reliable: true, destinationIdentities: [peerIdentity] })
+          // A copy: livekit-client serializes the packet after an await.
+          .publishData(bytes.slice(), {
+            reliable: true,
+            destinationIdentities: [peerIdentity],
+            topic,
+          })
           .then(
             () => undefined,
             (err: unknown) =>

@@ -10,6 +10,7 @@ import {
 } from "@statewalker/webrun-streams";
 import { callPort, NO_TIMEOUT } from "./call-port.js";
 import { getPortCloseSignal } from "./close-signal.js";
+import { fitSerializedError } from "./fit-error.js";
 import { listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 import {
@@ -772,7 +773,13 @@ async function sendChunks(
       const chunk: WireChunk = {
         done,
         value: done ? value : chunkBytes(value),
-        error: error === undefined ? undefined : serializeError(error),
+        // An error goes whole, not chunked: bounded so it still fits one message.
+        error:
+          error === undefined
+            ? undefined
+            : maxMessageSize
+              ? fitSerializedError(serializeError(error), maxMessageSize)
+              : serializeError(error),
       };
       log?.("[duplexOverPort] send", { channelName, done, size: value?.byteLength });
       // Decided per chunk: acknowledged calls until `pipeline` is agreed (the
