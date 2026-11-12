@@ -1,5 +1,6 @@
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
 import { duplexOverDataChannel, holdEvents, markAnswering } from "./duplex-over-data-channel.js";
+import { PORT_LABEL_PREFIX } from "./port-mux.js";
 
 export interface WebRtcParams {
   /** Open `RTCPeerConnection`. Signalling, auth, and connection setup are the caller's responsibility. */
@@ -63,6 +64,7 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
 export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
   const onChannel = (ev: RTCDataChannelEvent): void => {
     const dc = ev.channel;
+    if (dc.label.startsWith(PORT_LABEL_PREFIX)) return; // a port's channel: `webrtcPortMux`'s
     holdEvents(dc);
     markAnswering(dc); // the caller closes the channel once the call is over
     let inputFromPeer: PeekInput | null = null;
