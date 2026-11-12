@@ -30,6 +30,7 @@ export interface WebSocketMessageTarget {
 
 /** How often `whenDrained` looks at `bufferedAmount`: a WebSocket has no drain event. */
 const DRAIN_POLL_MS = 5;
+export const DRAIN_LOW_WATER = 0;
 
 const encoder = new TextEncoder();
 

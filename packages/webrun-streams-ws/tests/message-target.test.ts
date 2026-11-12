@@ -4,7 +4,11 @@ import { collectBytes } from "@statewalker/webrun-streams";
 import { describeDuplexAdapter } from "@statewalker/webrun-streams-conformance";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
-import { messageTargetOverWebSocket, openWebSocket } from "../src/message-target.js";
+import {
+  DRAIN_LOW_WATER,
+  messageTargetOverWebSocket,
+  openWebSocket,
+} from "../src/message-target.js";
 import type { WebSocketLike } from "../src/websocket-like.js";
 import { makeWsPortPair } from "./make-ws-port-pair.js";
 
@@ -85,6 +89,24 @@ describe("messageTargetOverWebSocket", () => {
     expect(new TextDecoder().decode((await got) as Uint8Array)).toBe("héllo");
   });
 
+  it("(review) a socket on binaryType 'fragments' or 'blob' still delivers bytes, in order", async () => {
+    for (const binaryType of ["fragments", "blob"] as const) {
+      const s = await server();
+      const clientWs = await openWebSocket({ url: s.url, WebSocketCtor: NodeCtor });
+      const serverWs = await s.next();
+      serverWs.binaryType = binaryType;
+      const { target } = messageTargetOverWebSocket(serverWs as unknown as WebSocketLike);
+      cleanups.push(() => target.close());
+      const got: number[][] = [];
+      target.addEventListener("message", (e) => {
+        got.push([...(e.data as Uint8Array)]);
+      });
+      for (let i = 0; i < 20; i++) clientWs.send(new Uint8Array([i, i]));
+      await expect.poll(() => got.length, { timeout: 5000 }).toBe(20);
+      expect(got).toEqual(Array.from({ length: 20 }, (_, i) => [i, i]));
+    }
+  });
+
   it("refuses anything but bytes: a codec breaking its contract is not papered over", async () => {
     const { a } = await pipePair();
     expect(() => a.target.postMessage({ not: "bytes" })).toThrow(TypeError);
@@ -119,7 +141,7 @@ describe("messageTargetOverWebSocket", () => {
     for (let i = 0; i < 4; i++) a.target.postMessage(big);
     expect(a.target.bufferedAmount).toBeGreaterThan(0);
     await a.target.whenDrained();
-    expect(a.target.bufferedAmount).toBe(0);
+    expect(a.target.bufferedAmount).toBeLessThanOrEqual(DRAIN_LOW_WATER);
     await expect.poll(() => received, { timeout: 10_000 }).toBe(4 * big.byteLength);
   });
 
@@ -135,6 +157,27 @@ describe("messageTargetOverWebSocket", () => {
     const pending = collectBytes(call((async function* () {})()));
     serverWs.terminate();
     await expect(pending).rejects.toBeDefined();
+  });
+});
+
+describe("(review) the port-stack pair", () => {
+  it("serve's teardown closes each connection's multiplexer: a call in flight is failed", async () => {
+    const pair = await makeWsPortPair({});
+    cleanups.push(() => pair.close());
+    const teardown = await pair.serve((input) =>
+      (async function* () {
+        yield new Uint8Array([1]);
+        for await (const _ of input);
+        await new Promise(() => {});
+      })(),
+    );
+    const { call, close } = await pair.connect();
+    cleanups.push(close);
+    const it = call((async function* () {})())[Symbol.asyncIterator]();
+    expect((await it.next()).value).toEqual(new Uint8Array([1]));
+    const rest = it.next();
+    await teardown();
+    await expect(rest).rejects.toBeDefined();
   });
 });
 
