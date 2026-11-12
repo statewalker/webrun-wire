@@ -1,18 +1,9 @@
-import type { MakePair } from "@statewalker/webrun-streams-conformance";
-import { Room, RoomEvent } from "livekit-client";
-import { inject } from "vitest";
-import { connect, serve } from "../src/connect-serve.js";
+import { type Room, RoomEvent } from "livekit-client";
 
 /**
- * Two LiveKit participants in one room, talking to each other over data
- * packets.
- *
- * The server and the two access tokens come from `livekit-server-setup.ts`
- * (Vitest global setup, Node side) and arrive through `inject`.
- *
- * Unlike the WebRTC adapter, this one is built on `emulateMux`, so it forwards
- * the suite's tuning and L6 exercises the real credit path rather than
- * degrading to an integrity check.
+ * Waiting helpers for the browser pair. The server and the two access tokens
+ * come from `livekit-server-setup.ts` (Vitest global setup, Node side) and
+ * arrive through `inject`.
  */
 
 const PEER_TIMEOUT_MS = 20_000;
@@ -48,30 +39,3 @@ export function waitForPeer(room: Room, identity: string): Promise<void> {
     room.on(RoomEvent.ParticipantConnected, onJoin);
   });
 }
-
-export const makeLiveKitPair: MakePair = async (tuning) => {
-  const url = inject("livekitUrl");
-  const callerRoom = new Room();
-  const responderRoom = new Room();
-
-  try {
-    await callerRoom.connect(url, inject("livekitTokenCaller"));
-    await responderRoom.connect(url, inject("livekitTokenResponder"));
-    await Promise.all([waitForPeer(callerRoom, "responder"), waitForPeer(responderRoom, "caller")]);
-  } catch (err) {
-    await Promise.allSettled([callerRoom.disconnect(), responderRoom.disconnect()]);
-    throw err;
-  }
-
-  return {
-    async connect() {
-      return connect({ room: callerRoom, peerIdentity: "responder", mux: tuning });
-    },
-    async serve(handler) {
-      return serve({ room: responderRoom, peerIdentity: "caller", mux: tuning }, handler);
-    },
-    async close() {
-      await Promise.allSettled([callerRoom.disconnect(), responderRoom.disconnect()]);
-    },
-  };
-};

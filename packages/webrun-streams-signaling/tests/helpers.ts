@@ -1,4 +1,4 @@
-import type { ByteChannel } from "@statewalker/webrun-streams";
+import type { ByteChannel } from "../src/types.js";
 
 /** Read the next byte chunk from a channel's `recv`. */
 export async function readOne(channel: ByteChannel): Promise<Uint8Array> {

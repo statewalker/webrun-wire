@@ -53,7 +53,7 @@ function waitConnected(pc: RTCPeerConnection, label: string): Promise<void> {
 }
 
 /**
- * `tuning` is accepted and ignored: this adapter does not use `emulateMux`.
+ * `tuning` is accepted and ignored: this adapter keeps its own window per data channel.
  * It opens one `RTCDataChannel` per call, with its own fixed credit window
  * (`RECEIVE_WINDOW`) and send-buffer limit, so there is no window to shrink
  * from outside. L6 therefore stays an integrity check here; the stalls and

@@ -11,9 +11,9 @@ export interface ConnectServePair {
 }
 
 /**
- * Flow-control tuning L6 asks a pair for. An adapter that can pass these
- * through to its `emulateMux` should; one that multiplexes natively, or has
- * no configurable window, ignores them and L6 degrades to an integrity check.
+ * Flow-control tuning L6 asks a pair for. No remaining adapter has the credit
+ * window these describe (it was `emulateMux`'s, removed in Plan C3): every pair
+ * ignores them and L6 is an integrity check, until spec D17 redefines it.
  */
 export interface PairTuning {
   mtu?: number;
@@ -26,7 +26,7 @@ export type MakePair = (tuning?: PairTuning) => Promise<ConnectServePair>;
  * Loopback pair: `call` invokes the registered `handler` directly, no
  * transport. The conformance suite must pass against this — it self-validates
  * that the assertions are correctly formulated independent of any wire
- * protocol or `emulateMux` behaviour.
+ * protocol or multiplexer.
  */
 export const makeLoopbackPair: MakePair = async () => {
   let handler: Duplex | null = null;

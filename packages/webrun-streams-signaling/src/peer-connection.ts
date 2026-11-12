@@ -12,12 +12,12 @@
  *  - remote ICE candidates are added as plain `RTCIceCandidateInit` (accepted by
  *    `addIceCandidate`) instead of constructing a global `RTCIceCandidate`,
  *    which does not exist outside a browser.
- *  - `open()` yields a webrun-streams {@link ByteChannel} rather than a `MessagePort`.
+ *  - `open()` yields a {@link ByteChannel} rather than a `MessagePort`.
  */
 
-import type { ByteChannel } from "@statewalker/webrun-streams";
 import { byteChannelFromDataChannel } from "./byte-channel.js";
 import type {
+  ByteChannel,
   ConnectionState,
   IceCandidate,
   PeerConnectionEvents,

@@ -1,6 +1,6 @@
-import type { ByteChannel } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { PeerManager } from "../src/peer-manager.js";
+import type { ByteChannel } from "../src/types.js";
 import { readOne } from "./helpers.js";
 import { makeMockRtc } from "./mocks/rtc.js";
 import { makeSignalingPair } from "./mocks/signaling-bus.js";

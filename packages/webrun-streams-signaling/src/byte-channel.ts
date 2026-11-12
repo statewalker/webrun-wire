@@ -3,12 +3,12 @@
  * requires. The original `vcs-port-*` helpers surfaced an established
  * connection as a Web `MessagePort` (via the out-of-scope `datachannel-port` /
  * `livekit-port` byte bridges); here the established primitive is wrapped
- * *directly* as a webrun-streams {@link ByteChannel} so the byte transport +
+ * *directly* as a {@link ByteChannel} so the byte transport +
  * multiplexing (`emulateMux`) can run on top.
  */
-import type { ByteChannel } from "@statewalker/webrun-streams";
+
 import { makeByteQueue, toBytes } from "./byte-queue.js";
-import type { RoomLike } from "./types.js";
+import type { ByteChannel, RoomLike } from "./types.js";
 import { ROOM_EVENT } from "./types.js";
 
 /**

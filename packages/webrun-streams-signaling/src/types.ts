@@ -4,9 +4,22 @@
  * Relocated from the retiring `@statewalker/vcs-port-{webrtc,livekit}` packages
  * and neutralised: nothing here is VCS/Git-specific. These describe the generic
  * P2P handshake (WebRTC offer/answer/ICE, QR payloads, LiveKit room membership)
- * used to *establish* a channel. The byte transport itself is
- * `@statewalker/webrun-streams` (a `ByteChannel`), not this package.
+ * used to *establish* a channel, and the `ByteChannel` an established data
+ * channel is handed back as.
  */
+
+/**
+ * An established connection's bytes: inbound as an async iterable, outbound by
+ * `send`, message-oriented (each `send` arrives as one item). This package
+ * owns the type: it used to come from `@statewalker/webrun-streams`, whose
+ * `emulateMux` (its only other consumer) is gone.
+ */
+export type ByteChannel = {
+  send(bytes: Uint8Array): void;
+  recv: AsyncIterable<Uint8Array>;
+  closed: Promise<void>;
+  close(): void;
+};
 
 /** WebRTC peer role in the connection. */
 export type PeerRole = "initiator" | "responder";

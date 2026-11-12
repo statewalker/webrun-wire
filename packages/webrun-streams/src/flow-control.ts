@@ -11,10 +11,13 @@
  * offer: the receiver's capacity is not knowable to the sender unless the
  * receiver states it.
  *
- * **The unit is opaque.** This module never interprets the numbers it counts.
- * `emulateMux` passes byte counts and advertises `maxStreamBuffer`; the RPC
- * tier passes 1 per value and advertises a maximum in-flight value count.
- * Nothing here depends on which.
+ * **The unit is opaque.** This module never interprets the numbers it counts:
+ * bytes or values, it does not depend on which.
+ *
+ * **Dormant.** Its consumer, `emulateMux`, was removed in Plan C3, and
+ * `webrun-rpc`'s port stack keeps its own window. It stays exported and
+ * tested as the mechanism for per-stream windowing (spec D13) rather than be
+ * rewritten later.
  */
 
 export interface CreditLedger {

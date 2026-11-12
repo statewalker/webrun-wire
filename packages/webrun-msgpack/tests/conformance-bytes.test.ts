@@ -82,8 +82,8 @@ function bytePipePair(): { a: MessageTarget; b: MessageTarget; close(): void } {
  * `PairTuning` is ignored, exactly as the `webrun-rpc` new-stack pair ignores
  * it: this design has no credit window to shrink, so **L6 here is an integrity
  * check only** — its green says the body round-trips and says nothing about
- * flow control. L6's redefinition is spec D17, sequenced into Plan C3 because
- * five adapters still run it against `emulateMux`, where the window is real.
+ * flow control. L6's redefinition is spec D17, the step after Plan C3 removed
+ * `emulateMux`, the last adapter whose window L6 really exercised.
  * This stack's flow-control coverage lives in `webrun-rpc`'s own
  * `duplex-over-port-timeout` and `duplex-over-port-hostile` suites.
  */
