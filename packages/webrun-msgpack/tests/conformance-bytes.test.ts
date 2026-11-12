@@ -81,7 +81,7 @@ function bytePipePair(): { a: MessageTarget; b: MessageTarget; close(): void } {
  *
  * `PairTuning.maxMessageSize`, when L6 sets it, overrides the factory's own.
  * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
- * it, so a producer is never more than a chunk ahead; the pair declares 8 KiB (two 4 KiB chunks).
+ * it, so a producer is never more than a chunk ahead; the pair declares one 4 KiB chunk.
  */
 const bytePairFactory =
   (fixedMaxMessageSize?: number): MakePair =>
@@ -92,7 +92,7 @@ const bytePairFactory =
     let serverMux: PortMux | undefined;
 
     return {
-      runAheadBytes: 8192,
+      runAheadBytes: 4096,
       async connect() {
         clientMux ??= multiplexPort(pipe.a, {
           codec: msgpackCodec,

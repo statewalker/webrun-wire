@@ -13,6 +13,6 @@ A pair that declares no bound gets the completion check alone. Measured bounds:
 | Pair | Bound |
 | --- | --- |
 | Loopback | 0 |
-| Port stack | 0 (declared 8 KiB) |
+| Port stack | 0 (declared one 4 KiB chunk) |
 | `-webrtc` | 4 MiB, its window |
 | `-libp2p` | none: 22–24 MiB ahead until libp2p aborts the stream; recorded in its README |

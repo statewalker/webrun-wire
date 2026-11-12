@@ -239,7 +239,7 @@ leaves the promise pending.
 `pnpm test` runs the shared conformance suite (L0 to L6) against an
 in-process `ws` server over the port stack (`overPipe` + `msgpackCodec`).
 L6 asserts the port stack's bound in both directions: a consumer that stops
-reading lets the producer get at most 8 KiB ahead (measured 0). `message-target.test.ts`
+reading lets the producer get at most one 4 KiB chunk ahead (measured 0). `message-target.test.ts`
 pins the pipe's contract: bytes only (anything else is a `TypeError`), text
 frames as UTF-8 bytes, `signal` aborted by a dead peer, `whenDrained`
 resolving at the low-water mark, sockets on "fragments" or "blob" delivering

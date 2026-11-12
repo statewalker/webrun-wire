@@ -16,7 +16,7 @@ import { waitConnOpen, waitPeerOpen } from "./make-peerjs-pair.js";
  *
  * `PairTuning.maxMessageSize`, when smaller than the adapter's own ceiling, is used instead.
  * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
- * it, so a producer is never more than a chunk ahead; the pair declares 8 KiB (two 4 KiB chunks).
+ * it, so a producer is never more than a chunk ahead; the pair declares one 4 KiB chunk.
  */
 export const makePeerJsPortPair: MakePair = async (tuning) => {
   const fit = (own: number) => Math.min(own, tuning?.maxMessageSize ?? own);
@@ -37,7 +37,7 @@ export const makePeerJsPortPair: MakePair = async (tuning) => {
     throw err;
   }
   return {
-    runAheadBytes: 8192,
+    runAheadBytes: 4096,
     async connect() {
       const conn = callerPeer.connect(responderId, { serialization: "raw", reliable: true });
       await waitConnOpen(conn);
@@ -62,7 +62,7 @@ export const makePeerJsPortPair: MakePair = async (tuning) => {
                 codec: msgpackCodec,
                 side: "responder",
                 signal,
-                maxMessageSize,
+                maxMessageSize: fit(maxMessageSize),
               }),
             },
             handler,

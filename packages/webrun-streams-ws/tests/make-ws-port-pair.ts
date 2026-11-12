@@ -17,7 +17,7 @@ const NodeCtor = NodeWebSocket as unknown as new (
  *
  * `PairTuning.maxMessageSize` goes to `overPipe` (a WebSocket sets none of its own).
  * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
- * it, so a producer is never more than a chunk ahead; the pair declares 8 KiB (two 4 KiB chunks).
+ * it, so a producer is never more than a chunk ahead; the pair declares one 4 KiB chunk.
  */
 export const makeWsPortPair: MakePair = async (tuning) => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
@@ -26,7 +26,7 @@ export const makeWsPortPair: MakePair = async (tuning) => {
   if (!address || typeof address === "string") throw new Error("WS server has no address");
   const url = `ws://127.0.0.1:${address.port}`;
   return {
-    runAheadBytes: 8192,
+    runAheadBytes: 4096,
     async connect() {
       const ws = await openWebSocket({ url, WebSocketCtor: NodeCtor });
       const { target, signal } = messageTargetOverWebSocket(ws);

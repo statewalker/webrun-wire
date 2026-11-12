@@ -10,8 +10,9 @@ import { waitForPeer } from "./make-livekit-pair.js";
  * The port stack over LiveKit: each (room, remote participant) is one pipe of
  * bytes (`messageTargetOverLiveKit`, reporting 12 KiB), `overPipe` with
  * `msgpackCodec` invents the ports, and `webrun-rpc`'s `connect` / `serve` run
- * one call per port. `PairTuning` is ignored: L6 is an integrity check on the
- * port stack until D17.
+ * one call per port. `PairTuning.maxMessageSize`, when smaller than 12 KiB, is
+ * used on both sides. L6 (spec D17): a producer is never more than a chunk
+ * ahead of a stalled consumer; the pair declares one 4 KiB chunk.
  */
 export const makeLiveKitPortPair: MakePair = async (tuning) => {
   const fit = (own: number) => Math.min(own, tuning?.maxMessageSize ?? own);
@@ -27,7 +28,7 @@ export const makeLiveKitPortPair: MakePair = async (tuning) => {
     throw err;
   }
   return {
-    runAheadBytes: 8192,
+    runAheadBytes: 4096,
     async connect() {
       const { target, signal, maxMessageSize } = messageTargetOverLiveKit(callerRoom, "responder");
       return connect({

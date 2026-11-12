@@ -38,6 +38,8 @@ peer dependencies. One entry point, `.`.
 | `MakePair` | type | `(tuning?: PairTuning) => Promise<ConnectServePair>`. Called once per test case, so each case gets a fresh transport. |
 | `ConnectServePair` | type | `{ connect(): Promise<{ call: Duplex; close(): Promise<void> }>; serve(handler: Duplex): Promise<() => Promise<void>>; close(): Promise<void>; runAheadBytes?: number }`. `runAheadBytes` is the most bytes a producer may get ahead of a consumer that stopped reading; L6 asserts it (see below). |
 | `PairTuning` | type | `{ maxMessageSize?: number }`. L6 asks for 4 KiB, so its 256 KiB body crosses as many messages; a pair whose transport decides its own ceiling ignores it. |
+| `measureRunAhead(makePair, direction)` | function | L6's run-ahead measurement, for one direction: resolves `{ bound, ahead, complete, intact }`. |
+| `RunAheadMeasurement` | type | What `measureRunAhead` resolves. |
 | `DescribeDuplexAdapterOptions` | type | `{ concurrency?: number; skipHugeBody?: boolean }`. |
 
 | Option | Default | Effect |
@@ -120,13 +122,18 @@ shrink the level proved only integrity. Now each pair declares
 `runAheadBytes`, the most a producer may get ahead of a consumer that has
 stopped reading, and L6 measures it, in both directions. The producer yields
 4 KiB chunks, enough to exceed the bound twice over; the consumer takes one and
-stops; once the producer has stopped growing, `produced − consumed` must be at
-most the bound; then the consumer resumes and every byte must arrive.
+stops; once the producer has produced nothing for a second, `produced −
+consumed` must be at most the bound; then the consumer resumes, and every byte
+must arrive in place (byte k belongs to chunk k / 4096, whatever chunk
+boundaries the transport chose). `measureRunAhead(makePair, direction)` is the
+measurement itself, exported; the package's own `tests/l6-self.test.ts` shows it
+catches a transport that buffers without bound while pulling only every 150 ms,
+and one that duplicates a chunk and drops another.
 
 | Pair | `runAheadBytes` | Measured |
 | --- | --- | --- |
 | loopback | 0 | 0 |
-| port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 8 KiB | 0: the next chunk is produced only once the consumer pulls past the last |
+| port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 4 KiB (one chunk) | 0: the next chunk is produced only once the consumer pulls past the last |
 | `-webrtc` | `RECEIVE_WINDOW` (4 MiB) + 16 KiB | 4 MiB exactly |
 | `-libp2p` | none declared | 22-24 MiB in half a second, until libp2p's 4 MiB read buffer aborts the stream |
 

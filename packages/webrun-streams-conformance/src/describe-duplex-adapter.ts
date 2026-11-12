@@ -1,6 +1,7 @@
 import { collectBytes, type Duplex } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import type { MakePair } from "./loopback.js";
+import { measureRunAhead } from "./run-ahead.js";
 
 export interface DescribeDuplexAdapterOptions {
   /** Number of concurrent calls for L1. Default 10. */
@@ -235,85 +236,11 @@ export function describeDuplexAdapter(
       });
 
       for (const direction of ["response", "request"] as const) {
-        it(`a ${direction} producer stops within the pair's runAheadBytes of a consumer that stopped reading, and finishes when it resumes`, async () => {
-          const pair = await makePair();
-          const bound = pair.runAheadBytes;
-          const CHUNK = 4096;
-          // Enough to exceed the bound twice over, so an unbounded transport
-          // shows; a pair without a bound gets a 1 MiB body.
-          const count =
-            bound === undefined ? 256 : Math.max(64, Math.ceil((2 * bound + 64 * 1024) / CHUNK));
-          let produced = 0;
-          const producer = async function* () {
-            for (let i = 0; i < count; i++) {
-              produced++;
-              yield new Uint8Array(CHUNK).fill(i & 0xff);
-            }
-          };
-          /** Waits until `produced` stops growing: the producer has stalled or finished. */
-          const settled = async () => {
-            let last = -1;
-            for (let i = 0; i < 40 && produced !== last; i++) {
-              last = produced;
-              await delay(100);
-            }
-          };
-          const check = (consumedBytes: number) => {
-            const ahead = produced * CHUNK - consumedBytes;
-            if (bound !== undefined) expect(ahead).toBeLessThanOrEqual(bound);
-          };
-          try {
-            if (direction === "response") {
-              await pair.serve(async function* (input) {
-                for await (const _ of input);
-                yield* producer();
-              });
-              const { call, close } = await pair.connect();
-              const it = call([])[Symbol.asyncIterator]();
-              const chunks: Uint8Array[] = [(await it.next()).value as Uint8Array];
-              await settled();
-              check(chunks[0]?.byteLength ?? 0);
-              for (let r = await it.next(); !r.done; r = await it.next()) chunks.push(r.value);
-              const all = concat(chunks);
-              expect(all.byteLength).toBe(count * CHUNK);
-              expect(all[all.byteLength - 1]).toBe((count - 1) & 0xff);
-              await close();
-            } else {
-              let handlerConsumed = 0;
-              let resume!: () => void;
-              const gate = new Promise<void>((r) => {
-                resume = r;
-              });
-              await pair.serve(async function* (input) {
-                let first = true;
-                let last = -1;
-                for await (const chunk of input) {
-                  handlerConsumed += chunk.byteLength;
-                  last = chunk[chunk.byteLength - 1] as number;
-                  if (first) {
-                    first = false;
-                    yield new Uint8Array([1]); // tell the caller the first chunk arrived
-                    await gate;
-                  }
-                }
-                yield new TextEncoder().encode(`${handlerConsumed}:${last}`);
-              });
-              const { call, close } = await pair.connect();
-              const it = call(producer())[Symbol.asyncIterator]();
-              await it.next(); // the first chunk reached the handler
-              await settled();
-              check(handlerConsumed);
-              resume();
-              const rest: Uint8Array[] = [];
-              for (let r = await it.next(); !r.done; r = await it.next()) rest.push(r.value);
-              expect(new TextDecoder().decode(concat(rest))).toBe(
-                `${count * CHUNK}:${(count - 1) & 0xff}`,
-              );
-              await close();
-            }
-          } finally {
-            await pair.close();
-          }
+        it(`${direction} run-ahead: a producer facing a consumer that stopped reading stays within the pair's declared bound (none declared: completion only), and every byte arrives in place once it resumes`, async () => {
+          const r = await measureRunAhead(makePair, direction);
+          if (r.bound !== undefined) expect(r.ahead).toBeLessThanOrEqual(r.bound);
+          expect(r.complete).toBe(true);
+          expect(r.intact).toBe(true);
         }, 60_000);
       }
     });
