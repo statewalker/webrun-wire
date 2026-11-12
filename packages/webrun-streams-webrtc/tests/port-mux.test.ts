@@ -143,6 +143,40 @@ if (isBrowser) {
       serverPc.close();
     });
 
+    it("a connection that fails (ICE) aborts its ports, though their channels have not closed yet", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      await webrtcPortMux({ pc: serverPc, codec, onPort: () => true });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      Object.defineProperty(clientPc, "connectionState", {
+        get: () => "failed",
+        configurable: true,
+      });
+      clientPc.dispatchEvent(new Event("connectionstatechange"));
+      expect(port.closeSignal.aborted).toBe(true);
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("messages that arrive before the port's first listener are kept for it", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (port) => {
+          port.postMessage({ greeting: "sent before anyone listened" });
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      await new Promise((r) => setTimeout(r, 300)); // the greeting has arrived by now
+      const got = await new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+      expect(got).toEqual({ greeting: "sent before anyone listened" });
+      clientPc.close();
+      serverPc.close();
+    });
+
     it("close() stops accepting and closes the ports it opened", async () => {
       const { clientPc, serverPc } = await connectedPeers();
       const serving = await webrtcPortMux({ pc: serverPc, codec, onPort: () => true });
