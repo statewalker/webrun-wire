@@ -13,20 +13,11 @@ import {
  * The B2 stack, end to end: one `MessageChannel`, `multiplexPort` on each end,
  * a virtual port per call, and `duplexOverPort` on that port.
  *
- * `PairTuning` is deliberately ignored. L6 asks for a credit window
- * (`mtu`, `maxStreamBuffer`) that this design removes — under spec D11 there
- * is no window to shrink — so for this pair **L6 is an integrity check only**:
- * its green says the body round-trips, and says nothing at all about flow
- * control. That is not an oversight. L6's redefinition and the `PairTuning`
- * reshape are spec D17, the step after `emulateMux` (the last adapter with a
- * real credit window under L6) was removed in Plan C3.
- *
- * This stack's flow-control coverage lives in its own files:
- * `duplex-over-port-timeout.test.ts` (the F5 regression, and that progress
- * resets the clock) and `duplex-over-port-hostile.test.ts` (a second
- * unconfirmed chunk is refused). Do not cite this L6 as evidence for either.
+ * `PairTuning.maxMessageSize` is threaded into both muxes.
+ * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
+ * it, so a producer is never more than a chunk ahead; the pair declares 8 KiB (two 4 KiB chunks).
  */
-const makeNewStackPair: MakePair = async () => {
+const makeNewStackPair: MakePair = async (tuning) => {
   const channel = new MessageChannel();
   channel.port1.start();
   channel.port2.start();
@@ -35,10 +26,12 @@ const makeNewStackPair: MakePair = async () => {
   let clientMux: PortMux | undefined;
 
   return {
+    runAheadBytes: 8192,
     async connect() {
       clientMux ??= multiplexPort(channel.port1, {
         codec: structuredCodec,
         side: "initiator",
+        maxMessageSize: tuning?.maxMessageSize,
       });
       const mux = clientMux;
       const call: Duplex = (input) =>
@@ -58,6 +51,7 @@ const makeNewStackPair: MakePair = async () => {
       const mux = multiplexPort(channel.port2, {
         codec: structuredCodec,
         side: "responder",
+        maxMessageSize: tuning?.maxMessageSize,
         onPort: (port) => {
           serveDuplexOverPort(port, handler, { maxMessageSize: mux.maxMessageSize });
         },

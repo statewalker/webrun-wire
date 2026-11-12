@@ -13,7 +13,8 @@ import { waitForPeer } from "./make-livekit-pair.js";
  * one call per port. `PairTuning` is ignored: L6 is an integrity check on the
  * port stack until D17.
  */
-export const makeLiveKitPortPair: MakePair = async () => {
+export const makeLiveKitPortPair: MakePair = async (tuning) => {
+  const fit = (own: number) => Math.min(own, tuning?.maxMessageSize ?? own);
   const url = inject("livekitUrl");
   const callerRoom = new Room();
   const responderRoom = new Room();
@@ -26,17 +27,28 @@ export const makeLiveKitPortPair: MakePair = async () => {
     throw err;
   }
   return {
+    runAheadBytes: 8192,
     async connect() {
       const { target, signal, maxMessageSize } = messageTargetOverLiveKit(callerRoom, "responder");
       return connect({
-        mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal, maxMessageSize }),
+        mux: overPipe(target, {
+          codec: msgpackCodec,
+          side: "initiator",
+          signal,
+          maxMessageSize: fit(maxMessageSize),
+        }),
       });
     },
     async serve(handler) {
       const { target, signal, maxMessageSize } = messageTargetOverLiveKit(responderRoom, "caller");
       return serve(
         {
-          mux: overPipe(target, { codec: msgpackCodec, side: "responder", signal, maxMessageSize }),
+          mux: overPipe(target, {
+            codec: msgpackCodec,
+            side: "responder",
+            signal,
+            maxMessageSize: fit(maxMessageSize),
+          }),
         },
         handler,
       );

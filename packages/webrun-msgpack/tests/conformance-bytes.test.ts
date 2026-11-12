@@ -79,22 +79,20 @@ function bytePipePair(): { a: MessageTarget; b: MessageTarget; close(): void } {
  * one those adapters engage on their first real body, and an unchunked run
  * alone would leave it untested.
  *
- * `PairTuning` is ignored, exactly as the `webrun-rpc` new-stack pair ignores
- * it: this design has no credit window to shrink, so **L6 here is an integrity
- * check only** — its green says the body round-trips and says nothing about
- * flow control. L6's redefinition is spec D17, the step after Plan C3 removed
- * `emulateMux`, the last adapter whose window L6 really exercised.
- * This stack's flow-control coverage lives in `webrun-rpc`'s own
- * `duplex-over-port-timeout` and `duplex-over-port-hostile` suites.
+ * `PairTuning.maxMessageSize`, when L6 sets it, overrides the factory's own.
+ * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
+ * it, so a producer is never more than a chunk ahead; the pair declares 8 KiB (two 4 KiB chunks).
  */
 const bytePairFactory =
-  (maxMessageSize?: number): MakePair =>
-  async () => {
+  (fixedMaxMessageSize?: number): MakePair =>
+  async (tuning) => {
+    const maxMessageSize = tuning?.maxMessageSize ?? fixedMaxMessageSize;
     const pipe = bytePipePair();
     let clientMux: PortMux | undefined;
     let serverMux: PortMux | undefined;
 
     return {
+      runAheadBytes: 8192,
       async connect() {
         clientMux ??= multiplexPort(pipe.a, {
           codec: msgpackCodec,

@@ -15,6 +15,15 @@ async function createNode(): Promise<Libp2p> {
   });
 }
 
+/**
+ * Declares no `runAheadBytes`: L6 measured this transport with no bound. A
+ * consumer that stops reading let the producer get 22-24 MiB ahead within half
+ * a second, in either direction, until libp2p's 4 MiB read buffer aborted the
+ * stream (the call then fails with `PeerGoneError`). Pausing the stream while
+ * the consumer holds a chunk, and capping yamux's window, did not bound it, so
+ * the buffering is elsewhere in the stack. Until it is found, L6 checks only
+ * that a stalled transfer below that point completes once the consumer resumes.
+ */
 export const makeLibp2pPair: MakePair = async () => {
   const serverNode = await createNode();
   const clientNode = await createNode();
