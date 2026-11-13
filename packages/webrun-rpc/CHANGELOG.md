@@ -1,5 +1,47 @@
 # @statewalker/webrun-rpc
 
+## 0.11.0
+
+### Minor Changes
+
+- e5e180b: **Breaking: `emulateMux` is removed (Plan C3).** Every transport now runs `webrun-rpc`'s port stack. Each adapter gives a pipe (`messageTargetOver…`), `overPipe` with `msgpackCodec` invents a port per call on it, and `webrun-rpc`'s `connect` / `serve` run one call per port. On that stack a producer stays at most one chunk ahead of its consumer; `emulateMux` buffered up to its 8 MiB window. The wire format changes, so both ends must upgrade together.
+  
+  - `webrun-streams`: `emulateMux`, `EmulateMuxOptions` and `ByteChannel` are gone. `newCreditLedger` / `newCreditGrantor` stay exported, dormant, as the mechanism for per-stream windowing (spec D13).
+  - `webrun-streams-ws`, `-peerjs`, `-livekit`: the `emulateMux`-based `connect` / `serve` and `byteChannelFromWebSocket` / `byteChannelFromPeerJs` / `byteChannelFromLiveKit` are gone. Use `messageTargetOverWebSocket` / `messageTargetOverPeerJs` / `messageTargetOverLiveKit` with `overPipe` (see each README). None of the three has a runtime dependency left.
+  - `webrun-rpc`: `byteChannelFromMessagePort` is gone; a `MessagePort` goes to `overPipe` directly.
+  - `webrun-streams-signaling`: `ByteChannel` is now declared here, with the same shape, and the package has no runtime dependency. Import the type from this package instead of `webrun-streams`. New `messageTargetOverByteChannel(channel)` runs the port stack over a channel this package hands back, reporting 16 KiB − 256 as `maxMessageSize`.
+  - `webrun-streams-conformance`: comments only. `PairTuning` is unchanged here, and every pair now ignores it until D17 redefines L6.
+  - `webrun-http-streams`: comments only. Its peer-error slot test now runs on the port stack.
+  
+  `webrun-streams-signaling` also fixes `byteChannelFromRoom`, which never ended. It now closes when the room disconnects, when its participant leaves, or when a reliable publish fails, and it ignores packets that carry no participant. Before this, anything run over it (now the port stack) hung when the other end went away.
+- 1758c6a: An exchange on a windowed `multiplexPort` port takes one round trip, in both directions, instead of two. The window handshake (`open`, the responder's zero-byte ack, the opener's answer to it) used to hold each end to confirmed calls until it had seen the other's step: a responder pipelined only 1.5 round trips after the port opened (a GET's body came a round trip after its head), and an opener only once the ack came back (a POST's end waited for its first chunk's confirmation). Nothing new goes on the wire; old and new peers interoperate in all four pairings.
+  
+  - **Responder:** it holds its own sends back by the window from the `open` on, without waiting for the opener's answer, when the `open` lists `caps` (only a mux that grants credit lists them, 0.9 and later, first published as 0.10) and this mux has already read a `credit` envelope on any port (which shows its own codec reads them; one that drops them keeps waiting for the answer, unwindowed, as before). It does not show that the opener's codec reads credit: an opener over a codec that drops credit on read never agrees `pipeline`, and its streams fail on the responder's first pipelined chunk ("pipelining was not agreed"), as with 0.10 on both ends once the opener's first grant arrives, but from the second port on at once. A 0.10 opener gets a GET's head and body together from its second port on.
+  - **Opener:** new option `presumeAck` on `multiplexPort` / `overPipe`, `"learned"` (default), `"always"` or `"never"`. A presuming port takes the responder's ack as given when it opens: it holds back by the window at once, agrees `pipeline`, and posts its answer to the ack right behind the `open`, so a 0.10 responder pipelines from the start too. `"learned"` presumes, on every port after the first, the ack this peer already sent on an earlier port of the same mux, once one listed `pipeline`; `"always"` presumes from the first port, for a pipe whose peer is known to be 0.10 or later; `"never"` keeps the 0.10 behaviour. An ack that contradicts the presumption (other sizing, or no `pipeline`) stops presumption on that mux, and fails the port with reason `"protocol"` only if it already posted something. A port refused without an ack (`maxPorts`) or after one (`onPort`) closes as before, having sent at most one window, which the responder drops.
+  
+  Behaviour change: by default an opener now sends a stream's chunks before the ack from its second port on, so on a refused port it may send up to a window where it sent one chunk. On the opening side `ports()` still reports `window` only once the ack arrived; on the serving side it now reports it from the `open` on when the `open` lists `caps` and the mux has already read a `credit`. Set `presumeAck: "never"` for the previous timing on the opening side.
+
+### Patch Changes
+
+- 9ed3bc7: New `libp2pPortMux(options)` in `webrun-streams-libp2p`: native MessagePorts over libp2p. Each port is its own libp2p stream, multiplexed by yamux, framed by `messageTargetOverStream` and encoded by a value codec (`{ encode: serialize, decode: deserialize }` from `webrun-msgpack`). It is a `webrun-rpc` `PortMux` by shape: pass it to `overPorts`, and `webrun-rpc`'s `connect` / `serve` run each call on its own stream. The port stack's backpressure keeps a producer within one chunk of a consumer that stopped reading. With libp2p's own `connect` / `serve`, a producer gets tens of megabytes ahead and the stream is then aborted.
+  
+  Native ports and emulated ports (`overPipe` on one `messageTargetOverStream`) both pass the conformance suite with L6 at a one-chunk bound. A port carries `closeSignal`, so a call on a dead stream fails. Ports reuse `connect()`'s early-stream gate. The stream limits default to 1024, because every concurrent call is a stream and libp2p's own default of 32 would reset the 33rd. A refused port is aborted on both ends, and a call on it fails. An undecodable frame fails the port. The serving side gets `{ remotePeer, connection }`.
+  
+  `messageTargetOverStream` now aborts its `signal` for a stream that ended before it was attached, for example a peer that reset the stream during protocol negotiation. Before, that signal never aborted; it now aborts with `PeerGoneError`. Its target also carries `closeSignal`.
+  
+  `webrun-rpc`: `MessageTarget` gains the optional `closeSignal`, and `getPortCloseSignal` returns it when no signal was registered with `setPortCloseSignal`. A transport adapter can now supply a port's close signal by shape, without importing `webrun-rpc`.
+  
+  `webrun-rpc` also fixes a stream-tier bug. A port whose close signal had already aborted when `duplexOverPort` or `serveDuplexOverPort` got it left the stream waiting forever, because an `abort` listener added to an aborted signal never fires. A call on such a port now fails at once.
+- 3166c3b: New `messageTargetOverPeerJs(conn)` and `messageTargetOverLiveKit(room, peerIdentity)`: a raw PeerJS connection, or one LiveKit participant, as a pipe of bytes for `webrun-rpc`'s port stack (Plan C2). Each returns `{ target, signal, maxMessageSize }`. `target` is a `MessageTarget` with `bufferedAmount` and `whenDrained()`. `signal` aborts when the transport goes. `maxMessageSize` is the payload ceiling to give `overPipe`: 16 KiB − 256 for PeerJS, 12 KiB for LiveKit.
+  
+  PeerJS's ceiling was measured first, as the spec required. Between two Chromiums, 256 KiB arrives and one byte more arrives as nothing, with the connection silently closed. Firefox to Chrome cuts off at 16 KiB. So a post past `maxFrameBytes` (16 KiB) ends the pipe with a `RangeError` rather than vanishing. The connection must be open, raw and reliable, and `close()` flushes before closing.
+  
+  LiveKit packets carry their own topic. Ending a pipe on one side sends a goodbye that ends the peer's pipe, because the room stays connected. The packet cap is livekit-client's own 64,000 bytes.
+  
+  `webrun-rpc`: `duplexOverPort` fits the error a stream ends with to `maxMessageSize` before sending it whole. In order, it drops the stack, then the largest extra fields, then the message's tail, and marks the error `truncated: true`. Before this, a large error message, or an error carrying an HTTP body, went out as one oversized message, which a transport with a ceiling drops or dies on.
+- Updated dependencies [e5e180b]
+  - @statewalker/webrun-streams@0.3.0
+
 ## 0.10.2
 
 ### Patch Changes
