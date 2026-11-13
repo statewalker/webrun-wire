@@ -327,6 +327,9 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         // events within ~190 ms of each other (seen in CI), so the floor sits well above 0 and
         // well below 300.
         for (const gap of gaps) expect(gap).toBeGreaterThan(100);
+        // A late middle event shifts one gap into the other but not the span (nominal 600 ms);
+        // buffering or merging any two events shrinks it (to ~0 or ~300).
+        expect(gaps[0] + gaps[1]).toBeGreaterThan(450);
       });
 
       it("request bodies reach the handler whole", async () => {
