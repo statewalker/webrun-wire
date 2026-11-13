@@ -322,7 +322,11 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
       return times.slice(1).map((t, i) => Math.round(t - times[i]));
     `,
         );
-        for (const gap of gaps) expect(gap).toBeGreaterThan(200);
+        // The handler sends one event every 300 ms. An event buffered until the stream ends would
+        // arrive with the others (gaps near 0); a runner's timer jitter can still bring two
+        // events within ~190 ms of each other (seen in CI), so the floor sits well above 0 and
+        // well below 300.
+        for (const gap of gaps) expect(gap).toBeGreaterThan(100);
       });
 
       it("request bodies reach the handler whole", async () => {
