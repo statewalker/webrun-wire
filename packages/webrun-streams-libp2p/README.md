@@ -16,7 +16,7 @@ libp2p solves transport negotiation, NAT traversal, relaying and authenticated
 peer identity. What it gives an application is a `Stream`, not a request. This
 adapter binds a stream to the `Duplex` shape, so a handler written once runs
 over libp2p as it does over any other adapter. Because libp2p multiplexes
-natively, there is no `emulateMux`: one call is one real libp2p stream.
+natively, there is no multiplexer on top: one call is one real libp2p stream.
 
 What the adapter adds on top of a raw stream:
 
@@ -57,6 +57,8 @@ runs (Node or browser).
 | `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
 | `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
 | `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
+| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits. See "MessagePorts over libp2p" below. |
+| `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
@@ -283,6 +285,54 @@ streams and that an unconfigured server stops at 32.
   A caller that sent its whole request and then stopped reading the response
   (`.return()` mid-stream) is ordinary and is not logged.
 
+### MessagePorts over libp2p, and the port stack on them
+
+`connect` / `serve` above stream each call's bytes straight onto a libp2p
+stream, and so inherit libp2p's buffering: a consumer that stops reading does
+not slow its producer (see Tests, L6). `webrun-rpc`'s port stack does: each
+call's chunk waits for the peer's confirmation that its consumer pulled the
+last one, so a producer is never more than a chunk ahead, whatever the
+transport buffers underneath. Two ways to put libp2p under it:
+
+```ts
+import { deserialize, msgpackCodec, serialize } from "@statewalker/webrun-msgpack";
+import { connect, overPipe, overPorts, serve } from "@statewalker/webrun-rpc";
+import { libp2pPortMux, messageTargetOverStream } from "@statewalker/webrun-streams-libp2p";
+
+// 1. native ports: one libp2p stream per port, multiplexed by yamux
+const codec = { encode: serialize, decode: deserialize };
+await serve({ mux: overPorts((onPort) => libp2pPortMux({ node, codec, onPort })) }, handler);
+const { call } = await connect({ mux: overPorts(() => libp2pPortMux({ node, codec, peer })) });
+
+// 2. emulated ports: one libp2p stream, multiplexPort inventing the ports on it
+const { target, signal } = messageTargetOverStream(await node.dialProtocol(peer, ["/my-mux/1.0.0"]));
+const pipe = await connect({ mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal }) });
+```
+
+Both pass the shared conformance suite, including L6 at a one-chunk bound
+(`tests/port-mux.test.ts`). Which to use:
+
+| | native (`libp2pPortMux`) | emulated (`overPipe` on one stream) |
+| --- | --- | --- |
+| multiplexing | yamux: per-stream windows, scheduling | `multiplexPort`'s id table |
+| a call costs | a stream open (a protocol negotiation) | nothing on the wire |
+| limits | a stream per concurrent call: `maxInboundStreams` / `maxOutboundStreams`, 1024 by default here (libp2p's own default, 32, would reset the 33rd call) | `maxPorts` |
+| one slow call | holds its own stream only | shares the stream; `frameSize` interleaves |
+| who is calling | `onPort` gets `{ remotePeer, connection }` | the stream's connection, once |
+| 4 MiB echo, in-process TCP, setup excluded (three runs) | 35–38 MiB/s (64 KiB chunks), 71–88 MiB/s (256 KiB) | 37–48 MiB/s, 79–87 MiB/s |
+
+Each native port carries `closeSignal`, aborted when its stream ends, the peer
+goes, or the port is closed here; `webrun-rpc`'s `getPortCloseSignal` reads it
+from the port, so a call on a dead stream fails instead of waiting, and this
+package still imports nothing from `webrun-rpc`. Ports are opened through the
+same early-stream gate as `connect()`. A port `onPort` refuses (returns
+`false`) is aborted: the opener's signal aborts with `PeerGoneError` and a call
+on it fails. A frame the port's codec cannot decode (a peer speaking another
+codec) aborts the port rather than vanish. `meta` is not sent: the
+protocol says what a port is for. Messages are values (objects holding
+`Uint8Array` chunks), so a port needs a value codec where `overPipe` needs a
+`PortCodec`.
+
 ### A multiplexer over one stream closes with it
 
 `multiplexPort` (from `@statewalker/webrun-rpc`) can run many ports over one
@@ -338,8 +388,74 @@ its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
 each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
 up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
-`skipHugeBody`, and L6's small window does not apply (there is no
-`emulateMux`), so L6 is an integrity check.
+`skipHugeBody`.
+
+**Run-ahead is bounded for `connect` / `serve`** (spec D17, L6;
+`tests/run-ahead.test.ts`, always on). L6 first found none: a consumer that
+stopped reading let the producer run 22-24 MiB ahead until libp2p's 4 MiB read
+buffer killed the stream. Two things buffered without limit:
+
+- **libp2p's stream iterator** moves every message into an unbounded queue as
+  it arrives, and **yamux grants its peer receive window on arrival**, not on
+  consumption. The inbound side now reads through its own queue: past
+  `readHighWaterBytes` (default 64 KiB) the stream is paused, which makes yamux
+  withhold window updates, and it is resumed once the consumer has read half.
+- **`serve` pushed every request chunk to the handler's input queue** without
+  waiting. Past the same 64 KiB it now waits until the handler has read the
+  queue back down. Once the handler's output has ended, input it never started
+  to read is dropped instead of waited for; input it is reading (a background
+  reader, say) keeps flowing at its pace. A handler that keeps its input
+  iterator, stops reading it and keeps producing output now makes the caller's
+  sends wait, and after `drainTimeoutMs` (5 minutes) abort the stream, where
+  the input used to be buffered without limit.
+
+The bound is then **two receive windows plus those queues**: a resume hands
+over what libp2p held while paused (up to the window granted before the
+pause) as one message, and the muxer grants a new window. Measured with a
+1 MiB window: 1.06 MiB when the consumer stalls at once, 2.00 MiB when it
+reads and stalls by turns; with yamux's default (16 MiB) up to 32 MiB per
+stalled stream. Cap the window on nodes that serve or call with large
+bodies: `yamux({ streamOptions: { maxStreamWindowSize: 1024 * 1024 } })` (the
+option sits under `streamOptions`; set at the top level it is ignored, which is
+why an earlier attempt to cap it "did not bound it"). yamux's default window
+exceeds libp2p's default read buffer, so a paused stream raises its
+`maxReadBufferLength` to the window plus the high-water mark rather than be
+killed for buffering what it was allowed to receive. The pause is used only
+where the muxer exposes its window (yamux's `maxStreamWindowSize`): on a
+stream whose muxer does not withhold window when paused, pausing would only
+move the data into libp2p's read buffer and get the stream aborted, so such a
+stream is read as before, without a bound.
+
+Review of #112 found, and tests now cover: a pause issued from inside
+`resume()` (whose synchronous dispatch can refill the queue) was undone by the
+muxer's own resume that follows it, leaving libp2p paused while yamux granted
+window for every frame — run-ahead grew until the stream was aborted, with a
+consumer that reads and stalls by turns; the message a resume dispatches (up
+to a window) is now queued in high-water-sized pieces, so a frame parser
+holding it does not hold a window outside the count; and a handler reading its
+input after its output ended was cut off.
+
+One-way throughput is unchanged (64 MiB over in-process TCP, 64 KiB chunks: up
+105-113, down 129-163 MiB/s before and after; 256 KiB chunks: 156-179 /
+184-219). An echo of 64 KiB chunks is slower (about 45 vs 65 MiB/s): it
+profited from the server reading the whole request ahead, which is the
+buffering removed. The port stack over libp2p (native or emulated ports,
+above) stays bounded at one chunk.
+
+Mutants, each killed by `tests/run-ahead.test.ts`: the reader never pauses (L6
+past the bound), never resumes (the stalled transfer never completes), no
+read-buffer raise (yamux's default window: the stream is aborted), `serve` not
+waiting on the handler's queue (L6 request), no drop once the handler's output
+ended (a handler that never reads its input hangs the call), a pause inside
+`resume()` (reads and stalls by turns: aborted), the resumed message not split
+(2.94 MiB past a 1 MiB window), input dropped although its reader started (a
+background reader cut off). Not covered by a test: the pause skipped for a
+muxer without a window (no such muxer in the test nodes).
+
+`messageTargetOverStream` (review of the port work) now also aborts its
+`signal` for a stream that ended before the target was attached: a peer that
+reset the stream during protocol negotiation left its `close` event unseen and
+the signal never aborted.
 
 ### Dependencies
 

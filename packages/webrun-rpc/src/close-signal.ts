@@ -39,5 +39,7 @@ export function setPortCloseSignal(port: MessageTarget, signal: AbortSignal): vo
  * `MessageChannel().port1`).
  */
 export function getPortCloseSignal(port: MessageTarget): AbortSignal | undefined {
-  return closeSignals.get(port);
+  // A registered signal first; else one the port carries itself (`MessageTarget.closeSignal`),
+  // so a transport adapter can supply it without importing this package.
+  return closeSignals.get(port) ?? port.closeSignal;
 }

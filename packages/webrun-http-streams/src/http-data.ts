@@ -176,10 +176,10 @@ function encodeErrorResponse(
 /**
  * `output` is the `Duplex` call's own generator — one logical call, per the
  * `Duplex` contract in `@statewalker/webrun-streams`: "Consumer `.return()`
- * on the output → producer's `finally` runs." On a mux transport
- * (`emulateMux`), that `finally` is what frees the stream-table slot; skip it
- * and every peer-error response leaks one slot, unboundedly, until the mux
- * itself is exhausted (`maxStreams` reached, every further call rejected).
+ * on the output → producer's `finally` runs." On a transport that holds a
+ * resource per call until then (the removed `emulateMux` held a stream-table
+ * slot), skipping it leaks one per peer-error response, unboundedly, until the
+ * transport is exhausted and every further call is rejected.
  *
  * Cancelling `output` here — not inside the codec's own decode logic — is
  * deliberate. `codec.decodeResponse` already pulled from `output` to read the
@@ -223,7 +223,7 @@ async function throwIfPeerError(
  * response envelope and an async iterable over the response body bytes.
  *
  * The call is one logical Duplex invocation; multiplexing of concurrent
- * calls is the adapter's concern (native or `emulateMux`).
+ * calls is the adapter's concern (native, or `webrun-rpc`'s port stack).
  */
 export async function httpFetch(
   call: Duplex,

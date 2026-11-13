@@ -3,7 +3,7 @@
   "version": "0.1.6",
   "private": false,
   "type": "module",
-  "description": "Generic P2P signaling/connection-setup (PeerManager, QrSignaling, RoomManager) yielding webrun-streams ByteChannels",
+  "description": "Generic P2P signaling/connection-setup (PeerManager, QrSignaling, RoomManager) yielding ByteChannels",
   "bugs": {
     "url": "https://github.com/statewalker/webrun-wire/issues"
   },
@@ -35,9 +35,6 @@
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"
   },
-  "dependencies": {
-    "@statewalker/webrun-streams": "workspace:^"
-  },
   "peerDependencies": {
     "livekit-client": "catalog:peers"
   },
@@ -48,6 +45,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@statewalker/webrun-msgpack": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
+    "@statewalker/webrun-streams": "workspace:^",
     "@types/node": "catalog:",
     "livekit-client": "catalog:",
     "rimraf": "catalog:",

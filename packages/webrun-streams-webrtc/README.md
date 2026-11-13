@@ -12,7 +12,7 @@ between the two peers with no server in the data path.
 ## Why it exists
 
 WebRTC can open as many data channels as needed, so concurrency comes from the
-transport and this adapter does not use `emulateMux`. What an
+transport and this adapter needs no multiplexer over it. What an
 `RTCDataChannel` lacks is what request/response needs:
 
 1. **No half-close.** A channel is open or closed. There is no way to say "I
@@ -44,6 +44,8 @@ below.
 | `serve({ pc }, handler)` | `Serve<WebRtcParams>`. Listens for `datachannel` events on `pc` and runs `handler` on each channel. Resolves to an idempotent teardown that stops accepting new channels; calls in flight continue. |
 | `duplexOverDataChannel(dc, input)` | The primitive under both: runs one call over one data channel. Sends `input` framed, and returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
 | `WebRtcParams` | `{ pc: RTCPeerConnection }`. |
+| `webrtcPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own data channel (labelled `webrun-port/…`), for `overPorts`. `options`: `pc`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `onPort(port)` (to accept ports), `maxMessageSize`, `maxFrameBytes`. See "MessagePorts over WebRTC" below. |
+| `DEFAULT_PORT_MAX_FRAME_BYTES`, `DEFAULT_PORT_MAX_MESSAGE_SIZE`, `PORT_DRAIN_LOW_WATER`, `PORT_LABEL_PREFIX` | 16 KiB, 16 KiB − 256, 256 KiB, `"webrun-port/"`. |
 
 ## Examples
 
@@ -171,6 +173,42 @@ is at most 16 KiB, a size that every browser's SCTP implementation accepts. The
 channel's `binaryType` is set to `"arraybuffer"`; text messages and empty
 messages are ignored. The channel is closed once both directions have ended.
 
+### MessagePorts over WebRTC, and the port stack on them
+
+`connect` / `serve` above run their own framing and credit window per data
+channel, so a consumer that stops reading lets its producer get up to 4 MiB
+ahead (L6). `webrtcPortMux` gives `webrun-rpc`'s port stack a data channel per
+port instead, and its stream tier keeps a producer within one confirmed chunk:
+
+```ts
+import { deserialize, serialize } from "@statewalker/webrun-msgpack";
+import { connect, overPorts, serve } from "@statewalker/webrun-rpc";
+import { webrtcPortMux } from "@statewalker/webrun-streams-webrtc";
+
+const codec = { encode: serialize, decode: deserialize };
+await serve({ mux: overPorts((onPort) => webrtcPortMux({ pc, codec, onPort })) }, handler);
+const { call } = await connect({ mux: overPorts(() => webrtcPortMux({ pc: other, codec })) });
+```
+
+Ports are ordered, reliable channels labelled `webrun-port/…`; a mux ignores
+inbound channels without that label, and this package's `serve()` ignores
+channels with it, so ports share a connection with `connect` / `serve` and with
+anyone else's channels. On one connection, a mux without `onPort` (a caller's)
+leaves inbound ports to the serving mux, so both directions can call; of
+several serving muxes, the first takes each port. Each message is one
+data channel message, so `maxMessageSize` defaults to 16 KiB − 256 (Firefox to
+Chrome cuts off at 16 KiB; the port stack's framing needs the margin), and a
+message past `maxFrameBytes` fails the port with a `RangeError` instead of
+being dropped. Each port carries `closeSignal`, aborted when its channel closes
+or errs, the connection becomes `failed` or `closed`, or the port is closed
+here. A refused port (`onPort` returning `false`) is closed, so the opener's
+call fails. Messages that arrive before a port's first listener are held for
+it, delivered after that tick to every listener added by then. A connection
+that has failed already makes `openPort` reject, as does an aborted `signal`.
+`whenDrained()` waits on `bufferedamountlow` (256 KiB). The suite runs a
+second conformance pair over these ports (`tests/port-mux.test.ts`), with L6 at
+a one-chunk bound.
+
 ### How cancellation reaches the handler
 
 `END` means "I am done sending", and the peer answers it by carrying on, so it
@@ -216,8 +254,9 @@ is caught, so it does not become an unhandled rejection.
   a sleeping reader stalls the sender within the window) run in Chromium
   through Playwright: `pnpm run test:browser`, also in CI.
   Under `pnpm test` (Node) the suite is registered as skipped, because Node
-  has no `RTCPeerConnection`. L6's small window does not apply here (there is
-  no `emulateMux`), so L6 is an integrity check.
+  has no `RTCPeerConnection`. L6 asserts the per-channel window: a consumer
+  that stops reading lets the producer get at most `RECEIVE_WINDOW` (4 MiB)
+  ahead, measured at exactly that.
 
 ### Dependencies
 

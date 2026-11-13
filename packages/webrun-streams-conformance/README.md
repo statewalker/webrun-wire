@@ -36,8 +36,10 @@ peer dependencies. One entry point, `.`.
 | `describeDuplexAdapter(name, makePair, options?)` | function | Registers L0 to L6 under `describe("<name> — Duplex conformance")`. |
 | `makeLoopbackPair` | `MakePair` | Reference pair: `call` invokes the registered handler directly. |
 | `MakePair` | type | `(tuning?: PairTuning) => Promise<ConnectServePair>`. Called once per test case, so each case gets a fresh transport. |
-| `ConnectServePair` | type | `{ connect(): Promise<{ call: Duplex; close(): Promise<void> }>; serve(handler: Duplex): Promise<() => Promise<void>>; close(): Promise<void> }`. |
-| `PairTuning` | type | `{ mtu?: number; maxStreamBuffer?: number }`. The flow-control window L6 asks for. |
+| `ConnectServePair` | type | `{ connect(): Promise<{ call: Duplex; close(): Promise<void> }>; serve(handler: Duplex): Promise<() => Promise<void>>; close(): Promise<void>; runAheadBytes?: number }`. `runAheadBytes` is the most bytes a producer may get ahead of a consumer that stopped reading; L6 asserts it (see below). |
+| `PairTuning` | type | `{ maxMessageSize?: number }`. L6 asks for 4 KiB, so its 256 KiB body crosses as many messages; a pair whose transport decides its own ceiling ignores it. |
+| `measureRunAhead(makePair, direction)` | function | L6's run-ahead measurement, for one direction: resolves `{ bound, ahead, complete, intact }`. |
+| `RunAheadMeasurement` | type | What `measureRunAhead` resolves. |
 | `DescribeDuplexAdapterOptions` | type | `{ concurrency?: number; skipHugeBody?: boolean }`. |
 
 | Option | Default | Effect |
@@ -59,31 +61,36 @@ describeDuplexAdapter("my-adapter", makeMyAdapterPair, { skipHugeBody: true });
 
 ### Write a pair factory
 
-A pair factory stands up both ends of one transport and forwards the tuning to
-the adapter if it can. For an adapter built on `emulateMux`, the tuning maps
-directly onto its options:
+A pair factory stands up both ends of one transport. Most adapters are a pipe
+for `@statewalker/webrun-rpc`'s port stack, so the factory runs `overPipe` and
+`webrun-rpc`'s `connect` / `serve` over that pipe. Here the pipe is a
+`MessageChannel`; a real adapter puts its own pipe (and its `signal` and
+`maxMessageSize`) in its place:
 
 ```ts
 // tests/make-pair.ts
-import { type ByteChannel, emulateMux } from "@statewalker/webrun-streams";
+import { connect, overPipe, serve, structuredCodec } from "@statewalker/webrun-rpc";
 import type { MakePair } from "@statewalker/webrun-streams-conformance";
 
-declare function makeChannelPair(): { a: ByteChannel; b: ByteChannel };
-
-export const makeMyAdapterPair: MakePair = async (tuning) => {
-  const { a, b } = makeChannelPair();
-  const client = emulateMux(a, { side: "initiator", ...tuning });
-  const server = emulateMux(b, { side: "responder", ...tuning });
+export const makeMyAdapterPair: MakePair = async () => {
+  const { port1, port2 } = new MessageChannel();
+  const codec = structuredCodec;
   return {
-    connect: async () => ({ call: client.call, close: async () => {} }),
-    serve: async (handler) => server.serve(handler),
+    runAheadBytes: 8192, // the port stack: a producer is never more than a chunk ahead
+    connect: () => connect({ mux: overPipe(port1, { codec, side: "initiator" }) }),
+    serve: (handler) => serve({ mux: overPipe(port2, { codec, side: "responder" }) }, handler),
     close: async () => {
-      await client.close();
-      await server.close();
+      port1.close();
+      port2.close();
     },
   };
 };
 ```
+
+The factory may take the suite's `tuning` argument and pass `maxMessageSize`
+on to `overPipe`. `runAheadBytes` declares the transport's buffering; leave it
+out only if the transport has no known bound, and L6 then checks completion
+alone (say why where the pair is declared).
 
 ### Check the suite itself
 
@@ -105,22 +112,37 @@ describeDuplexAdapter("loopback", makeLoopbackPair);
 | L3 | Mid-stream cancellation: the caller breaks out after 3 chunks of an endless response, and within 50 ms the handler's `finally` has run. |
 | L4 | Error propagation: a handler that throws an `Error` with `status: 418` and `code: "TEAPOT"` makes the caller's `for await` reject with the same `message`, `status` and `code`, and a non-empty `stack`. |
 | L5 | Teardown: calling the `serve` teardown twice resolves; `pair.close()` after a completed call resolves. |
-| L6 | Flow control: a 256 KiB body reaches a consumer that waits 1 ms per chunk, intact and in order, through `{ mtu: 4096, maxStreamBuffer: 16384 }`. |
+| L6 | Flow control (spec D17): a 256 KiB body crosses as 4 KiB messages to a consumer that waits 1 ms per chunk, intact; and in each direction, a producer of 4 KiB chunks facing a consumer that stops after one chunk stalls within the pair's `runAheadBytes`, then finishes, every byte intact, once the consumer resumes. |
 
-### Why L6 uses a small window and a slow consumer
+### L6 asserts how far a producer runs ahead (spec D17)
 
-At an adapter's default window (8 MiB for `emulateMux`) a 256 KiB body never
-exhausts credit, so no sender stalls and no grant is sent, and the test would
-pass with flow control removed. A 16 KiB window against a 256 KiB body makes
-the sender run out of credit and resume on grants sixteen times. The test
-itself checks completion and integrity; stalling and replenishment are covered
-by elimination: without grants the transfer hangs and the test times out;
-without credit reservation the sender floods the window and the receiver's
-buffer cap tears the stream down.
+L6 used to ask a pair for a small credit window and check that a body crossed
+it. That window was `emulateMux`'s (removed in Plan C3), and with no window to
+shrink the level proved only integrity. Now each pair declares
+`runAheadBytes`, the most a producer may get ahead of a consumer that has
+stopped reading, and L6 measures it, in both directions. The producer yields
+4 KiB chunks, enough to exceed the bound twice over; the consumer takes one and
+stops; once the producer has produced nothing for a second, `produced −
+consumed` must be at most the bound; then the consumer resumes, and every byte
+must arrive in place (byte k belongs to chunk k / 4096, whatever chunk
+boundaries the transport chose). `measureRunAhead(makePair, direction)` is the
+measurement itself, exported; the package's own `tests/l6-self.test.ts` shows it
+catches a transport that buffers without bound while pulling only every 150 ms,
+and one that duplicates a chunk and drops another.
 
-An adapter that multiplexes natively, or has no configurable window, ignores
-`tuning`. For it, L6 is an integrity check at the adapter's own defaults and
-nothing more.
+| Pair | `runAheadBytes` | Measured |
+| --- | --- | --- |
+| loopback | 0 | 0 |
+| port stack (`webrun-rpc`, `msgpack` byte pipe, `-ws`, `-peerjs`, `-livekit`) | 4 KiB (one chunk) | 0: the next chunk is produced only once the consumer pulls past the last |
+| `-webrtc` `connect` / `serve` | `RECEIVE_WINDOW` (4 MiB) + 16 KiB | 4 MiB exactly |
+| `-webrtc` port stack (`webrtcPortMux`) | 4 KiB (one chunk) | 0 |
+| `-libp2p` `connect` / `serve` | 2 × the receiving node's yamux window + 256 KiB | 1.06-1.13 MiB with a 1 MiB window (2.00 MiB reading and stalling by turns), 16.05-16.12 MiB with yamux's default 16 MiB (before the paced reader: 22-24 MiB, until libp2p's read buffer aborted the stream) |
+| `-libp2p` port stack (native `libp2pPortMux`, or `overPipe` on one stream) | 4 KiB (one chunk) | 0 |
+
+The level dies on what it should: sending port-stack chunks without waiting for
+their confirmation fails it, a WebRTC pair declaring half its window fails it at
+exactly 4 MiB ahead, and a libp2p pair whose reader never pauses fails it (its
+`tests/run-ahead.test.ts`, with the other mutants listed in that package).
 
 ### What L5 deliberately does not assert
 

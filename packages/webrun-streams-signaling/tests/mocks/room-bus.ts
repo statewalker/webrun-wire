@@ -65,6 +65,7 @@ export class MockRoom implements RoomLike {
       member.remoteParticipants.delete(this.identity);
       member.emit(ROOM_EVENT.participantDisconnected, { identity: this.identity });
     }
+    this.emit("disconnected"); // as LiveKit's Room does
     return Promise.resolve();
   }
 

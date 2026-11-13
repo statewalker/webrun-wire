@@ -15,21 +15,29 @@ const NodeCtor = NodeWebSocket as unknown as new (
  * (`messageTargetOverWebSocket`), `overPipe` with `msgpackCodec` invents the
  * ports, and `webrun-rpc`'s `connect` / `serve` run one call per port.
  *
- * `PairTuning` is ignored, as on every port-stack pair: under spec D11 there is
- * no credit window to shrink, so L6 here is an integrity check only. Flow
- * control on this stack is covered by `webrun-rpc`'s own backpressure tests.
+ * `PairTuning.maxMessageSize` goes to `overPipe` (a WebSocket sets none of its own).
+ * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
+ * it, so a producer is never more than a chunk ahead; the pair declares one 4 KiB chunk.
  */
-export const makeWsPortPair: MakePair = async () => {
+export const makeWsPortPair: MakePair = async (tuning) => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
   const address = wss.address();
   if (!address || typeof address === "string") throw new Error("WS server has no address");
   const url = `ws://127.0.0.1:${address.port}`;
   return {
+    runAheadBytes: 4096,
     async connect() {
       const ws = await openWebSocket({ url, WebSocketCtor: NodeCtor });
       const { target, signal } = messageTargetOverWebSocket(ws);
-      return connect({ mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal }) });
+      return connect({
+        mux: overPipe(target, {
+          codec: msgpackCodec,
+          side: "initiator",
+          signal,
+          maxMessageSize: tuning?.maxMessageSize,
+        }),
+      });
     },
     async serve(handler) {
       const teardowns = new Set<() => Promise<void>>();
@@ -37,7 +45,14 @@ export const makeWsPortPair: MakePair = async () => {
         socket.binaryType = "nodebuffer";
         const { target, signal } = messageTargetOverWebSocket(socket as unknown as WebSocketLike);
         void serve(
-          { mux: overPipe(target, { codec: msgpackCodec, side: "responder", signal }) },
+          {
+            mux: overPipe(target, {
+              codec: msgpackCodec,
+              side: "responder",
+              signal,
+              maxMessageSize: tuning?.maxMessageSize,
+            }),
+          },
           handler,
         ).then((teardown) => {
           teardowns.add(teardown);

@@ -12,4 +12,3 @@ LiveKit packets carry their own topic. Ending a pipe on one side sends a goodbye
 
 `webrun-rpc`: `duplexOverPort` fits the error a stream ends with to `maxMessageSize` before sending it whole. In order, it drops the stack, then the largest extra fields, then the message's tail, and marks the error `truncated: true`. Before this, a large error message, or an error carrying an HTTP body, went out as one oversized message, which a transport with a ceiling drops or dies on.
 
-`connect` / `serve` over `emulateMux` are unchanged.

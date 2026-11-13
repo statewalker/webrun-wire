@@ -17,9 +17,7 @@ const isBrowser =
 // anything registered from a later microtask arrives after collection and is
 // silently dropped, so the file fails with "No test suite found".
 if (isBrowser) {
-  const { makeLiveKitPair } = await import("./make-livekit-pair.js");
   const { describeDuplexAdapter } = await import("@statewalker/webrun-streams-conformance");
-  describeDuplexAdapter("webrun-streams-livekit", makeLiveKitPair);
   const { makeLiveKitPortPair } = await import("./make-livekit-port-pair.js");
   describeDuplexAdapter("webrun-streams-livekit over multiplexPort", makeLiveKitPortPair);
 } else {

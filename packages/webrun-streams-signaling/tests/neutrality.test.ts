@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 /** Allowed bare (non-relative) import specifiers for the package src. */
-const ALLOWED_BARE = new Set(["@statewalker/webrun-streams", "livekit-client", "peerjs"]);
+const ALLOWED_BARE = new Set(["livekit-client", "peerjs"]);
 
 const IMPORT_RE = /(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/g;
 
 describe("dependency neutrality", () => {
-  it("src imports only webrun-streams + optional vendor peer-deps; no vcs/git coupling", () => {
+  it("src imports only optional vendor peer-deps; no vcs/git coupling", () => {
     const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts"));
     expect(files.length).toBeGreaterThan(0);
 

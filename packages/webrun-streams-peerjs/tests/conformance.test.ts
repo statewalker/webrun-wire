@@ -12,9 +12,7 @@ const isBrowser =
 // anything registered from a later microtask arrives after collection and is
 // silently dropped, so the file fails with "No test suite found".
 if (isBrowser) {
-  const { makePeerJsPair } = await import("./make-peerjs-pair.js");
   const { describeDuplexAdapter } = await import("@statewalker/webrun-streams-conformance");
-  describeDuplexAdapter("webrun-streams-peerjs", makePeerJsPair);
   const { makePeerJsPortPair } = await import("./make-peerjs-port-pair.js");
   describeDuplexAdapter("webrun-streams-peerjs over multiplexPort", makePeerJsPortPair);
 } else {

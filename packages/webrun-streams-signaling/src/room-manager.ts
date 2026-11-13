@@ -4,16 +4,15 @@
  * Relocated from `@statewalker/vcs-port-livekit`'s `RoomManager` and adapted to
  * the target API: `join`/`participants`/`channelTo`/`leave`. Participant
  * tracking is the original event-wiring; `channelTo` yields a per-participant
- * webrun-streams {@link ByteChannel} (see {@link byteChannelFromRoom}).
+ * {@link ByteChannel} (see {@link byteChannelFromRoom}).
  *
  * The vendor (`livekit-client`) stays an optional peerDependency: the `Room` is
  * injected via {@link RoomManagerOptions.roomFactory} (production:
  * `() => new Room()`), so this module never hard-imports it.
  */
 
-import type { ByteChannel } from "@statewalker/webrun-streams";
 import { byteChannelFromRoom } from "./byte-channel.js";
-import type { RoomLike, RoomManagerOptions, RoomParticipantLike } from "./types.js";
+import type { ByteChannel, RoomLike, RoomManagerOptions, RoomParticipantLike } from "./types.js";
 import { ROOM_EVENT } from "./types.js";
 
 export class RoomManager {

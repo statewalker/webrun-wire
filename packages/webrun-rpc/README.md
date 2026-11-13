@@ -97,17 +97,12 @@ Typed-JSON RPC:
 | `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call. |
 | `ListenPortOptions`, `PortHandler`, `BidiHandler`, `IoSendOptions`, `RecieveOptions`, `SendOptions` | Supporting types. |
 | `postCancelChannel(port, channelName)` / `listenCancelChannel(port, channelName, onCancel)` / `CANCEL_CHANNEL_TYPE` | The `"cancel-channel"` message `ioSend` posts when its consumer stops early. |
-| `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. |
+| `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. A port may also carry it as `closeSignal` (an adapter needing no import, e.g. `webrun-streams-libp2p`'s `libp2pPortMux`); a registered signal wins. |
 
 Message passing (types only): `MessageTarget` (`MessageSource` + `MessageSink` + optional
-`close()`), `MessageSource` (`addEventListener` / `removeEventListener` for `"message"`, optional
+`close()` and `closeSignal`), `MessageSource` (`addEventListener` / `removeEventListener` for `"message"`, optional
 `start()`), `MessageSink` (`postMessage(message, transfer?)`), `MessageListener`. A `MessagePort`
 satisfies `MessageTarget` structurally.
-
-`byteChannelFromMessagePort(port)` wraps a `MessageTarget` as a `webrun-streams` `ByteChannel`
-(bytes out through `postMessage`, `Uint8Array` / `ArrayBuffer` / views in, everything else
-ignored), for driving `webrun-streams`' `emulateMux` yourself. Nothing else in this package uses
-it.
 
 ## Examples
 
@@ -719,6 +714,12 @@ a full-size chunk overruns it; a 12 KiB setting produced 12,413-byte frames, and
 oversized message delivered a body as zero bytes with no error on either side. A transport with no
 ceiling leaves it unset, and nothing is split.
 
+An error is not split: it crosses whole, in one message. When `maxMessageSize` is set, a stream
+that ends with an error whose serialised form (stack, message, attached fields such as an HTTP
+body) would exceed it has that form cut to fit first: the stack goes, then the largest extra
+fields, then the message is shortened, keeping its start. A cut error is sent with
+`truncated: true`.
+
 ### There is no timeout by default
 
 A per-chunk deadline fails a consumer that is merely slow, so the stream tier calls `callPort`
@@ -869,7 +870,7 @@ its body crosses as one chunk each way. Bounded memory is measured in
 
 One runtime dependency, `@statewalker/webrun-streams`: the `Duplex` / `Connect` / `Serve` types,
 the iterator primitives under the stream and RPC tiers (`sendIterator`, `recieveIterator`,
-`toChunks`), error serialisation, and the `ByteChannel` type for `byteChannelFromMessagePort`. No
+`toChunks`) and error serialisation. No
 peer dependencies. The byte-transport codec lives in `@statewalker/webrun-msgpack`, so this package
 stays free of an encoder.
 

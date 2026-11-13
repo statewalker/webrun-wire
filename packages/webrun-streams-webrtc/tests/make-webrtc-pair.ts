@@ -1,5 +1,6 @@
 import type { MakePair } from "@statewalker/webrun-streams-conformance";
 import { connect, serve } from "../src/connect-serve.js";
+import { RECEIVE_WINDOW } from "../src/duplex-over-data-channel.js";
 
 /**
  * Two `RTCPeerConnection`s negotiated against each other inside the page.
@@ -53,14 +54,19 @@ function waitConnected(pc: RTCPeerConnection, label: string): Promise<void> {
 }
 
 /**
- * `tuning` is accepted and ignored: this adapter does not use `emulateMux`.
- * It opens one `RTCDataChannel` per call, with its own fixed credit window
- * (`RECEIVE_WINDOW`) and send-buffer limit, so there is no window to shrink
- * from outside. L6 therefore stays an integrity check here; the stalls and
- * replenishment are tested in `backpressure.test.ts` and
- * `flow-control-edges.test.ts`.
+ * `tuning` is accepted and ignored: each call is one `RTCDataChannel`, chunked
+ * to 16 KiB by the adapter, with its own fixed credit window. L6 (spec D17)
+ * asserts that window: a stalled consumer lets the producer get at most
+ * `RECEIVE_WINDOW` (4 MiB) ahead, measured at exactly that, plus one chunk.
  */
-export const makeWebRtcPair: MakePair = async () => {
+/**
+ * Two `RTCPeerConnection`s paired up in this page, with SCTP negotiated (a
+ * bootstrap channel shapes the SDP and is closed again).
+ */
+export async function connectedPeers(): Promise<{
+  clientPc: RTCPeerConnection;
+  serverPc: RTCPeerConnection;
+}> {
   const clientPc = new RTCPeerConnection({ iceServers: [] });
   const serverPc = new RTCPeerConnection({ iceServers: [] });
 
@@ -100,8 +106,15 @@ export const makeWebRtcPair: MakePair = async () => {
   }
 
   bootstrap.close();
+  return { clientPc, serverPc };
+}
+
+export const makeWebRtcPair: MakePair = async () => {
+  const runAheadBytes = RECEIVE_WINDOW + 16 * 1024;
+  const { clientPc, serverPc } = await connectedPeers();
 
   return {
+    runAheadBytes,
     async connect() {
       return connect({ pc: clientPc });
     },

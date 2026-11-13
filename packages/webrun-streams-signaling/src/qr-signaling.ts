@@ -8,12 +8,12 @@
  *
  * The compress/expand/encode/decode functions are pure and unchanged; the
  * {@link QrSignaling} class is adapted to the target API and yields
- * webrun-streams {@link ByteChannel}s.
+ * {@link ByteChannel}s.
  */
 
-import type { ByteChannel } from "@statewalker/webrun-streams";
 import { PeerConnection } from "./peer-connection.js";
 import type {
+  ByteChannel,
   CompressedSignal,
   IceCandidate,
   PeerRole,

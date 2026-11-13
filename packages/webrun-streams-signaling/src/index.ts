@@ -3,9 +3,9 @@
  *
  * Generic P2P signaling / connection-setup helpers, relocated from the retiring
  * `@statewalker/vcs-port-{webrtc,livekit}` packages and adapted to yield
- * webrun-streams {@link ByteChannel}s. Signaling here is *transport-setup only*:
+ * {@link ByteChannel}s. Signaling here is *transport-setup only*:
  * it establishes a peer connection and hands back an established channel; the
- * byte transport + multiplexing is `@statewalker/webrun-streams`.
+ * byte transport + multiplexing is `@statewalker/webrun-rpc`'s port stack.
  *
  * - {@link PeerManager} — WebRTC peer discovery + connection over a signaling transport.
  * - {@link QrSignaling} — serverless offer/answer exchange via QR strings.
@@ -15,6 +15,7 @@
  */
 
 export { byteChannelFromDataChannel, byteChannelFromRoom } from "./byte-channel.js";
+export * from "./message-target.js";
 export { PeerConnection } from "./peer-connection.js";
 export { PeerManager, type PeerManagerOptions } from "./peer-manager.js";
 export {

@@ -24,7 +24,7 @@ WebRTC channel by changing the adapter. Iterator semantics carry every signal: a
            protocols:  webrun-http-streams   webrun-rpc   webrun-msgpack   webrun-http-browser
                                   \              |              /                /
                                    v             v             v                v
-  seam:                         webrun-streams  (Duplex, Connect, Serve, ByteChannel, emulateMux)
+  seam:                         webrun-streams  (Duplex, Connect, Serve, TransportClosedError)
                                    ^             ^             ^                ^
                                   /              |              \                \
            adapters:  webrun-streams-ws  -webrtc  -libp2p  -livekit  -peerjs   (+ -signaling to set up P2P)
@@ -33,15 +33,18 @@ WebRTC channel by changing the adapter. Iterator semantics carry every signal: a
   testing:     webrun-streams-conformance (the suite every adapter passes)
 ```
 
-Message-oriented transports (WebSocket, MessagePort, LiveKit, PeerJS) supply a `ByteChannel`, and
-`emulateMux` runs many concurrent streams over it. Transports that multiplex natively (WebRTC data
-channels, libp2p) skip `emulateMux`.
+Message-oriented transports (WebSocket, MessagePort, LiveKit, PeerJS, a signaled P2P channel)
+supply only a pipe of messages, and `webrun-rpc`'s port stack runs many concurrent streams over
+it: `overPipe(pipe, { codec: msgpackCodec, side, signal, maxMessageSize })` opens a port per call,
+and `webrun-rpc`'s `connect` / `serve` turn each port into a `Duplex`. Transports that multiplex
+natively (WebRTC data channels, libp2p) need no multiplexer and implement the seam directly. The
+byte-channel multiplexer `emulateMux` that used to sit in `webrun-streams` was removed in Plan C3.
 
 ### Packages
 
 | Package | What it gives | Depends on |
 | --- | --- | --- |
-| [`@statewalker/webrun-streams`](./packages/webrun-streams) | The `Duplex` seam, `emulateMux`, async-iterator, stream, text/JSONL and error primitives | nothing |
+| [`@statewalker/webrun-streams`](./packages/webrun-streams) | The `Duplex` seam, async-iterator, stream, text/JSONL and error primitives | nothing |
 | [`@statewalker/webrun-rpc`](./packages/webrun-rpc) | Port multiplexing and typed request/response and streaming RPC over any `MessageTarget` | webrun-streams |
 | [`@statewalker/webrun-msgpack`](./packages/webrun-msgpack) | MessagePack, length-prefixed stream codecs, a byte codec for `webrun-rpc` ports | webrun-rpc |
 | [`@statewalker/webrun-http-streams`](./packages/webrun-http-streams) | HTTP/1.1 request/response over a `Duplex` | webrun-streams |
@@ -49,12 +52,12 @@ channels, libp2p) skip `emulateMux`.
 | [`@statewalker/webrun-rpc-http`](./packages/webrun-rpc-http) | Object methods as a `(Request) => Response` handler, called with `fetch` | webrun-streams |
 | [`@statewalker/webrun-http-events`](./packages/webrun-http-events) | Publish/subscribe over Server-Sent Events: a fetch handler and a client | nothing |
 | [`@statewalker/webrun-http-proxy`](./packages/webrun-http-proxy) | Re-issue a request to an outside origin safely | nothing |
-| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | WebSocket adapter | webrun-streams |
+| [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | A WebSocket as a pipe for `webrun-rpc`'s port stack | nothing |
 | [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | WebRTC data channel adapter, one channel per call | webrun-streams |
 | [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | libp2p stream adapter | webrun-streams; peers `@libp2p/interface`, `@multiformats/multiaddr`, optional `libp2p` |
-| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | LiveKit data channel adapter | webrun-streams; peer `livekit-client` |
-| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | PeerJS `DataConnection` adapter | webrun-streams; peer `peerjs` |
-| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | P2P connection setup (`PeerManager`, `QrSignaling`, `RoomManager`) yielding `ByteChannel`s | webrun-streams; optional peer `livekit-client` |
+| [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | A LiveKit participant as a pipe for `webrun-rpc`'s port stack | peer `livekit-client` |
+| [`@statewalker/webrun-streams-peerjs`](./packages/webrun-streams-peerjs) | A PeerJS `DataConnection` as a pipe for `webrun-rpc`'s port stack | peer `peerjs` |
+| [`@statewalker/webrun-streams-signaling`](./packages/webrun-streams-signaling) | P2P connection setup (`PeerManager`, `QrSignaling`, `RoomManager`) yielding `ByteChannel`s, with a pipe for `webrun-rpc`'s port stack | optional peer `livekit-client` |
 | [`@statewalker/webrun-streams-conformance`](./packages/webrun-streams-conformance) | The Vitest suite every adapter must pass | webrun-streams, `vitest` |
 
 Every package is public on npm (`https://www.npmjs.com/package/@statewalker/<name>`), ESM-only,
@@ -96,8 +99,8 @@ and ships built JavaScript with type declarations in `dist/` plus its TypeScript
 
 ## Why it is the way it is
 
-**One seam instead of one API per transport.** Every transport is reduced to a `Duplex` (or a
-`ByteChannel` that `emulateMux` turns into one). Protocols above it (HTTP, RPC) never see the
+**One seam instead of one API per transport.** Every transport is reduced to a `Duplex`, directly
+or through `webrun-rpc`'s port stack over a pipe of messages. Protocols above it (HTTP, RPC) never see the
 transport, and a new transport only has to pass `webrun-streams-conformance` to work with all of
 them.
 
@@ -134,9 +137,6 @@ Published consumers only ever see `dist`.
 - **A dropped generator holds a stream open.** A caller of a `Duplex` must drain the returned
   generator or call `.return()` on it. An unreferenced generator sends no signal, so the peer waits
   for an acknowledgement that never comes and both sides keep the stream's slot.
-- **`emulateMux` refuses a zero window.** A window of 0 would authorise the peer to send nothing,
-  forever, so it throws `RangeError: emulateMux: maxStreamBuffer must be at least 1, got 0` at
-  construction instead of deadlocking on the first call.
 
 ## Reference
 

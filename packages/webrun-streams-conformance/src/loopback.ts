@@ -8,16 +8,23 @@ export interface ConnectServePair {
   connect(): Promise<{ call: Duplex; close: () => Promise<void> }>;
   serve(handler: Duplex): Promise<() => Promise<void>>;
   close(): Promise<void>;
+  /**
+   * The most bytes a producer may get ahead of a consumer that has stopped
+   * reading — this transport's buffering between the two ends. L6 asserts it,
+   * in both directions (spec D17). Omitted, the pair claims no bound and L6
+   * checks only that a stalled transfer completes once the consumer resumes;
+   * the test title says so.
+   */
+  runAheadBytes?: number;
 }
 
 /**
- * Flow-control tuning L6 asks a pair for. An adapter that can pass these
- * through to its `emulateMux` should; one that multiplexes natively, or has
- * no configurable window, ignores them and L6 degrades to an integrity check.
+ * What L6 asks of a pair (spec D17): bodies crossing as many messages. A pair
+ * that can set its payload ceiling passes `maxMessageSize` on; one whose
+ * transport decides ignores it.
  */
 export interface PairTuning {
-  mtu?: number;
-  maxStreamBuffer?: number;
+  maxMessageSize?: number;
 }
 
 export type MakePair = (tuning?: PairTuning) => Promise<ConnectServePair>;
@@ -26,7 +33,7 @@ export type MakePair = (tuning?: PairTuning) => Promise<ConnectServePair>;
  * Loopback pair: `call` invokes the registered `handler` directly, no
  * transport. The conformance suite must pass against this — it self-validates
  * that the assertions are correctly formulated independent of any wire
- * protocol or `emulateMux` behaviour.
+ * protocol or multiplexer.
  */
 export const makeLoopbackPair: MakePair = async () => {
   let handler: Duplex | null = null;
@@ -49,6 +56,8 @@ export const makeLoopbackPair: MakePair = async () => {
   };
 
   return {
+    // `call` is the handler itself: a value is produced only when pulled.
+    runAheadBytes: 0,
     async connect() {
       return {
         call,
