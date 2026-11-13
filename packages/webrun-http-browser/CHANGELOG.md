@@ -1,5 +1,26 @@
 # @statewalker/webrun-http-browser
 
+## 0.13.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-rpc crosses a breaking line
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [e5e180b]
+- Updated dependencies [9ed3bc7]
+- Updated dependencies [1758c6a]
+- Updated dependencies [3166c3b]
+- Updated dependencies [5a5b86d]
+  - @statewalker/webrun-http-streams@0.5.0
+  - @statewalker/webrun-streams@0.3.0
+  - @statewalker/webrun-rpc@0.11.0
+
 ## 0.12.6
 
 ### Patch Changes

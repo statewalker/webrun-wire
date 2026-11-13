@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-webrtc",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "WebRTC DataChannel-backed Connect/Serve adapter (native multi-stream) in the webrun-streams-* family",

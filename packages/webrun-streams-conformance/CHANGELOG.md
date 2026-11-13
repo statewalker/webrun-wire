@@ -1,5 +1,39 @@
 # @statewalker/webrun-streams-conformance
 
+## 0.4.0
+
+### Minor Changes
+
+- a4d705c: **Breaking: L6 is redefined around run-ahead, and `PairTuning` is reshaped (spec D17).** `PairTuning` is now `{ maxMessageSize?: number }`; `mtu` and `maxStreamBuffer` described `emulateMux`'s window, which is gone. `ConnectServePair` gains an optional `runAheadBytes`: the most bytes a producer may get ahead of a consumer that stopped reading.
+  
+  L6 now has three tests:
+  - A 256 KiB body crosses as 4 KiB messages to a slow consumer, intact.
+  - In each direction, a producer facing a consumer that stops after one chunk must stall within `runAheadBytes`, then finish with every byte intact once the consumer resumes.
+  
+  A pair that declares no bound gets the completion check alone. Measured bounds:
+  
+  | Pair | Bound |
+  | --- | --- |
+  | Loopback | 0 |
+  | Port stack | 0 (declared one 4 KiB chunk) |
+  | `-webrtc` | 4 MiB, its window |
+  | `-libp2p` | none: 22–24 MiB ahead until libp2p aborts the stream; recorded in its README |
+
+### Patch Changes
+
+- e5e180b: **Breaking: `emulateMux` is removed (Plan C3).** Every transport now runs `webrun-rpc`'s port stack. Each adapter gives a pipe (`messageTargetOver…`), `overPipe` with `msgpackCodec` invents a port per call on it, and `webrun-rpc`'s `connect` / `serve` run one call per port. On that stack a producer stays at most one chunk ahead of its consumer; `emulateMux` buffered up to its 8 MiB window. The wire format changes, so both ends must upgrade together.
+  
+  - `webrun-streams`: `emulateMux`, `EmulateMuxOptions` and `ByteChannel` are gone. `newCreditLedger` / `newCreditGrantor` stay exported, dormant, as the mechanism for per-stream windowing (spec D13).
+  - `webrun-streams-ws`, `-peerjs`, `-livekit`: the `emulateMux`-based `connect` / `serve` and `byteChannelFromWebSocket` / `byteChannelFromPeerJs` / `byteChannelFromLiveKit` are gone. Use `messageTargetOverWebSocket` / `messageTargetOverPeerJs` / `messageTargetOverLiveKit` with `overPipe` (see each README). None of the three has a runtime dependency left.
+  - `webrun-rpc`: `byteChannelFromMessagePort` is gone; a `MessagePort` goes to `overPipe` directly.
+  - `webrun-streams-signaling`: `ByteChannel` is now declared here, with the same shape, and the package has no runtime dependency. Import the type from this package instead of `webrun-streams`. New `messageTargetOverByteChannel(channel)` runs the port stack over a channel this package hands back, reporting 16 KiB − 256 as `maxMessageSize`.
+  - `webrun-streams-conformance`: comments only. `PairTuning` is unchanged here, and every pair now ignores it until D17 redefines L6.
+  - `webrun-http-streams`: comments only. Its peer-error slot test now runs on the port stack.
+  
+  `webrun-streams-signaling` also fixes `byteChannelFromRoom`, which never ended. It now closes when the room disconnects, when its participant leaves, or when a reliable publish fails, and it ignores packets that carry no participant. Before this, anything run over it (now the port stack) hung when the other end went away.
+- Updated dependencies [e5e180b]
+  - @statewalker/webrun-streams@0.3.0
+
 ## 0.3.4
 
 ### Patch Changes
