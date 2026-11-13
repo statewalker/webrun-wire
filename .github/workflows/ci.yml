@@ -267,7 +267,10 @@ jobs:
               older=$(node -e 'const n=(v)=>v.split("-")[0].split(".").map(Number);const [a,b]=[n(process.argv[1]),n(process.argv[2]||"0.0.0")];for(let i=0;i<3;i++){if(a[i]!==b[i]){console.log(a[i]<b[i]);process.exit()}}console.log(false)' "$version" "$latest")
               if [ "$older" = true ]; then echo "$name@$version is older than latest $latest: published as backport"; tag=backport; fi
             fi
-            if npm publish "./$t" --provenance --access public --tag "$tag" 2> >(tee "$RUNNER_TEMP/publish.err" >&2); then
+            published=true
+            npm publish "./$t" --provenance --access public --tag "$tag" 2>"$RUNNER_TEMP/publish.err" || published=false
+            cat "$RUNNER_TEMP/publish.err" >&2
+            if [ "$published" = true ]; then
               echo "$name@$version" >> "$RUNNER_TEMP/on-npm"
             else
               hint=""
