@@ -173,7 +173,11 @@ const MAX_INTERIM_RESPONSES = 16;
 /** reason-phrase = *( HTAB / SP / VCHAR / obs-text ) (RFC 9112 §4), as decoded from Latin-1. */
 const REASON_PHRASE = /^[\t\x20-\x7e\x80-\xff]*$/;
 
-function parseStatusLine(startLine: string): { version: string; status: number; statusText: string } {
+function parseStatusLine(startLine: string): {
+  version: string;
+  status: number;
+  statusText: string;
+} {
   const firstSp = startLine.indexOf(" ");
   if (firstSp === -1) {
     throw new HttpParseError(`malformed status line: ${quoteLine(startLine)}`);

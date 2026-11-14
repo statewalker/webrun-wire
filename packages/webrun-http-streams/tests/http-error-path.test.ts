@@ -294,7 +294,9 @@ describe("codec selection", () => {
 
 describe("x-webrun-error carries no stack trace by default (#144)", () => {
   const peerError = async (call: Duplex) => {
-    const wire = call(httpCodec.encodeRequest({ url: "http://h.test/x", method: "GET", headers: [] }));
+    const wire = call(
+      httpCodec.encodeRequest({ url: "http://h.test/x", method: "GET", headers: [] }),
+    );
     const decoded = await httpCodec.decodeResponse(wire, { method: "GET" });
     await text(decoded.body);
     const found = decoded.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
@@ -311,7 +313,9 @@ describe("x-webrun-error carries no stack trace by default (#144)", () => {
   });
 
   it("omits the stack of a refused request (400)", async () => {
-    const call = httpServe(async () => ({ envelope: { status: 200, statusText: "OK", headers: [] } }));
+    const call = httpServe(async () => ({
+      envelope: { status: 200, statusText: "OK", headers: [] },
+    }));
     const out = call([new TextEncoder().encode("NOT A REQUEST LINE\r\n\r\n")]);
     const decoded = await httpCodec.decodeResponse(out, { method: "GET" });
     expect(decoded.envelope.status).toBe(400);
@@ -338,8 +342,7 @@ describe("x-webrun-error carries no stack trace by default (#144)", () => {
     };
     expect(await peerError(serveFetchOverDuplex(throwing))).not.toHaveProperty("stack");
     expect(
-      typeof (await peerError(serveFetchOverDuplex(throwing, { includeErrorStack: true })))
-        .stack,
+      typeof (await peerError(serveFetchOverDuplex(throwing, { includeErrorStack: true }))).stack,
     ).toBe("string");
   });
 });

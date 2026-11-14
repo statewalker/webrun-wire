@@ -67,7 +67,9 @@ export class MsgpackExtension {
 
   constructor(type: number, data: Uint8Array) {
     if (!Number.isInteger(type) || type < -128 || type > 127) {
-      throw new RangeError(`MsgpackExtension: type must be an integer from -128 to 127, got ${type}`);
+      throw new RangeError(
+        `MsgpackExtension: type must be an integer from -128 to 127, got ${type}`,
+      );
     }
     this.type = type;
     this.data = data;
