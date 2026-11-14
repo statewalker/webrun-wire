@@ -94,6 +94,19 @@ describe("fetchOverDuplex on a hostile status line (#134)", () => {
     expect(p.open()).toBe(0);
   });
 
+  it("accepts 16 interim responses but refuses a 17th, ending the call", async () => {
+    const hints = "HTTP/1.1 103 Early Hints\r\n\r\n";
+    const ok = peer(`${hints.repeat(16)}HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n`, false);
+    expect((await fetchOverDuplex(ok.call, get())).status).toBe(200);
+
+    const p = peer(hints.repeat(17));
+    const err = await fetchOverDuplex(p.call, get()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpParseError);
+    expect((err as Error).message).toContain("interim");
+    await settle();
+    expect(p.open()).toBe(0);
+  });
+
   it("accepts obs-text and tabs in the reason phrase", async () => {
     const head = "HTTP/1.1 200 \xe9t\xe9\tok\r\ncontent-length: 0\r\n\r\n";
     const bytes = Uint8Array.from(head, (c) => c.charCodeAt(0)); // Latin-1, not UTF-8
