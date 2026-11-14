@@ -190,13 +190,14 @@ test.
 
 ### Tests
 
-- `pnpm test`: builds with tsdown, then runs the unit tests with a fake
-  `EventSource` and in-process responses.
+- `pnpm test`: builds with tsdown, then runs the unit tests in `tests/` with a
+  fake `EventSource` and in-process responses.
 - `pnpm run test:browser`: drives a real Chromium tab through a real
   ServiceWorker (`@statewalker/webrun-http-browser`'s `sw-worker.js`) and a
   real `text/event-stream` fetch, including past the 30 s ServiceWorker idle
   window.
-- `pnpm run typecheck`.
+- `pnpm run typecheck`: `src/` and `tests/`, then `test-browser/`.
+- `pnpm run lint`: `biome check src tests test-browser`.
 
 ## License
 

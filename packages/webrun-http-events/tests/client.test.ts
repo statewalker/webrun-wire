@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { newPubSubClient } from "./client.js";
+import { newPubSubClient } from "../src/client.js";
 
 /** Minimal EventSource stand-in; vitest runs under Node, which has no DOM one. */
 class FakeEventSource {

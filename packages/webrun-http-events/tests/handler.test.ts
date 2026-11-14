@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { newBroker } from "./broker.js";
-import { createSseSource, newPubSub } from "./handler.js";
+import { newBroker } from "../src/broker.js";
+import { createSseSource, newPubSub } from "../src/handler.js";
 
 /** Read exactly `count` SSE frames off a response body, then release it. */
 async function readFrames(res: Response, count: number): Promise<string[]> {
