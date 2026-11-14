@@ -40,10 +40,12 @@ pass an `rtc` factory from a WebRTC implementation.
 | `PeerManagerOptions` | `WebRtcConnectionOptions` plus `onError?: (error, peerId) => void`, called when a connection fails with no caller to tell (a signal it rejects, an inbound channel that never opens). |
 | `new QrSignaling(options?)` | Serverless pairing. `offer(): Promise<{ qr, accept(answerQr): Promise<ByteChannel> }>`, `answer(offerQr): Promise<{ qr, channel }>`, `getSessionId()`. |
 | `QrSignalingOptions` | `{ sessionId?: string; connection?: WebRtcConnectionOptions }`. |
-| `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
+| `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId, options?): Promise<ByteChannel>` (a `byteChannelFromRoom` channel), `leave()`. |
 | `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
 | `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`, with the data channel's `bufferedAmount` and a `whenDrained()` that waits for `bufferedamountlow`. |
-| `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. It closes when the room disconnects, the participant leaves, or a reliable publish fails, so whatever runs on it learns the other end is gone. |
+| `byteChannelFromRoom(room, peerId, options?)` | A `ByteChannel` to one participant of a `RoomLike`, on its own data topic (`options.topic`, default `DEFAULT_ROOM_TOPIC`). It closes when the room disconnects, the participant leaves, the peer's channel closes, a reliable publish fails, or a `send` exceeds `options.maxFrameBytes` (default `DEFAULT_ROOM_MAX_FRAME_BYTES`), so whatever runs on it learns the other end is gone. Packets and goodbye follow `webrun-streams-livekit`'s conventions. |
+| `ByteChannelFromRoomOptions` | `{ topic?: string; maxFrameBytes?: number }`. |
+| `DEFAULT_ROOM_TOPIC`, `DEFAULT_ROOM_MAX_FRAME_BYTES` | `"webrun/port-stack"` and `64_000`, the same defaults as `webrun-streams-livekit`. |
 | `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel; pass `maxMessageSize: 12 * 1024` for a `byteChannelFromRoom` channel). `target` also has the channel's `bufferedAmount` and `whenDrained()`, so `overPipe` with `frameSize` paces its frames by the transport. It must be the channel's only reader. |
 | `DRAIN_LOW_WATER` | `256 * 1024`. The channels' `whenDrained()` resolves once `bufferedAmount` is at most this. |
 | `ByteChannel` | The channel type: `send`, `recv`, `closed`, `close`, and optional `bufferedAmount` / `whenDrained()`. It used to come from `@statewalker/webrun-streams`; it is declared here since `emulateMux` was removed. |
@@ -55,7 +57,7 @@ Types and constants: `SignalingTransport` (`localId`, `send(to, msg)`,
 `PeerConnectionEvents` (`stateChange`, `signal`, `open`, `close`, `error`),
 `WebRtcConnectionOptions`, `RtcPeerConnectionFactory`, `DEFAULT_ICE_SERVERS` (two Google STUN
 servers), `CompressedSignal`, `RoomLike`, `RoomParticipantLike`, `RoomLocalParticipantLike`,
-`RoomManagerOptions` (`url`, `getToken(room)`, `roomFactory`), `ROOM_EVENT` (the three LiveKit
+`RoomManagerOptions` (`url`, `getToken(room)`, `roomFactory`), `ROOM_EVENT` (the four LiveKit
 event names used), `ParticipantInfo` (exported, not used by any API here).
 
 `WebRtcConnectionOptions`:
@@ -239,10 +241,18 @@ version other than 1, and a malformed packed candidate throws
   `bufferedamountlow` or when the channel ends.
 - `messageTargetOverByteChannel`'s `whenDrained()` is the channel's, and resolves at once over a
   channel without one or once the pipe has ended.
-- `byteChannelFromRoom` publishes with `reliable: true` to `destinationIdentities: [peerId]` and
-  accepts `dataReceived` events from that participant (or with no participant). Its `closed`
-  resolves only when you call `close()`; it does not watch for the participant leaving or the
-  room disconnecting.
+- `byteChannelFromRoom` publishes with `reliable: true` to `destinationIdentities: [peerId]` on
+  its topic, and accepts `dataReceived` events from that participant on that topic only; packets
+  with no participant, from anyone else, or on another topic are ignored, so several channels to
+  one participant can share a room on different topics. It ends when the room disconnects, the
+  participant leaves, a reliable publish fails, a `send` exceeds `maxFrameBytes` (that `send`
+  throws `RangeError`), or the peer's goodbye arrives. When it ends on this side (`close()`, an
+  oversized `send`, a failed publish) it publishes an empty goodbye on `<topic>/close`, the same
+  convention as `webrun-streams-livekit`'s `CLOSE_TOPIC`, so the peer's channel ends although the
+  room stays connected. The topic, goodbye and frame ceiling match `messageTargetOverLiveKit`'s
+  defaults, so the port stack over this channel talks to one over that adapter. `bufferedAmount`
+  counts bytes whose publish has not settled; `whenDrained()` resolves once that is at most
+  `DRAIN_LOW_WATER`.
 
 ### What `RoomManager` tracks
 

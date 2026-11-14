@@ -87,8 +87,9 @@ describe("(#146) messageTargetOverByteChannel paces by the channel", () => {
     });
     const base: ByteChannel = {
       send: () => {},
-      recv: (async function* () {
+      recv: (async function* (): AsyncGenerator<Uint8Array> {
         await closed;
+        yield* [];
       })(),
       closed,
       close,

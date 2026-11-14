@@ -100,55 +100,153 @@ export function byteChannelFromDataChannel(channel: RTCDataChannel): ByteChannel
 }
 
 /**
- * Build a {@link ByteChannel} to a single room participant over a LiveKit-style
- * `Room`. Outbound bytes are published to `peerId`; inbound `dataReceived`
- * events from `peerId` feed `recv`. This is the per-participant filtering the
- * retired `vcs-port-livekit` `livekit-port` performed, adapted to ByteChannel.
+ * The topic a {@link byteChannelFromRoom} channel's packets carry, the same
+ * default as `webrun-streams-livekit`'s `messageTargetOverLiveKit`; packets on
+ * other topics are someone else's. The goodbye goes on this topic with
+ * `/close` appended, as there.
  */
-export function byteChannelFromRoom(room: RoomLike, peerId: string): ByteChannel {
+export const DEFAULT_ROOM_TOPIC = "webrun/port-stack";
+
+/**
+ * The largest packet a {@link byteChannelFromRoom} channel publishes, as in
+ * `webrun-streams-livekit`: livekit-client (2.x) refuses a larger one.
+ */
+export const DEFAULT_ROOM_MAX_FRAME_BYTES = 64_000;
+
+/** Options for {@link byteChannelFromRoom}. */
+export interface ByteChannelFromRoomOptions {
+  /**
+   * The data topic, default {@link DEFAULT_ROOM_TOPIC}; the goodbye uses it
+   * with `/close` appended. Both ends must agree. Use another to run two
+   * channels to the same participant.
+   */
+  topic?: string;
+  /** The largest packet sent; past it `send` ends the channel and throws `RangeError`. Default {@link DEFAULT_ROOM_MAX_FRAME_BYTES}. */
+  maxFrameBytes?: number;
+}
+
+/**
+ * Build a {@link ByteChannel} to a single room participant over a LiveKit-style
+ * `Room`. Outbound bytes are published reliably to `peerId` on the channel's
+ * topic; inbound `dataReceived` events from `peerId` on that topic feed
+ * `recv`. The packets and the goodbye follow `webrun-streams-livekit`'s
+ * conventions, so the port stack over this channel talks to one over
+ * `messageTargetOverLiveKit` with the same topic.
+ *
+ * The channel ends when the room disconnects, the participant leaves, the
+ * peer's goodbye arrives, a reliable publish fails, or a `send` exceeds
+ * `maxFrameBytes`. When it ends on this side, a goodbye on the close topic
+ * ends the peer's channel too: the room stays connected, so nothing else would.
+ * `bufferedAmount` counts bytes whose publish has not settled.
+ */
+export function byteChannelFromRoom(
+  room: RoomLike,
+  peerId: string,
+  options: ByteChannelFromRoomOptions = {},
+): ByteChannel {
+  const topic = options.topic ?? DEFAULT_ROOM_TOPIC;
+  const closeTopic = `${topic}/close`;
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_ROOM_MAX_FRAME_BYTES;
   const queue = makeByteQueue();
   let closedResolve!: () => void;
   const closed = new Promise<void>((r) => {
     closedResolve = r;
   });
   let ended = false;
+  let inFlight = 0;
+  const drainWaiters = new Set<() => void>();
+  const wakeDrainWaiters = (): void => {
+    if (inFlight > DRAIN_LOW_WATER && !ended) return;
+    for (const w of [...drainWaiters]) w();
+    drainWaiters.clear();
+  };
 
   const onData = (...args: unknown[]): void => {
-    const payload = args[0];
-    const participant = args[1] as { identity?: string } | undefined;
+    const [payload, participant, , packetTopic] = args as [
+      unknown,
+      { identity?: string } | undefined,
+      unknown,
+      string | undefined,
+    ];
     // A packet with no participant is the server's, not the peer's.
-    if (participant?.identity !== peerId) return;
-    if (payload != null) queue.push(toBytes(payload));
+    if (ended || participant?.identity !== peerId) return;
+    if (packetTopic === closeTopic) {
+      end(false);
+      return;
+    }
+    if (packetTopic !== topic || payload == null) return;
+    let bytes: Uint8Array;
+    try {
+      bytes = toBytes(payload);
+    } catch {
+      end(true);
+      return;
+    }
+    queue.push(bytes);
   };
   const onParticipantDisconnected = (...args: unknown[]): void => {
-    if ((args[0] as { identity?: string } | undefined)?.identity === peerId) end();
+    if ((args[0] as { identity?: string } | undefined)?.identity === peerId) end(false);
   };
-  // The channel ends with the room or with the peer: otherwise nothing above
-  // it would ever learn the other end is gone.
-  const end = (): void => {
+  const onDisconnected = (): void => end(false);
+  // The channel ends with the room, with the peer, or with the peer's
+  // goodbye: otherwise nothing above it would ever learn the other end is gone.
+  /** `tellPeer`: it ended on this side, and the room is still there to say so. */
+  const end = (tellPeer: boolean): void => {
     if (ended) return;
     ended = true;
     room.off(ROOM_EVENT.dataReceived, onData);
     room.off(ROOM_EVENT.participantDisconnected, onParticipantDisconnected);
-    room.off(ROOM_EVENT.disconnected, end);
+    room.off(ROOM_EVENT.disconnected, onDisconnected);
     queue.done();
     closedResolve();
+    wakeDrainWaiters();
+    if (tellPeer) {
+      room.localParticipant
+        .publishData(new Uint8Array(0), {
+          reliable: true,
+          destinationIdentities: [peerId],
+          topic: closeTopic,
+        })
+        .catch(() => undefined);
+    }
   };
 
   room.on(ROOM_EVENT.dataReceived, onData);
   room.on(ROOM_EVENT.participantDisconnected, onParticipantDisconnected);
-  room.on(ROOM_EVENT.disconnected, end);
+  room.on(ROOM_EVENT.disconnected, onDisconnected);
 
   return {
     send(bytes) {
       if (ended) return;
-      void room.localParticipant
-        .publishData(bytes, { reliable: true, destinationIdentities: [peerId] })
+      if (bytes.byteLength > maxFrameBytes) {
+        end(true);
+        throw new RangeError(
+          `webrun-streams-signaling: a ${bytes.byteLength}-byte packet exceeds maxFrameBytes (${maxFrameBytes})`,
+        );
+      }
+      const size = bytes.byteLength;
+      inFlight += size;
+      room.localParticipant
+        .publishData(bytes, { reliable: true, destinationIdentities: [peerId], topic })
         // A reliable publish that fails lost a message: the stream above is broken.
-        .catch(end);
+        .then(
+          () => undefined,
+          () => end(true),
+        )
+        .finally(() => {
+          inFlight -= size;
+          wakeDrainWaiters();
+        });
     },
     recv: queue.recv,
     closed,
-    close: end,
+    close: () => end(true),
+    get bufferedAmount() {
+      return inFlight;
+    },
+    whenDrained() {
+      if (ended || inFlight <= DRAIN_LOW_WATER) return Promise.resolve();
+      return new Promise<void>((resolve) => drainWaiters.add(resolve));
+    },
   };
 }

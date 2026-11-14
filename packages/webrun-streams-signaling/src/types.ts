@@ -166,7 +166,7 @@ export interface RoomParticipantLike {
 export interface RoomLocalParticipantLike {
   publishData(
     data: Uint8Array,
-    opts?: { reliable?: boolean; destinationIdentities?: string[] },
+    opts?: { reliable?: boolean; destinationIdentities?: string[]; topic?: string },
   ): Promise<void>;
 }
 
