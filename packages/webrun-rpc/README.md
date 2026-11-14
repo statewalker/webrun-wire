@@ -833,6 +833,9 @@ until its user closes it (or, for an opened port, its `openPort` signal aborts);
 `` `call-${Date.now()}-${random}` ``. The default `timeout` is 1000 ms; any value that is not a
 finite number above zero installs no deadline. Errors cross as `webrun-streams`' serialised form
 (`message`, `stack`, and every own enumerable property) and are rebuilt as `Error`s.
+A reply that cannot be posted (an unclonable result or error field) reaches the caller as an
+error, `webrun-rpc: the reply could not be sent: <reason>`, and a request that cannot be posted
+rejects the call at once.
 
 `callPort` rejects early when its `signal` aborts, or when the port's close signal fires.
 `getPortCloseSignal(port)` returns the `AbortSignal` registered with `setPortCloseSignal`, or
