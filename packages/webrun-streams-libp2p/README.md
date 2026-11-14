@@ -403,8 +403,8 @@ identity, burst, stream-limit and serving-resilience tests against two real
 in-process TCP nodes. `dead-peer.test.ts` kills the peer two ways, aborting
 its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
-each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
-up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
+each; every channel must fail with an error within 1 s. The shared conformance
+suite (`tests/conformance.test.ts`, about 7 s) runs in the same `pnpm test`, with
 `skipHugeBody`.
 
 **Run-ahead is bounded for `connect` / `serve`** (spec D17, L6;
