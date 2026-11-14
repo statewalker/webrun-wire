@@ -15,9 +15,9 @@ Packages are published to npm from CI with changesets. Nobody runs `changeset ve
    publishes the tarballs with provenance and creates a GitHub release per package.
 
 The checks do not run on the version pull request itself (GitHub Actions opened it); they run
-again on `main` after the merge, before anything is packed. The release waits for both the shared
-CI and the `webrun-http-browser` browser suites (Chromium and Firefox); the other packages' browser
-suites are not run in CI.
+again on `main` after the merge, before anything is packed. The release waits for the shared CI,
+the Node 22 test job, and the browser suites of `webrun-http-browser` (Chromium and Firefox) and
+`webrun-streams-webrtc`; the other packages' browser suites are not run in CI.
 
 ## No npm token: trusted publishing
 

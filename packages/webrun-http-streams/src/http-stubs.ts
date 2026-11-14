@@ -171,13 +171,6 @@ export function newHttpServerStub(
       // whatever the producer holds open — a socket, a port subscription — is
       // never released. `discard` calls `.next()` first for exactly this
       // reason; see its comment in `bytes.ts`.
-      //
-      // `fetch.ts` has the same shape at its null-body-status branch and still
-      // uses the bare form — not because it is safe there (it is not; its
-      // producer's `finally` does not run either) but because `discard` cannot
-      // fix it: the release has to reach the `output` generator that
-      // `fetchOverDuplex` has no handle on. See the KNOWN GAP note there. Here
-      // the producer is reachable, so here it gets released.
       await discard(content);
     } else if (supportsRequestStreams()) {
       requestInit.body = toReadableStream(content[Symbol.asyncIterator]());

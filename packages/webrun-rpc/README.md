@@ -821,10 +821,9 @@ cannot. A `PORT_TRANSFER` message without an attached port is dropped. `onPort` 
 explicitly; nothing sniffs capabilities. `target` must be a full `MessageTarget`; a send-only
 `MessageSink` such as a `ServiceWorkerClient` is not supported.
 
-**The issued-port set never shrinks.** Every port opened or accepted is kept until `close()`, and
-nothing removes a port when it closes. Bounding it needs a per-port `close` event listener, a newer
-platform surface this implementation avoids. Nothing fails; the set just grows. Scope the mux to the
-lifetime of the thing it multiplexes — a worker, an iframe, a connection — not to the process.
+**A port is forgotten when it closes.** A port opened or accepted stays in the mux's issued set
+until its user closes it (or, for an opened port, its `openPort` signal aborts); the mux's
+`close()` closes and forgets the rest.
 
 ### The typed-JSON RPC tier on the wire
 
@@ -839,7 +838,7 @@ finite number above zero installs no deadline. Errors cross as `webrun-streams`'
 `getPortCloseSignal(port)` returns the `AbortSignal` registered with `setPortCloseSignal`, or
 `undefined`. A raw `MessagePort` never reports its peer closing, so an adapter that does know when
 its transport closed can register a signal and pending calls reject instead of waiting for their
-timeout. Nothing in this package registers one.
+timeout. The ports of `multiplexPort` register one, which fires when the port closes.
 
 `send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`; `recieve`
 yields one async generator per inbound stream and never ends on its own. `ioSend` / `ioHandle`
