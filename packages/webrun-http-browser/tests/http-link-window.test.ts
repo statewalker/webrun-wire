@@ -132,7 +132,7 @@ const throughDispatcher: Route = async (options) => {
   const dispatcher = new SwHttpDispatcher({ self, ...options });
   dispatcher.start();
   const attached = await channelCall(
-    dispatcher.self,
+    self,
     ATTACH_CALL,
     { wire: HTTP_LINK_PROTOCOL, key: "upload" },
     [calling],

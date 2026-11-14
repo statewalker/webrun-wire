@@ -62,6 +62,8 @@
     "test": "vitest run",
     "bench": "vitest run --config vitest.bench.config.ts && echo \"all benchmarks passed\"",
     "test:browser": "pnpm run build && vitest run --config vitest.browser.config.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
     "lint": "biome check src tests",
     "serve": "http-server -p 5173 -c-1 -s .",
     "example:same-origin": "pnpm run build && http-server -p 5173 -c-1 -o /public/index.html .",

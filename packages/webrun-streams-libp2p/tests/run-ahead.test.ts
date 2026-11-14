@@ -152,7 +152,9 @@ describe("(review of #112) a handler that reads its input after its output ended
           for await (const c of input) n += c.byteLength;
           readerDone(n);
         })();
-        return [new TextEncoder().encode("ok")];
+        return (async function* () {
+          yield new TextEncoder().encode("ok");
+        })();
       });
       const { call } = await pair.connect();
       const chunks = function* () {

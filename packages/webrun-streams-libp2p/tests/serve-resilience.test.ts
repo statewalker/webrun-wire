@@ -18,7 +18,9 @@ async function node(listen: boolean): Promise<Libp2p> {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-const echo = async function* echo(input: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+const echo = async function* echo(
+  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
   for await (const chunk of input) yield chunk;
 };
 

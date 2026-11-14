@@ -97,7 +97,7 @@ const CASES: Case[] = [
     consume: async (r) => {
       const reader = (r.body as ReadableStream<Uint8Array>).getReader();
       let n = 0;
-      for (let c = await reader.read(); !c.done; c = await reader.read()) n += c.byteLength;
+      for (let c = await reader.read(); !c.done; c = await reader.read()) n += c.value.byteLength;
       void n;
     },
   },

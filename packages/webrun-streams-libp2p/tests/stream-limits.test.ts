@@ -2,6 +2,7 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import type { Libp2p } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
+import type { Duplex } from "@statewalker/webrun-streams";
 import { createLibp2p } from "libp2p";
 import { describe, expect, it } from "vitest";
 import { connect, serveConnections } from "../src/index.js";
@@ -49,7 +50,7 @@ interface HeldEchoHandlerState {
  * live limit are rejected for real, not merely "not yet gotten to".
  */
 function makeHeldEchoHandler(): {
-  handler: (input: AsyncIterable<Uint8Array>) => AsyncGenerator<Uint8Array>;
+  handler: Duplex;
   state: HeldEchoHandlerState;
   release: () => void;
 } {
@@ -59,7 +60,9 @@ function makeHeldEchoHandler(): {
     releaseFn = resolve;
   });
 
-  const handler = async function* (input: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const handler = async function* (
+    input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  ): AsyncGenerator<Uint8Array> {
     state.active++;
     state.peakConcurrency = Math.max(state.peakConcurrency, state.active);
     await gate;
