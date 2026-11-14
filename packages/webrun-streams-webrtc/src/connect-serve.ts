@@ -21,12 +21,10 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
   let counter = 0;
   let closed = false;
   const open = new Set<RTCDataChannel>();
-  const onConnectionClose = (): void => {
-    closed = true;
+  const onStateChange = (): void => {
+    if (pc.connectionState === "closed" || pc.connectionState === "failed") closed = true;
   };
-  pc.addEventListener("connectionstatechange", () => {
-    if (pc.connectionState === "closed" || pc.connectionState === "failed") onConnectionClose();
-  });
+  pc.addEventListener("connectionstatechange", onStateChange);
 
   const call: Duplex = (input) => {
     if (closed) {
@@ -50,6 +48,7 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
     call,
     async close() {
       closed = true;
+      pc.removeEventListener("connectionstatechange", onStateChange);
       for (const dc of open) {
         try {
           dc.close();
