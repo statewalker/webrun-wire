@@ -13,6 +13,19 @@ permissions:
 jobs:
   ci:
     uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
+    with:
+      # Required root scripts run without --if-present, every package with a tsconfig.json has a
+      # `typecheck`, and every test file is compiled by `typecheck` or `typecheck:tests`.
+      baseline: library
+      # publint (errors fail) and attw (default profile esm-only) on every packed public package.
+      package-checks: true
+      # gitleaks on the files and on every commit of the pull request, before the install.
+      secret-scan: true
+      # A publish step anywhere but the `publish` job below fails.
+      release-path: true
+      # Each public package's types against npm's latest: a breaking change needs a declared bump
+      # (a minor on 0.x). webrun-wire is layer L0, the lowest: nothing below it to switch on first.
+      api-diff: true
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
@@ -39,14 +52,9 @@ jobs:
       - name: Test
         run: pnpm -r run test
 
-      # The tests' own typecheck (src and tests together, with Node's types): the shared CI's
-      # typecheck covers src only. It needs the build: sibling packages resolve to their dist types.
-      - name: Typecheck the tests
-        run: pnpm -r --if-present run typecheck:tests
-
   # The shared CI runs the Node suites only. webrun-http-browser's browser
-  # suites (ServiceWorkers, workers, relays, WebSockets) and webrun-streams-webrtc's
-  # (RTCPeerConnection) need real browsers:
+  # suites (ServiceWorkers, workers, relays, WebSockets), webrun-streams-webrtc's
+  # (RTCPeerConnection) and webrun-streams-peerjs's need real browsers:
   # Chromium and Firefox, installed by Playwright on the runner.
   browser:
     name: Browser tests (webrun-http-browser)
@@ -78,6 +86,13 @@ jobs:
         # also when the step above failed: one package's failures must not hide the other's
         if: ${{ !cancelled() }}
         run: pnpm --filter @statewalker/webrun-streams-webrtc run test:browser
+
+      # Conformance L0–L6, the message pipe and its ceiling over PeerJS DataConnections, against a
+      # loopback PeerJS broker the suite starts itself. livekit's suite needs a livekit-server
+      # binary downloaded on the runner: it runs in the nightly workflow instead.
+      - name: Test (webrun-streams-peerjs)
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @statewalker/webrun-streams-peerjs run test:browser
 
   # Releases to npm in three jobs: `version` opens the version pull request, `pack` packs what
   # npm lacks once it is merged, `publish` uploads the tarballs. Nobody approves the upload:

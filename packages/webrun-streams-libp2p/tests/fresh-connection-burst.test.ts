@@ -53,7 +53,9 @@ async function createNode(slowUpgrade: boolean): Promise<Libp2p> {
   return node;
 }
 
-async function* echo(input: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
+async function* echo(
+  input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
   for await (const chunk of input) yield chunk;
 }
 

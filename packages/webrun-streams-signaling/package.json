@@ -32,6 +32,8 @@
   "scripts": {
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"
   },
@@ -48,6 +50,7 @@
     "@statewalker/webrun-msgpack": "workspace:^",
     "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams": "workspace:^",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "livekit-client": "catalog:",
     "rimraf": "catalog:",

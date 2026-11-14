@@ -92,10 +92,13 @@ and ships built JavaScript with type declarations in `dist/` plus its TypeScript
    pnpm lint:check
    pnpm format:check
    pnpm typecheck
+   pnpm typecheck:tests   # the tests too; after pnpm build
    ```
 
 5. Browser tests are separate scripts in the packages that have them, for example
-   `pnpm --filter @statewalker/webrun-http-browser test:browser`.
+   `pnpm --filter @statewalker/webrun-http-browser test:browser`. `pnpm test:nightly` runs the ones
+   CI leaves to the nightly run (livekit, peerjs, http-events); livekit's needs `livekit-server` on
+   `PATH`.
 
 ## Why it is the way it is
 
@@ -146,7 +149,9 @@ Published consumers only ever see `dist`.
 | --- | --- |
 | `pnpm build` | `pnpm -r run build`: rolldown (tsdown for `webrun-http-events`) and declarations per package |
 | `pnpm test` | `pnpm -r run test` (Vitest), including `tools/consumer-install` |
-| `pnpm typecheck` | `pnpm -r run typecheck` in the packages that define it |
+| `pnpm typecheck` | `pnpm -r run typecheck`: every package with a `tsconfig.json` defines it |
+| `pnpm typecheck:tests` | `pnpm -r run typecheck:tests`: each package's `src` and tests (`tsconfig.tests.json`) |
+| `pnpm test:nightly` | the `test:browser` suites of webrun-streams-livekit, webrun-streams-peerjs and webrun-http-events, each run to the end |
 | `pnpm bench` | `pnpm -r run bench`: the throughput and latency benchmarks of `webrun-rpc` and `webrun-http-browser`, kept out of `pnpm test` |
 | `pnpm lint` / `pnpm lint:check` | `biome check --write .` / `biome check .` |
 | `pnpm lint:fix`, `pnpm format:fix` | `biome check --write --unsafe .` |
@@ -167,8 +172,16 @@ Published consumers only ever see `dist`.
 
 CI (`.github/workflows/ci.yml`) runs on pushes to `main` and on pull requests: a frozen install,
 dependency-reference checks (`workspace:^` inside the repository, `catalog:` for everything else),
-`lint:check`, `format:check`, build, typecheck, tests, and checks of export targets, dist imports
-and packed manifests.
+`lint:check`, `format:check`, build, typecheck, typecheck:tests, tests, and checks of export
+targets, dist imports and packed manifests. It runs the shared CI of
+[statewalker/statewalker-ci](https://github.com/statewalker/statewalker-ci) with every switch on:
+the required baseline (`baseline: library`), publint and attw (`package-checks`), the API diff
+against npm (`api-diff`), the gitleaks secret scan (`secret-scan`) and the release-path check
+(`release-path`). Its own jobs add the Node suites on Node 22 and the browser suites of
+webrun-http-browser, webrun-streams-webrtc and webrun-streams-peerjs.
+
+`.github/workflows/nightly.yml` runs `pnpm test:nightly` every night (and on demand from the Actions
+tab, `workflow_dispatch`); a failure opens one `bug` issue labelled `ci-baseline`.
 
 Packages are published to npm from CI with changesets. After CI passes on `main`, a job adds a
 changeset for each package whose packed contents differ from npm and opens a "chore: version

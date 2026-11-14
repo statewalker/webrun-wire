@@ -23,7 +23,7 @@ function source(count: number) {
 
 /** a handler that counts what it receives and answers with the count (8 bytes) */
 function counting(pauseAfterFirstMs = 0) {
-  return async function* (input: AsyncIterable<Uint8Array>) {
+  return async function* (input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
     let n = 0;
     let first = true;
     for await (const c of input) {

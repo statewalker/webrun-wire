@@ -1,0 +1,33 @@
+name: Nightly
+
+# The browser suites the CI of a pull request does not run (statewalker/statewalker-ci's
+# nightly.yml): root `test:nightly` runs the `test:browser` suites of webrun-streams-livekit,
+# webrun-streams-peerjs and webrun-http-events, each to the end even when one fails. A failure opens
+# one `bug` + `ci-baseline` issue here; later failures comment on it while it is open.
+#
+# webrun-streams-livekit's suite starts `livekit-server` itself (its global setup), so the setup
+# installs the server binary, from LiveKit's official image pinned by digest, next to Chromium.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly:
+    uses: statewalker/statewalker-ci/.github/workflows/nightly.yml@main
+    with:
+      setup: |
+        pnpm --filter @statewalker/webrun-streams-peerjs exec playwright install --with-deps chromium
+        # livekit-server is copied out of LiveKit's official image, pinned by digest, so docker
+        # verifies the content and no downloaded script runs in this job, which holds an
+        # issues:write token. To upgrade: take the new tag's multi-arch digest from Docker Hub.
+        lk=livekit/livekit-server:v1.13.11@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20
+        id=$(docker create "$lk")
+        sudo docker cp "$id:/livekit-server" /usr/local/bin/livekit-server
+        docker rm "$id"
+        livekit-server --version

@@ -212,7 +212,9 @@ describe("a multiplexer over one libp2p stream closes with its connection", () =
     const { target } = messageTargetOverStream(
       await clientNode.dialProtocol(addr, ["/test-echo/1.0.0"]),
     );
-    target.addEventListener("message", (event) => received.push(event.data));
+    target.addEventListener("message", (event) => {
+      received.push(event.data);
+    });
     const big = new Uint8Array(300_000).map((_, i) => i % 251);
     const sent = [new Uint8Array([1, 2, 3]), big, new Uint8Array(0), new Uint8Array([9])];
     for (const message of sent) target.postMessage(message);

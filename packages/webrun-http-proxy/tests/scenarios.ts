@@ -100,7 +100,7 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
 
   app.notFound(() => new Response("no route", { status: 404, headers: { [MARKER]: "no-route" } }));
 
-  const table = (request: Request): Promise<Response> => app.fetch(request);
+  const table = async (request: Request): Promise<Response> => app.fetch(request);
 
   const call = (path: string, init?: RequestInit): Promise<Response> =>
     table(new Request(`http://mesh.local${path}`, init));

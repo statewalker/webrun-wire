@@ -290,6 +290,8 @@ describe("heartbeat watch from the first ping", () => {
   function counted() {
     let armed = 0;
     const timers = {
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>),
       setInterval: (fn: () => void, ms: number) => {
         armed++;
         return setInterval(fn, ms);
@@ -398,6 +400,8 @@ describe("server end: other platforms' semantics (workerd's WebSocketPair)", () 
   it("a ping announcing a period past what a timer takes (no heartbeat) arms no watch", async () => {
     let armed = 0;
     const timers = {
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>),
       setInterval: (fn: () => void, ms: number) => {
         armed++;
         return setInterval(fn, ms);
@@ -415,6 +419,8 @@ describe("server end: other platforms' semantics (workerd's WebSocketPair)", () 
   it("a ping turning the heartbeat off stops the watch armed at open", async () => {
     let armed = 0;
     const timers = {
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>),
       setInterval: (fn: () => void, ms: number) => {
         armed++;
         return setInterval(fn, ms);

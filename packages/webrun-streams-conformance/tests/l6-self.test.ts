@@ -4,7 +4,7 @@ import { type MakePair, makeLoopbackPair, measureRunAhead } from "../src/index.j
 
 /** Pumps `source` into an unbounded queue, one chunk every `everyMs`, whether or not anyone reads. */
 function eagerSlowPump(
-  source: AsyncIterable<Uint8Array>,
+  source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   everyMs: number,
 ): AsyncIterable<Uint8Array> {
   const queue: Uint8Array[] = [];
@@ -46,7 +46,7 @@ const slowUnbounded: MakePair = async () => {
 /** A loopback pair that delivers chunk 6's bytes in place of chunk 5's (a duplicate and a drop). */
 const corrupting: MakePair = async () => {
   const inner = await makeLoopbackPair();
-  const swap = async function* (source: AsyncIterable<Uint8Array>) {
+  const swap = async function* (source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>) {
     let i = 0;
     let held: Uint8Array | undefined;
     for await (const chunk of source) {

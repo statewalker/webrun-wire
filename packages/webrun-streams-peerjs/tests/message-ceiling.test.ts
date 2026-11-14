@@ -14,12 +14,12 @@ if (isBrowser) {
       const options = { host: "127.0.0.1", port, path: "/webrun", secure: false, debug: 0 };
       const a = new Peer(`ceil-a-${suffix}`, options);
       const b = new Peer(`ceil-b-${suffix}`, options);
-      await Promise.all([a, b].map((p) => new Promise((r) => p.on("open", r))));
+      await Promise.all([a, b].map((p) => new Promise<void>((r) => p.on("open", () => r()))));
       const inbound = new Promise<import("peerjs").DataConnection>((r) => b.on("connection", r));
       const conn = a.connect(`ceil-b-${suffix}`, { serialization: "raw", reliable: true });
-      await new Promise((r) => conn.on("open", r));
+      await new Promise<void>((r) => conn.on("open", () => r()));
       const peerConn = await inbound;
-      await new Promise((r) => (peerConn.open ? r(undefined) : peerConn.on("open", r)));
+      await new Promise<void>((r) => (peerConn.open ? r() : peerConn.on("open", () => r())));
       const errors: string[] = [];
       conn.on("error", (e) => errors.push(String((e as Error).message ?? e)));
       const report: string[] = [];
