@@ -150,6 +150,89 @@ export function describeDuplexAdapter(
       });
     });
 
+    describe("L3: cancellation and request errors while the handler reads its input", () => {
+      it("a handler reading its input sees the caller's .return(): its input ends and its finally runs", async () => {
+        const pair = await makePair();
+        let stopUpload = false;
+        try {
+          let handlerCleanupRan = false;
+          await pair.serve(async function* readingEcho(input) {
+            try {
+              for await (const chunk of input) yield chunk;
+            } finally {
+              handlerCleanupRan = true;
+            }
+          });
+          const { call, close } = await pair.connect();
+          try {
+            const out = call(
+              (async function* endlessUpload() {
+                while (!stopUpload) {
+                  yield new TextEncoder().encode("tick");
+                  await delay(10);
+                }
+              })(),
+            );
+            let count = 0;
+            for await (const _ of out) {
+              count++;
+              if (count >= 3) break;
+            }
+            expect(count).toBe(3);
+            expect(await waitFor(() => handlerCleanupRan, 3000)).toBe(true);
+          } finally {
+            stopUpload = true;
+            await close();
+          }
+        } finally {
+          stopUpload = true;
+          await pair.close();
+        }
+      }, 10_000);
+
+      it("a handler reading its input sees the caller's input error, not a clean end", async () => {
+        const pair = await makePair();
+        try {
+          let handlerSaw: unknown = "nothing";
+          let handlerCleanupRan = false;
+          await pair.serve(async function* readingEcho(input) {
+            try {
+              for await (const chunk of input) yield chunk;
+              handlerSaw = "end";
+            } catch (err) {
+              handlerSaw = err instanceof Error ? err : new Error(String(err));
+              throw err;
+            } finally {
+              handlerCleanupRan = true;
+            }
+          });
+          const { call, close } = await pair.connect();
+          try {
+            const out = call(
+              (async function* failingUpload() {
+                yield new TextEncoder().encode("first");
+                yield new TextEncoder().encode("second");
+                await delay(20);
+                throw new Error("upload failed");
+              })(),
+            );
+            await expect(async () => {
+              for await (const _ of out) {
+                /* drain */
+              }
+            }).rejects.toBeInstanceOf(Error);
+            expect(await waitFor(() => handlerCleanupRan, 3000)).toBe(true);
+            expect(handlerSaw).toBeInstanceOf(Error);
+            expect((handlerSaw as Error).message).toContain("upload failed");
+          } finally {
+            await close();
+          }
+        } finally {
+          await pair.close();
+        }
+      }, 10_000);
+    });
+
     describe("L4: error propagation", () => {
       it("preserves message, custom fields, and stack across the wire", async () => {
         const pair = await makePair();
@@ -266,6 +349,13 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+/** polls `cond` until it holds or `ms` elapse; resolves its last value */
+async function waitFor(cond: () => boolean, ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (!cond() && Date.now() < until) await delay(10);
+  return cond();
 }
 
 function delay(ms: number): Promise<void> {

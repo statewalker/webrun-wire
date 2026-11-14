@@ -110,6 +110,7 @@ describeDuplexAdapter("loopback", makeLoopbackPair);
 | L1 | `concurrency` concurrent calls each get back their own body. |
 | L2 | Half-close: after the caller's input ends, the handler keeps yielding (three chunks, 30 ms apart) and the caller receives all of them. |
 | L3 | Mid-stream cancellation: the caller breaks out after 3 chunks of an endless response, and within 50 ms the handler's `finally` has run. |
+| L3 (input) | Cancellation and request errors while the handler reads its input: an echo handler reading an endless upload sees the caller break out after 3 chunks (its `finally` runs within 3 s), and an echo handler whose caller's input throws `upload failed` sees its own read throw that error, not a clean end, while the caller's `for await` rejects. |
 | L4 | Error propagation: a handler that throws an `Error` with `status: 418` and `code: "TEAPOT"` makes the caller's `for await` reject with the same `message`, `status` and `code`, and a non-empty `stack`. |
 | L5 | Teardown: calling the `serve` teardown twice resolves; `pair.close()` after a completed call resolves. |
 | L6 | Flow control (spec D17): a 256 KiB body crosses as 4 KiB messages to a consumer that waits 1 ms per chunk, intact; and in each direction, a producer of 4 KiB chunks facing a consumer that stops after one chunk stalls within the pair's `runAheadBytes`, then finishes, every byte intact, once the consumer resumes. |

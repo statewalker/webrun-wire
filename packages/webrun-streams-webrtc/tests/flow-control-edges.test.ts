@@ -31,7 +31,9 @@ async function drain(g: AsyncIterable<Uint8Array>): Promise<number> {
 }
 
 if (isBrowser) {
-  const { makeWebRtcPair } = await import("./make-webrtc-pair.js");
+  const { makeWebRtcPair, connectedPeers } = await import("./make-webrtc-pair.js");
+  const { serve } = await import("../src/connect-serve.js");
+  const { RECEIVE_WINDOW } = await import("../src/duplex-over-data-channel.js");
 
   describe("webrun-streams-webrtc — flow control without deadlocks", () => {
     it("a reply larger than the window, sent after the whole input was read", async () => {
@@ -118,6 +120,53 @@ if (isBrowser) {
         await within(g.return(undefined), 5_000, "return()");
       } finally {
         await pair.close();
+      }
+    }, 30_000);
+
+    it("a peer that ignores credit and sends past the receive window fails the call", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      try {
+        let handlerSaw: unknown = "nothing";
+        let startReading = (): void => {};
+        const gate = new Promise<void>((r) => {
+          startReading = r;
+        });
+        await serve({ pc: serverPc }, async function* (input) {
+          await gate; // read nothing (return no credit) until the overrun was dealt with
+          try {
+            for await (const _ of input) {
+              /* read */
+            }
+            handlerSaw = "end";
+          } catch (err) {
+            handlerSaw = err;
+          }
+          yield* [];
+        });
+        // a raw caller that speaks the framing but never waits for CREDIT
+        const dc = clientPc.createDataChannel("webrun/raw/0");
+        dc.binaryType = "arraybuffer";
+        const closed = new Promise<void>((r) => dc.addEventListener("close", () => r()));
+        await new Promise<void>((r) => dc.addEventListener("open", () => r(), { once: true }));
+        const frame = new Uint8Array(16 * 1024);
+        frame[0] = 0x00; // DATA
+        for (let sent = 0; sent <= RECEIVE_WINDOW + 64 * 1024; sent += frame.byteLength - 1) {
+          dc.send(frame);
+        }
+        await within(closed, 10_000, "responder closes the channel");
+        startReading();
+        await within(
+          (async () => {
+            while (handlerSaw === "nothing") await new Promise((r) => setTimeout(r, 20));
+          })(),
+          5_000,
+          "handler input ends",
+        );
+        expect(handlerSaw).toBeInstanceOf(Error);
+        expect((handlerSaw as Error).message).toContain("receive window");
+      } finally {
+        clientPc.close();
+        serverPc.close();
       }
     }, 30_000);
   });

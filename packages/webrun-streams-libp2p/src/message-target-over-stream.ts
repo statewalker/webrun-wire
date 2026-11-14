@@ -1,10 +1,11 @@
 import type { Stream, StreamCloseEvent } from "@libp2p/interface";
 import {
+  ByteBuffer,
   closeStream,
-  decodeVarint,
   encodeVarint,
   normalizeChunk,
   PeerGoneError,
+  readLength,
 } from "./duplex-over-stream.js";
 
 type Listener = (event: MessageEvent) => void | Promise<void>;
@@ -18,6 +19,7 @@ export interface StreamMessageTarget {
   target: {
     addEventListener(type: "message", listener: Listener): void;
     removeEventListener(type: "message", listener: Listener): void;
+    /** Sends one message. Throws `TypeError` for anything but bytes. */
     postMessage(message: unknown): void;
     close(): Promise<void>;
     /** The stream's write buffer, in bytes. */
@@ -108,35 +110,25 @@ export function messageTargetOverStream(
   };
 
   void (async () => {
-    // Unread bytes are `buf[start, end)`; the buffer grows by doubling, so a
-    // large message arriving in many chunks is copied a bounded number of times.
-    let buf = new Uint8Array(0);
-    let start = 0;
-    let end = 0;
+    // The buffer grows by doubling, so a large message arriving in many chunks
+    // is copied a bounded number of times.
+    const buf = new ByteBuffer();
     for await (const item of stream) {
-      const incoming = normalizeChunk(item);
-      if (end + incoming.byteLength > buf.byteLength) {
-        const size = end - start + incoming.byteLength;
-        const next = new Uint8Array(Math.max(size, buf.byteLength * 2));
-        next.set(buf.subarray(start, end), 0);
-        buf = next;
-        end -= start;
-        start = 0;
-      }
-      buf.set(incoming, end);
-      end += incoming.byteLength;
+      buf.push(normalizeChunk(item));
       for (;;) {
-        const header = readLength(buf.subarray(start, end));
+        const bytes = buf.unread();
+        const header = readLength(bytes, "message");
         if (header === undefined) break; // the length is not all here yet
         if (header.value > maxMessageBytes) {
           throw new Error(
             `webrun-streams-libp2p: a ${header.value}-byte message exceeds maxMessageBytes (${maxMessageBytes})`,
           );
         }
-        const stop = start + header.offset + header.value;
-        if (end < stop) break;
-        deliver(buf.slice(start + header.offset, stop));
-        start = stop;
+        const stop = header.offset + header.value;
+        if (bytes.byteLength < stop) break;
+        const message = bytes.slice(header.offset, stop);
+        buf.consume(stop);
+        deliver(message);
       }
     }
     if (peerClosedWrite) {
@@ -162,7 +154,12 @@ export function messageTargetOverStream(
         listeners.delete(listener);
       },
       postMessage(message) {
-        const payload = normalizeChunk(message);
+        const payload = toBytes(message);
+        if (!payload) {
+          throw new TypeError(
+            `webrun-streams-libp2p: a byte pipe carries Uint8Array, ArrayBuffer or a view, got ${Object.prototype.toString.call(message)}`,
+          );
+        }
         const header = encodeVarint(payload.byteLength);
         const frame = new Uint8Array(header.byteLength + payload.byteLength);
         frame.set(header, 0);
@@ -196,12 +193,12 @@ export function messageTargetOverStream(
   };
 }
 
-/** The length prefix of `bytes`, or `undefined` while it is incomplete; throws when malformed. */
-function readLength(bytes: Uint8Array): { value: number; offset: number } | undefined {
-  try {
-    return decodeVarint(bytes, 0);
-  } catch (err) {
-    if (bytes.byteLength < 5) return undefined;
-    throw new Error("webrun-streams-libp2p: a malformed message length", { cause: err });
+/** `message` as bytes, or `undefined` when it is not bytes */
+function toBytes(message: unknown): Uint8Array | undefined {
+  if (message instanceof Uint8Array) return message;
+  if (message instanceof ArrayBuffer) return new Uint8Array(message);
+  if (ArrayBuffer.isView(message)) {
+    return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
   }
+  return undefined;
 }

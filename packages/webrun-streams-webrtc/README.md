@@ -144,7 +144,10 @@ Two limits keep memory bounded whatever the speed of either side:
   the previous one, so a slow handler stalls the caller.
 
 Both ends must speak `CREDIT`: a sender facing a peer that never returns
-credit stops after the first window.
+credit stops after the first window. The receiver enforces the window too: a
+peer that sends more than the window plus the credit it was returned fails the
+call. The receiver drops what it queued, closes the channel, and its side of
+the call throws (on the responder, the handler's input throws).
 
 Each side keeps listening for `CREDIT` until both directions are done, so a
 reply larger than the window, sent after the input ended, still flows. When
@@ -213,10 +216,15 @@ a one-chunk bound.
 
 `END` means "I am done sending", and the peer answers it by carrying on, so it
 cannot express "stop". When the caller leaves early (`.return()` on the call's
-generator, or an error), `duplexOverDataChannel` waits for its own outbound
-pump to settle and then closes the channel. On the responder, the channel's
-`close` event ends the inbound side with `TransportClosedError`, which closes
-the handler's input and runs the handler's `finally`.
+generator, or an error), `duplexOverDataChannel` closes the channel and then
+waits for its own outbound pump to settle. On the responder, the channel's
+`close` event ends the inbound side with `TransportClosedError`; a caller whose
+input throws sends `ERROR` instead, which ends it with that error. Either way
+the handler's input ends with the error (its next read throws it, so a handler
+never takes a truncated upload for a complete one) before the responder waits
+for its own outbound pump, which may be waiting for the handler's next output.
+The handler's `finally` then runs, whether it was reading its input or
+producing output.
 
 On a normal finish the outbound pump is not awaited. The responder feeds the
 handler's input from this generator and closes that input only when the
@@ -243,6 +251,7 @@ SDP, must be opened before `serve` is registered or on a different connection.
 | Channel closes before it opens | `DataChannel closed before open` |
 | Channel error before it opens | `DataChannel error: <message or "unknown">` |
 | Channel closes before the peer sent `END` | `TransportClosedError` (`transport closed`) |
+| The peer sends past the receive window without credit | `webrun-streams-webrtc: the peer sent past the receive window (4194304 bytes) without credit` |
 | Handler throws | The caller's `for await` throws the deserialised error, with `message`, `stack` and custom fields |
 
 On the responder, a channel task that fails (usually a caller that cancelled)
