@@ -1,12 +1,12 @@
-import { postCancelChannel } from "./cancel-channel.js";
+import { listenCancelChannel, postCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
-import { type RecieveOptions, recieve } from "./recieve.js";
+import { type ReceiveOptions, receive } from "./receive.js";
 import { send } from "./send.js";
 
 export interface IoSendOptions extends ListenPortOptions {
   /**
-   * Optional cancel signal threaded into `recieve` so the consumer can force
+   * Optional cancel signal threaded into `receive` so the consumer can force
    * an in-flight `input.next()` to resolve immediately (otherwise an
    * AsyncGenerator's `.return()` queues behind the pending `.next()` and
    * never preempts a hanging await). Used by `callBidi` to abort the inner
@@ -32,8 +32,8 @@ export async function* ioSend<T, U = T>(
   output: AsyncIterable<U> | Iterable<U>,
   options: IoSendOptions = {},
 ): AsyncGenerator<T> {
-  const { cancelSignal, ...recieveOptions } = options;
-  const channelName = recieveOptions.channelName ?? "";
+  const { cancelSignal, ...receiveOptions } = options;
+  const channelName = receiveOptions.channelName ?? "";
   let inputEndedNormally = false;
   const sendAbort = new AbortController();
 
@@ -46,25 +46,37 @@ export async function* ioSend<T, U = T>(
     else cancelSignal.addEventListener("abort", () => sendAbort.abort(), { once: true });
   }
 
-  // Combine outer cancel signal with recieve's force-close mechanism.
-  const recieveOpts: RecieveOptions = { ...recieveOptions, signal: cancelSignal };
+  // The peer's `ioHandle` posts `cancel-channel` when its handler stopped
+  // without reading all of our output: nothing answers our chunk calls any
+  // more, so stop sending. (An older peer never posts it; `callBidi` also
+  // stops the send once the peer's outer call settles.)
+  const unsubscribeCancel = channelName
+    ? listenCancelChannel(port, channelName, () => sendAbort.abort())
+    : () => {};
 
-  for await (const input of recieve<T>(port, recieveOpts)) {
-    const sendPromise = send<U>(port, output, { ...recieveOptions, signal: sendAbort.signal });
-    try {
-      yield* input;
-      inputEndedNormally = true;
-    } finally {
-      if (!inputEndedNormally) {
-        postCancelChannel(port, channelName);
-        sendAbort.abort();
-      }
+  // Combine outer cancel signal with receive's force-close mechanism.
+  const receiveOpts: ReceiveOptions = { ...receiveOptions, signal: cancelSignal };
+
+  try {
+    for await (const input of receive<T>(port, receiveOpts)) {
+      const sendPromise = send<U>(port, output, { ...receiveOptions, signal: sendAbort.signal });
       try {
-        await sendPromise;
-      } catch {
-        /* swallow — consumer is done either way */
+        yield* input;
+        inputEndedNormally = true;
+      } finally {
+        if (!inputEndedNormally) {
+          postCancelChannel(port, channelName);
+          sendAbort.abort();
+        }
+        try {
+          await sendPromise;
+        } catch {
+          /* swallow — consumer is done either way */
+        }
       }
+      break;
     }
-    break;
+  } finally {
+    unsubscribeCancel();
   }
 }

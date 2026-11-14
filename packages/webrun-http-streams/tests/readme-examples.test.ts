@@ -164,8 +164,8 @@ describe("README: bodyless messages", () => {
       const call = httpServe(async () => ({
         envelope: { status, statusText: "S", headers: [] },
       }));
-      await expect(fetchOverDuplex(call, new Request("http://p/x"))).rejects.toThrow(
-        /must be in the range of 200 to 599/,
+      await expect(fetchOverDuplex(call, new Request("http://p/x"))).rejects.toBeInstanceOf(
+        HttpParseError,
       );
     }
   });

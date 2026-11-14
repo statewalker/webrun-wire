@@ -218,6 +218,14 @@ await res.text(); // "echo hi"
 A `send` that resolves `undefined` (no service for this call) becomes a `404`
 on the client side.
 
+The server stub builds the `Request` from the known `RequestInit` fields only
+(`method`, `headers`, `credentials`, `cache`, `redirect`, `referrer`,
+`referrerPolicy`, `integrity`, `keepalive`); any other envelope key is ignored.
+A response's headers travel twice: `headers`, a record that keeps one value per
+name, and `headerEntries`, every `[name, value]` pair, so each `set-cookie`
+survives. The client stub uses `headerEntries` when present and falls back to
+`headers` for a peer that does not send it.
+
 ### Choosing a codec
 
 ```ts
@@ -354,11 +362,23 @@ Responses with a null-body status (204, 205, 304) and responses to `HEAD` or
 body stream; the handler's stream is cancelled. The reader gets
 `new Response(null, init)`, whose `.body` is `null`.
 
-The null-body set also contains 101 and 103, but `fetchOverDuplex` cannot
-return them: `ResponseInit.status` must be 200–599, so the `Response`
-constructor throws a `RangeError` (`init["status"] must be in the range of 200
-to 599, inclusive.` in Node) if a peer answers with one. Use `httpFetch` to see
-an informational status.
+The null-body set also contains 101 and 103, but `fetchOverDuplex` never
+returns a 1xx: `ResponseInit.status` must be 200–599. The HTTP/1.1 decoder
+treats a 1xx other than 101 (100 Continue, 103 Early Hints...) as an interim
+response, as RFC 9110 §15.2 says: its head is read and dropped, and the final
+response that follows is returned. At most 16 interim responses are skipped. A
+101 Switching Protocols is refused with an `HttpParseError`: one message per
+call cannot switch protocols. A peer that sends only a 1xx and then ends the
+call gets an `HttpParseError` too. With the JSON envelope, a 1xx status reaches
+`fetchOverDuplex` as such; `httpFetch` returns it, and `fetchOverDuplex` refuses
+it as below.
+
+`fetchOverDuplex` turns any status line the `Response` constructor refuses (a
+status outside 200–599, a reason phrase with a control character) into an
+`HttpParseError` and ends the call, so a peer's status line never surfaces as a
+`RangeError` or `TypeError`. The HTTP/1.1 decoder already refuses a status
+outside 100–599 and a reason phrase that is not `*( HTAB / SP / VCHAR /
+obs-text )` (RFC 9112 §4).
 
 ### How a handler that has not answered learns its caller left
 
@@ -388,14 +408,17 @@ it can:
 
 | Situation | On the wire | What a webrun caller sees |
 | --- | --- | --- |
-| Handler throws | `500 Internal Server Error`, message in the body | `httpFetch` rejects with the peer's error; `name`, `message`, `stack` and custom fields preserved |
+| Handler throws | `500 Internal Server Error`, message in the body | `httpFetch` rejects with the peer's error; `name`, `message` and custom fields preserved (`stack` only with `includeErrorStack`) |
 | Request cannot be parsed | `400 Bad Request`, reason in the body | `httpFetch` rejects with the parse error |
 | Transport fails | nothing | the transport error propagates unchanged |
 
 Both error responses carry the serialised error in the `x-webrun-error` header
 (`PEER_ERROR_HEADER`). A webrun peer re-throws it; any other client reads a
 normal response. The header value is escaped to printable ASCII and capped at
-4096 characters. Without the cap a huge message would push the head past the
+4096 characters. It carries no `stack` unless the serving side passes
+`includeErrorStack: true` to `httpServe` / `serveFetchOverDuplex`: a stack
+trace would show the server's file paths to any peer that sends one malformed
+request line. Without the cap a huge message would push the head past the
 reader's `maxHeaderBytes`, and the caller would see
 `head section exceeds 65536 bytes` instead of the real error. On this path the
 caller also cancels the `Duplex` output, which frees the call's slot on a
@@ -404,7 +427,7 @@ multiplexing transport.
 `instanceof HttpParseError` holds only when this side's decoder refused the
 peer's bytes. When the peer refuses your request, its 400 comes back through
 the header, and `deserializeError` builds a plain `Error` with the original
-`name`, `message`, `stack` and fields, not the original class. The same is true
+`name`, `message` and fields (and `stack`, if the peer sends it), not the original class. The same is true
 of every error class crossing this boundary, including your handler's own
 `Error` subclasses. A refusal is answered in the format the peer was speaking.
 

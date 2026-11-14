@@ -14,7 +14,14 @@
  * @packageDocumentation
  */
 
-export { byteChannelFromDataChannel, byteChannelFromRoom } from "./byte-channel.js";
+export {
+  type ByteChannelFromRoomOptions,
+  byteChannelFromDataChannel,
+  byteChannelFromRoom,
+  DEFAULT_ROOM_MAX_FRAME_BYTES,
+  DEFAULT_ROOM_TOPIC,
+  DRAIN_LOW_WATER,
+} from "./byte-channel.js";
 export * from "./message-target.js";
 export { PeerConnection } from "./peer-connection.js";
 export { PeerManager, type PeerManagerOptions } from "./peer-manager.js";

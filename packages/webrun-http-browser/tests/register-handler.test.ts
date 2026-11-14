@@ -16,7 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleChannelCalls } from "../src/core/data-calls.js";
-import { handleHttpRequests } from "../src/http/http-send-recieve.js";
+import { handleHttpRequests } from "../src/http/http-send-receive.js";
 import { startRelayServiceWorker } from "../src/relay/index-sw.js";
 
 const { idbStore, idbGet, idbSet } = vi.hoisted(() => {
@@ -44,6 +44,10 @@ class FakeClients {
     const client = { id };
     this.byId.set(id, client);
     return client;
+  }
+  /** The client went away: a closed tab, a navigation. */
+  remove(id: string): void {
+    this.byId.delete(id);
   }
   /**
    * A client backed by a real `MessagePort`, so the worker's own CONNECT call
@@ -74,12 +78,13 @@ function register(
   sourceId: string,
   key: string,
   path?: string,
+  type: "REGISTER" | "UNREGISTER" = "REGISTER",
 ): Promise<{ result?: unknown; error?: { message?: string } }> {
   return new Promise((resolve) => {
     const { port1, port2 } = new MessageChannel();
     port1.onmessage = (event) => resolve(event.data);
     const messageEvent = Object.assign(
-      new MessageEvent("message", { data: { type: "REGISTER", params: { key, path } } }),
+      new MessageEvent("message", { data: { type, params: { key, path } } }),
       {},
     );
     Object.defineProperty(messageEvent, "ports", { value: [port2] });
@@ -141,6 +146,82 @@ describe('REGISTER: takeover "first-wins"', () => {
       // and is left to the network -- the same outcome as if B had never
       // called REGISTER at all.
       await expectNotTheRelays(self, "https://relay.example/prefix-b/x");
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe('REGISTER: takeover "first-wins" under concurrency', () => {
+  // The check (who holds the key, are they live) and the write are separated
+  // by awaits. Two REGISTERs arriving together must not both pass the check:
+  // the loser would believe it holds the key while the winner's entry is gone.
+  it("lets exactly one of two concurrent registrations win, and keeps the winner", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    clients.add("B");
+    const stop = startRelayServiceWorker(self, { takeover: "first-wins" });
+    try {
+      const [a, b] = await Promise.all([
+        register(self, "A", "svc", "/"),
+        register(self, "B", "svc", "/"),
+      ]);
+      expect(a).toEqual({ result: true });
+      expect(b.result).toBeUndefined();
+      expect(b.error?.message).toMatch(/already served/);
+      expect(idbStore.get("clientsIds")).toEqual([["svc", { clientId: "A", path: "/" }]]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("serializes an UNREGISTER behind a pending REGISTER of the same key", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, { takeover: "first-wins" });
+    try {
+      const [registered, unregistered] = await Promise.all([
+        register(self, "A", "svc", "/svc/"),
+        register(self, "A", "svc", undefined, "UNREGISTER"),
+      ]);
+      expect(registered).toEqual({ result: true });
+      expect(unregistered).toEqual({ result: true });
+      expect(idbStore.get("clientsIds")).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe("a holder that went away", () => {
+  // Its registry entry is dropped once the relay finds it gone; the mount it
+  // made must go with it, or its path keeps answering 410 instead of falling
+  // through to the network until the worker restarts.
+  it("loses its mount along with its registry entry", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self);
+    try {
+      expect(await register(self, "A", "svc", "/dyn/")).toEqual({ result: true });
+      clients.remove("A");
+      const gone = await dispatchFetch(self, "https://relay.example/dyn/x");
+      expect(gone.status).toBe(410);
+      expect(idbStore.get("clientsIds")).toEqual([]);
+      await expectNotTheRelays(self, "https://relay.example/dyn/x");
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps a host-declared mount", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, { mounts: [{ key: "app", path: "/app/" }] });
+    try {
+      expect(await register(self, "A", "app")).toEqual({ result: true });
+      clients.remove("A");
+      expect((await dispatchFetch(self, "https://relay.example/app/x")).status).toBe(410);
+      await expectTheRelays(self, "https://relay.example/app/x");
     } finally {
       stop();
     }

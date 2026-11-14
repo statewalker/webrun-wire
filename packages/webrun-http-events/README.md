@@ -52,7 +52,8 @@ import { newPubSub } from "@statewalker/webrun-http-events";
 
 const events = newPubSub({ topics: ["build"], bufferSize: 64 });
 
-// Mount the handler on any fetch-style router; the topic is the last path segment.
+// Mount the handler on any fetch-style router; the topic is the last path segment,
+// percent-decoded (GET /_events/my%20topic serves the topic "my topic").
 // GET /_events/build  ->  text/event-stream
 export const fetch = (request: Request) => events.handler(request);
 
@@ -67,7 +68,8 @@ events.publish("build", { changed: ["/index.html"] }, "rebuilt");
 | `onSubscriberError` | none | `(error, event)`, called when a subscriber throws. Delivery to the others continues either way. |
 
 The handler answers `405 method not allowed` (with `allow: GET`) to anything
-but `GET`, and `404 no such topic` to an empty or unlisted topic. A stream
+but `GET`, and `404 no such topic` to an empty or unlisted topic, or to a last
+path segment with a malformed percent-escape. A stream
 response carries `cache-control: no-cache` and `x-accel-buffering: no`, which
 stops proxy buffering from stalling delivery.
 
@@ -91,7 +93,12 @@ off(); // one subscription
 client.close(); // every subscription of this client
 ```
 
-Each `subscribe` opens one `EventSource` on `<baseUrl>/<topic>`. Options:
+Each `subscribe` opens one `EventSource` on `<baseUrl>/<topic>`, with the
+topic as one path segment: `%`, `/`, `?`, `#`, a space and any other character
+that is not valid in a path segment are percent-encoded, and the handler
+decodes them. Other topics go on the wire as they are (`user:42` is
+`/user:42`). `.` and `..` cannot be topics: the URL parser resolves them away.
+Options:
 `events`, `onGap`, `onError`, `onOpen`, and `EventSourceImpl` for runtimes
 without a global `EventSource`. With no `EventSource` at all,
 `newPubSubClient` throws `no EventSource available; pass options.EventSourceImpl`.
@@ -190,13 +197,14 @@ test.
 
 ### Tests
 
-- `pnpm test`: builds with tsdown, then runs the unit tests with a fake
-  `EventSource` and in-process responses.
+- `pnpm test`: builds with tsdown, then runs the unit tests in `tests/` with a
+  fake `EventSource` and in-process responses.
 - `pnpm run test:browser`: drives a real Chromium tab through a real
   ServiceWorker (`@statewalker/webrun-http-browser`'s `sw-worker.js`) and a
   real `text/event-stream` fetch, including past the 30 s ServiceWorker idle
   window.
-- `pnpm run typecheck`.
+- `pnpm run typecheck`: `src/` and `tests/`, then `test-browser/`.
+- `pnpm run lint`: `biome check src tests test-browser`.
 
 ## License
 

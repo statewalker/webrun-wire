@@ -35,7 +35,7 @@ export type {
   PortMux,
   PortMuxOptions,
 } from "./port-types.js";
-export * from "./recieve.js";
+export * from "./receive.js";
 export * from "./send.js";
 export { structuredCodec } from "./structured-codec.js";
 export * from "./transfer-port-mux.js";

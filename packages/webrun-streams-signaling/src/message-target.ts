@@ -22,6 +22,13 @@ export interface ByteChannelMessageTarget {
     postMessage(message: unknown): void;
     /** Closes the channel. */
     close(): Promise<void>;
+    /** The channel's `bufferedAmount`; 0 where it cannot tell. */
+    readonly bufferedAmount: number;
+    /**
+     * The channel's `whenDrained`: resolves once it can take more, or the pipe
+     * ended. Resolves at once over a channel without one.
+     */
+    whenDrained(): Promise<void>;
   };
   /** Aborts when the channel closes. Pass it as `overPipe`'s `signal`. */
   signal: AbortSignal;
@@ -106,6 +113,24 @@ export function messageTargetOverByteChannel(
         try {
           channel.close();
         } catch {}
+      },
+      get bufferedAmount() {
+        return channel.bufferedAmount ?? 0;
+      },
+      whenDrained() {
+        if (life.signal.aborted || !channel.whenDrained) return Promise.resolve();
+        const signal = life.signal;
+        return new Promise<void>((resolve, reject) => {
+          const done = (): void => {
+            signal.removeEventListener("abort", done);
+            resolve();
+          };
+          signal.addEventListener("abort", done);
+          channel.whenDrained?.().then(done, (err: unknown) => {
+            signal.removeEventListener("abort", done);
+            reject(err);
+          });
+        });
       },
     },
   };

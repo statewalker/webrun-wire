@@ -11,7 +11,7 @@
  * `() => new Room()`), so this module never hard-imports it.
  */
 
-import { byteChannelFromRoom } from "./byte-channel.js";
+import { type ByteChannelFromRoomOptions, byteChannelFromRoom } from "./byte-channel.js";
 import type { ByteChannel, RoomLike, RoomManagerOptions, RoomParticipantLike } from "./types.js";
 import { ROOM_EVENT } from "./types.js";
 
@@ -94,10 +94,10 @@ export class RoomManager {
     };
   }
 
-  /** Open a {@link ByteChannel} to a specific participant. */
-  async channelTo(peerId: string): Promise<ByteChannel> {
+  /** Open a {@link ByteChannel} to a specific participant (see {@link byteChannelFromRoom}). */
+  async channelTo(peerId: string, options?: ByteChannelFromRoomOptions): Promise<ByteChannel> {
     if (!this.room) throw new Error("channelTo() before join()");
-    return byteChannelFromRoom(this.room, peerId);
+    return byteChannelFromRoom(this.room, peerId, options);
   }
 
   /** Leave the room: unsubscribe and disconnect. */

@@ -19,6 +19,13 @@ export type ByteChannel = {
   recv: AsyncIterable<Uint8Array>;
   closed: Promise<void>;
   close(): void;
+  /** Bytes sent and not yet written out, where the transport can tell. */
+  readonly bufferedAmount?: number;
+  /**
+   * Resolves once the transport can take more (`bufferedAmount` at most a
+   * low-water mark) or the channel closed. Absent where it cannot tell.
+   */
+  whenDrained?(): Promise<void>;
 };
 
 /** WebRTC peer role in the connection. */
@@ -159,7 +166,7 @@ export interface RoomParticipantLike {
 export interface RoomLocalParticipantLike {
   publishData(
     data: Uint8Array,
-    opts?: { reliable?: boolean; destinationIdentities?: string[] },
+    opts?: { reliable?: boolean; destinationIdentities?: string[]; topic?: string },
   ): Promise<void>;
 }
 

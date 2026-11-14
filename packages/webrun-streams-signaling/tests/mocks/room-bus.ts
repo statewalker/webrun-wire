@@ -20,11 +20,17 @@ export class RoomBus {
     }
   }
 
-  deliver(from: string, data: Uint8Array, destinations: string[] | undefined): void {
+  deliver(
+    from: string,
+    data: Uint8Array,
+    destinations: string[] | undefined,
+    topic: string | undefined,
+  ): void {
     for (const member of this.members) {
       if (member.identity === from) continue;
       if (destinations && !destinations.includes(member.identity)) continue;
-      member.emit(ROOM_EVENT.dataReceived, data, { identity: from });
+      // LiveKit's argument order: payload, participant, kind, topic.
+      member.emit(ROOM_EVENT.dataReceived, data, { identity: from }, undefined, topic);
     }
   }
 }
@@ -34,9 +40,9 @@ export class MockRoom implements RoomLike {
   readonly localParticipant = {
     publishData: (
       data: Uint8Array,
-      opts?: { reliable?: boolean; destinationIdentities?: string[] },
+      opts?: { reliable?: boolean; destinationIdentities?: string[]; topic?: string },
     ): Promise<void> => {
-      this.bus.deliver(this.identity, data, opts?.destinationIdentities);
+      this.bus.deliver(this.identity, data, opts?.destinationIdentities, opts?.topic);
       return Promise.resolve();
     },
   };
