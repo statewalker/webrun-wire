@@ -30,7 +30,7 @@ export class HttpError extends Error {
   static fromError(error: unknown): HttpError {
     if (error instanceof HttpError) return error;
     const message = error instanceof Error ? error.message : String(error);
-    return new HttpError({ status: 500, statusText: "Bad Request", message });
+    return new HttpError({ status: 500, statusText: "Internal Server Error", message });
   }
 
   static errorResourceNotFound(options: HttpErrorOptions = {}): HttpError {

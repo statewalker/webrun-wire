@@ -218,6 +218,14 @@ await res.text(); // "echo hi"
 A `send` that resolves `undefined` (no service for this call) becomes a `404`
 on the client side.
 
+The server stub builds the `Request` from the known `RequestInit` fields only
+(`method`, `headers`, `credentials`, `cache`, `redirect`, `referrer`,
+`referrerPolicy`, `integrity`, `keepalive`); any other envelope key is ignored.
+A response's headers travel twice: `headers`, a record that keeps one value per
+name, and `headerEntries`, every `[name, value]` pair, so each `set-cookie`
+survives. The client stub uses `headerEntries` when present and falls back to
+`headers` for a peer that does not send it.
+
 ### Choosing a codec
 
 ```ts
