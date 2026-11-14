@@ -42,7 +42,11 @@ export default {
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // The test server advertises only loopback ICE candidates (`--node-ip 127.0.0.1`), and
+      // Chromium neither gathers nor pairs loopback candidates by default: without this flag the
+      // signalling connects but the peer connection never forms ("could not establish pc
+      // connection"), as the first nightly run showed (#169).
+      provider: playwright({ launchOptions: { args: ["--allow-loopback-in-peer-connection"] } }),
       instances: [{ browser: "chromium" }],
     },
   },
