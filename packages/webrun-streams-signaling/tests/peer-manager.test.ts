@@ -69,6 +69,56 @@ describe("PeerManager", () => {
     b.close();
   });
 
+  it("(#127) the side that answered can redial at once, from a fresh manager", async () => {
+    const rtc = makeMockRtc();
+    const [sigA, sigB] = makeSignalingPair("A", "B");
+    const errors: string[] = [];
+    const a = new PeerManager(sigA, {
+      rtc,
+      connectionTimeout: 300,
+      onError: (e) => errors.push(e.message),
+    });
+    const inbound: string[] = [];
+    a.onConnection((peerId) => inbound.push(peerId));
+    const b = new PeerManager(sigB, { rtc, connectionTimeout: 300 });
+    await a.connect("B");
+
+    // B reloads before A's ICE reports anything, and dials A.
+    b.close();
+    const b2 = new PeerManager(sigB, { rtc, connectionTimeout: 300 });
+    const ch = await b2.connect("A");
+    expect(ch).toBeDefined();
+    expect(inbound).toEqual(["B"]);
+    expect(errors).toEqual([]);
+
+    a.close();
+    b2.close();
+  });
+
+  it("(#127) the side that answered can redial at once, from the same manager", async () => {
+    const rtc = makeMockRtc();
+    const [sigA, sigB] = makeSignalingPair("A", "B");
+    const errors: string[] = [];
+    const a = new PeerManager(sigA, {
+      rtc,
+      connectionTimeout: 300,
+      onError: (e) => errors.push(e.message),
+    });
+    const inbound: ByteChannel[] = [];
+    a.onConnection((_peerId, ch) => inbound.push(ch));
+    const b = new PeerManager(sigB, { rtc, connectionTimeout: 300 });
+    await a.connect("B");
+
+    const chB = await b.connect("A");
+    expect(inbound.length).toBe(1);
+    chB.send(new Uint8Array([3]));
+    expect(await readOne(inbound[0])).toEqual(new Uint8Array([3]));
+    expect(errors).toEqual([]);
+
+    a.close();
+    b.close();
+  });
+
   it("(#126, #127) a responder whose channel never opens is reported and forgotten", async () => {
     const rtc = makeMockRtc();
     const [sigA, sigB] = makeSignalingPair("A", "B");

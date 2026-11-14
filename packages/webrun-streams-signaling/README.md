@@ -41,7 +41,7 @@ pass an `rtc` factory from a WebRTC implementation.
 | `new QrSignaling(options?)` | Serverless pairing. `offer(): Promise<{ qr, accept(answerQr): Promise<ByteChannel> }>`, `answer(offerQr): Promise<{ qr, channel }>`, `getSessionId()`. |
 | `QrSignalingOptions` | `{ sessionId?: string; connection?: WebRtcConnectionOptions }`. |
 | `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId, options?): Promise<ByteChannel>` (a `byteChannelFromRoom` channel), `leave()`. |
-| `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
+| `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `hasRemoteDescription()`, `getDataChannel()`, `on` / `off`, `close()`. |
 | `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`, with the data channel's `bufferedAmount` and a `whenDrained()` that waits for `bufferedamountlow`. |
 | `byteChannelFromRoom(room, peerId, options?)` | A `ByteChannel` to one participant of a `RoomLike`, on its own data topic (`options.topic`, default `DEFAULT_ROOM_TOPIC`). It closes when the room disconnects, the participant leaves, the peer's channel closes, a reliable publish fails, or a `send` exceeds `options.maxFrameBytes` (default `DEFAULT_ROOM_MAX_FRAME_BYTES`), so whatever runs on it learns the other end is gone. Packets and goodbye follow `webrun-streams-livekit`'s conventions. |
 | `ByteChannelFromRoomOptions` | `{ topic?: string; maxFrameBytes?: number }`. |
@@ -197,9 +197,13 @@ candidates from unknown peers are ignored. Candidates that arrive before the rem
 is set are queued and applied after it. When ICE gathering completes, a `{ type: "ready" }`
 signal is sent; receivers ignore it. A connection is closed and forgotten when its data channel
 closes, when its state becomes `failed` or `closed`, when its channel does not open, or when it
-rejects a signal; the peer's next offer then starts a new responder. A new offer from a peer this
-side already answered replaces that connection: a connection makes one offer, so the peer started
-over.
+rejects a signal; the peer's next offer then starts a new responder. A connection makes one
+offer, so a new offer from a peer means it started over (for example it reloaded before ICE
+reported a failure here): if this side answered that peer before, or dialed it and already applied
+its answer, the old connection is closed and the offer starts a new responder at once. An offer
+to a connection that is still waiting for its answer is glare: both dials fail (reported through
+`onError` on this side) and must be retried. `connect(peerId)` replaces any existing connection to
+that peer.
 
 ### What `answer()` waits for
 

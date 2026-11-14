@@ -43,6 +43,9 @@ export class PeerManager {
 
   /** Dial `peerId` and resolve with the established channel. */
   async connect(peerId: string): Promise<ByteChannel> {
+    // Dialing again replaces whatever connection to this peer there was.
+    const previous = this.connections.get(peerId);
+    if (previous) this.forget(peerId, previous);
     const pc = this.makeConnection(peerId, "initiator");
     const channel = pc.open();
     try {
@@ -103,8 +106,10 @@ export class PeerManager {
   private onSignal(from: string, msg: SignalingMessage): void {
     let pc = this.connections.get(from);
     // A connection makes one offer, so a new offer from a peer we answered
-    // before means it started over: the old connection is stale.
-    if (pc && msg.type === "offer" && pc.getRole() === "responder") {
+    // before, or whose answer we already applied, means it started over: the
+    // old connection is stale. (An offer to an initiator still waiting for
+    // its answer is glare: handleSignal rejects it below.)
+    if (pc && msg.type === "offer" && (pc.getRole() === "responder" || pc.hasRemoteDescription())) {
       this.forget(from, pc);
       pc = undefined;
     }

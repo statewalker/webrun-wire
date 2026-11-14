@@ -68,6 +68,11 @@ export class PeerConnection {
     return this.role;
   }
 
+  /** Whether the remote description (the peer's offer or answer) has been applied. */
+  hasRemoteDescription(): boolean {
+    return this.remoteDescriptionSet;
+  }
+
   getDataChannel(): RTCDataChannel | null {
     return this.dataChannel;
   }
