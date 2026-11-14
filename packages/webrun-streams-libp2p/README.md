@@ -63,6 +63,7 @@ runs (Node or browser).
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
 | `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
+| `DEFAULT_MAX_FRAME_BYTES` | `67_108_864` (64 MiB), `duplexOverStream`'s default cap on one inbound frame's payload (`maxFrameBytes`). |
 | `ConnectLibp2pParams`, `ServeLibp2pParams`, `ConnectionContext`, `ServeConnectionsHandler`, `DuplexOverStreamOptions` | Types, below. |
 
 `ConnectLibp2pParams`:
@@ -73,10 +74,11 @@ runs (Node or browser).
 | `peer` | `PeerId \| Multiaddr` | required | Who to dial. |
 | `protocol` | `string` | `DEFAULT_PROTOCOL` | Protocol id. |
 | `drainTimeoutMs` | `number` | `300_000` | How long a backpressured send waits for `'drain'`. |
+| `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame payload accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
 | `maxOutboundStreams` | `number` | libp2p's (64) | Passed to `dialProtocol`. |
 | `runOnLimitedConnection` | `boolean` | unset | Passed to `dialProtocol`. Allows relayed or otherwise limited connections. |
 
-`ServeLibp2pParams`: `node`, `protocol`, `drainTimeoutMs`,
+`ServeLibp2pParams`: `node`, `protocol`, `drainTimeoutMs`, `maxFrameBytes`,
 `maxOutboundStreams` and `runOnLimitedConnection` as above (passed to
 `node.handle`), plus `maxInboundStreams` (libp2p default 32).
 
@@ -90,6 +92,7 @@ runs (Node or browser).
 | `onPeerInputEnd?(err?)` | Called once when the peer's side ends: closed, `ERROR` frame (passed as `err`) or torn down. `serveConnections` uses it to end the handler's input. |
 | `onSourceCompleted?()` | Called only when the peer's side ended normally. `connect` uses it to choose a graceful close over an abort. |
 | `drainTimeoutMs?` | As above. |
+| `maxFrameBytes?` | As above. |
 
 ## Examples
 
@@ -174,6 +177,18 @@ from whatever chunks arrive. Normal end of input is libp2p's own
 `close()` (close-write), not a frame. The `ERROR` frame exists because a yamux
 reset carries only "stream reset"; without it, a handler that throws would
 reach the caller as an anonymous reset. Frames of other types are skipped.
+
+A producer chunk larger than 64 KiB is sent as several `DATA` frames of at most
+64 KiB each. Frames are self-delimiting and a receiver yields each `DATA`
+payload as it completes, so a receiver of any version reassembles the same
+bytes; only the chunk boundaries the consumer sees change. The receiver keeps
+unread bytes in a buffer that grows by doubling, so a large frame arriving in
+many pieces is copied a bounded number of times. A frame length past
+`maxFrameBytes` (default 64 MiB), or one that is not a valid varint, fails the
+call with `webrun-streams-libp2p: a <n>-byte frame exceeds maxFrameBytes (<cap>)`
+or `webrun-streams-libp2p: a malformed frame length`, and aborts the stream:
+a peer not speaking this framing would otherwise make the receiver buffer
+without bound. On the serving side the handler's input throws that error.
 
 ### Why identity reaches the handler by closure
 

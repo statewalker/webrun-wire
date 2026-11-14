@@ -34,6 +34,12 @@ export interface ConnectLibp2pParams {
    */
   readHighWaterBytes?: number;
   /**
+   * The largest frame payload accepted from the peer; past it, or on a
+   * malformed frame header, the call fails and the stream is aborted. See
+   * `DuplexOverStreamOptions.maxFrameBytes` (default 64 MiB).
+   */
+  maxFrameBytes?: number;
+  /**
    * How many outgoing streams for this protocol libp2p allows to be open at
    * the same time on one connection; passed through to `node.dialProtocol`.
    * Left unset, libp2p's own default (64) applies.
@@ -65,6 +71,12 @@ export interface ServeLibp2pParams {
    * paused; see `DuplexOverStreamOptions.readHighWaterBytes` (default 64 KiB).
    */
   readHighWaterBytes?: number;
+  /**
+   * The largest frame payload accepted from the peer; past it, or on a
+   * malformed frame header, the call fails and the stream is aborted. See
+   * `DuplexOverStreamOptions.maxFrameBytes` (default 64 MiB).
+   */
+  maxFrameBytes?: number;
   /**
    * How many incoming streams for this protocol libp2p allows to be open at
    * the same time on one connection; passed through to `node.handle`. Left
@@ -119,6 +131,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
   protocol,
   drainTimeoutMs,
   readHighWaterBytes,
+  maxFrameBytes,
   maxOutboundStreams,
   runOnLimitedConnection,
 }) => {
@@ -158,6 +171,7 @@ export const connect: Connect<ConnectLibp2pParams> = async ({
         yield* duplexOverStream(stream, input, {
           drainTimeoutMs,
           readHighWaterBytes,
+          maxFrameBytes,
           onSourceCompleted: () => {
             sourceCompleted = true;
           },
@@ -242,6 +256,7 @@ export async function serveConnections(
     protocol,
     drainTimeoutMs,
     readHighWaterBytes,
+    maxFrameBytes,
     maxInboundStreams,
     maxOutboundStreams,
     runOnLimitedConnection,
@@ -270,6 +285,7 @@ export async function serveConnections(
         for await (const chunk of duplexOverStream(stream, output, {
           drainTimeoutMs,
           readHighWaterBytes,
+          maxFrameBytes,
           onPeerInputEnd: (err) => {
             if (err === undefined) requestComplete = true;
             inputQueue.done(err);
