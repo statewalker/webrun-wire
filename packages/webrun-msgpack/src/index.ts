@@ -1,4 +1,6 @@
 export {
+  DEFAULT_MAX_FRAME_BYTES,
+  type DecodeMsgpackOptions,
   decodeFloat32Arrays,
   decodeMsgpack,
   encodeFloat32Arrays,
@@ -7,7 +9,7 @@ export {
 export {
   type DeserializeOptions,
   deserialize,
-  type MsgpackExtension,
+  MsgpackExtension,
   type MsgpackInput,
   type SerializeOptions,
   serialize,

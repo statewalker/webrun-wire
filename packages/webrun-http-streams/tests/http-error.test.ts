@@ -32,6 +32,7 @@ describe("HttpError", () => {
   it("fromError wraps plain Error into 500", () => {
     const wrapped = HttpError.fromError(new Error("kaboom"));
     expect(wrapped.status).toBe(500);
+    expect(wrapped.statusText).toBe("Internal Server Error");
     expect(wrapped.message).toBe("kaboom");
   });
 
