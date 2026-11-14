@@ -95,7 +95,8 @@ call, and cached for the client's lifetime; create a new client to refresh it.
 Every method call is one `POST` with no connection held open.
 `loadService` rejects with `Service <name> not found` for a name the descriptor
 does not list, and with `Failed to load services descriptor: <status> <statusText>`
-when the descriptor request fails.
+when the descriptor request fails. A failed descriptor load is not cached: the
+next `loadService` call fetches it again.
 
 ### Wire client to server in process
 
