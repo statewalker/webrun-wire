@@ -9,7 +9,7 @@ export {
 export {
   type DeserializeOptions,
   deserialize,
-  type MsgpackExtension,
+  MsgpackExtension,
   type MsgpackInput,
   type SerializeOptions,
   serialize,

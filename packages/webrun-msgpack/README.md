@@ -70,8 +70,9 @@ where there are none is the truncation bug the stream codec exists to prevent.
 Types: `DecodeMsgpackOptions` (`maxFrameBytes?: number`, the largest payload a frame header may
 announce, default `DEFAULT_MAX_FRAME_BYTES`), `SerializeOptions` (`multiple?: boolean`, `invalidTypeReplacement?: unknown`),
 `DeserializeOptions` (`multiple?: boolean`), `MsgpackInput` (`Uint8Array | ArrayBuffer |
-ArrayLike<number>`) and `MsgpackExtension` (`{ type: number; data: Uint8Array }`, an extension
-value other than a timestamp).
+ArrayLike<number>`). `MsgpackExtension` (`new MsgpackExtension(type, data)`, `type` an int8 from
+-128 to 127) is a class, exported as a value: an extension value other than a timestamp, which
+`deserialize` returns and `serialize` writes back as the same ext.
 
 The four stream functions accept synchronous iterables too, so an array needs no async wrapper.
 
@@ -342,13 +343,14 @@ Array to serialize multiple values.` when `multiple` is set on a non-array.
 | other typed arrays | array of numbers | `number[]` |
 | `Array` | array | `unknown[]` |
 | `Date` | timestamp extension (type -1), 32/64/96-bit as needed | `Date`, floored to the millisecond |
-| any other object | map of its own enumerable string keys | plain object; every key, `__proto__` included, is an own property |
+| `MsgpackExtension` | ext / fixext of its `type` and `data` | `MsgpackExtension` |
+| any other object (a plain `{ type, data }` included) | map of its own enumerable string keys | plain object; every key, `__proto__` included, is an own property |
 | `bigint`, `function`, `symbol` | throws, unless `invalidTypeReplacement` supplies a stand-in | |
 
 Reading also accepts what other encoders write: float 32, int 64 / uint 64 (as the nearest
 `number`, losing precision beyond 2⁵³), maps with non-string keys (converted with `String()`), and
-extension types other than timestamps, returned as `{ type, data }` with `type` as the unsigned
-byte (type `-2` reads as `254`). A `Map` or `Set` has no own enumerable keys and is written as an
+extension types other than timestamps, returned as a `MsgpackExtension` with `type` signed, as the
+spec defines it (type `-2` reads as `-2`). A `Map` or `Set` has no own enumerable keys and is written as an
 empty map.
 
 ### The MessagePack implementation is a port of msgpack.js
@@ -385,7 +387,9 @@ implementation failed:
 4. A `__proto__` map key is decoded as an own property (upstream's assignment replaced the
    prototype), and only own enumerable keys are written (upstream's `for…in` also wrote inherited
    ones).
-5. TypeScript types, `unknown` in place of `any`, and the bounds `0xffffffffffffffff` /
+5. Extension types are read as signed int8 (upstream read `-2` as `254`), and a
+   `MsgpackExtension` is written as an ext (upstream wrote it as a map, so it did not round-trip).
+6. TypeScript types, `unknown` in place of `any`, and the bounds `0xffffffffffffffff` /
    `0x7fffffffffffffff` spelled `2 ** 64` / `2 ** 63` (the same doubles).
 
 Besides this package's own tests, the suite runs upstream's test page ported to vitest
