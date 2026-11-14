@@ -1,5 +1,13 @@
 # @statewalker/webrun-http-streams
 
+## 0.5.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md, dist/http-stubs.d.ts.map, src/http-stubs.ts
+
 ## 0.5.0
 
 ### Minor Changes
