@@ -73,23 +73,28 @@ export class ByteReader {
     return this.#buf.byteLength;
   }
 
-  /** Pull one more non-empty chunk. Returns false at end of stream. */
-  async #pull(): Promise<boolean> {
-    if (this.#done) return false;
+  /** The next non-empty chunk from the source, or `undefined` at end of stream. */
+  async #nextChunk(): Promise<Uint8Array | undefined> {
+    if (this.#done) return undefined;
     while (true) {
       const next = await this.#iter.next();
       if (next.done) {
         this.#done = true;
-        return false;
+        return undefined;
       }
-      const chunk = next.value;
-      if (chunk.byteLength === 0) continue;
-      this.#buf =
-        this.#buf.byteLength === 0
-          ? chunk
-          : concatChunks([this.#buf, chunk], this.#buf.byteLength + chunk.byteLength);
-      return true;
+      if (next.value.byteLength > 0) return next.value;
     }
+  }
+
+  /** Pull one more non-empty chunk. Returns false at end of stream. */
+  async #pull(): Promise<boolean> {
+    const chunk = await this.#nextChunk();
+    if (chunk === undefined) return false;
+    this.#buf =
+      this.#buf.byteLength === 0
+        ? chunk
+        : concatChunks([this.#buf, chunk], this.#buf.byteLength + chunk.byteLength);
+    return true;
   }
 
   async peekByte(): Promise<number | undefined> {
@@ -133,12 +138,25 @@ export class ByteReader {
         return line;
       }
       searched = this.#buf.byteLength;
-      if (searched > maxBytes) {
-        throw new ByteStreamError(`line exceeds ${maxBytes} bytes without CRLF`);
+      // Chunks without an LF are only collected, and joined once the LF arrives: joining on
+      // every pull would copy the line so far each time, quadratic in a line sent in tiny chunks.
+      const parts = [this.#buf];
+      let total = searched;
+      while (true) {
+        if (total > maxBytes) {
+          this.#buf = concatChunks(parts, total);
+          throw new ByteStreamError(`line exceeds ${maxBytes} bytes without CRLF`);
+        }
+        const chunk = await this.#nextChunk();
+        if (chunk === undefined) {
+          this.#buf = concatChunks(parts, total);
+          throw new ByteStreamError(`stream ended after ${total} bytes without CRLF`);
+        }
+        parts.push(chunk);
+        total += chunk.byteLength;
+        if (chunk.indexOf(LF) !== -1) break;
       }
-      if (!(await this.#pull())) {
-        throw new ByteStreamError(`stream ended after ${searched} bytes without CRLF`);
-      }
+      this.#buf = concatChunks(parts, total);
     }
   }
 

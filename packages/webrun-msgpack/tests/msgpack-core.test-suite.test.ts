@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { deserialize, serialize } from "../src/msgpack-core.js";
+import { deserialize, MsgpackExtension, serialize } from "../src/msgpack-core.js";
 
 type Entry = { msgpack: string[] } & Record<string, unknown>;
 type Suite = Record<string, Entry[]>;
@@ -71,7 +71,7 @@ function expected(entry: Entry): unknown {
     }
     case "ext": {
       const [type, data] = value as [number, string];
-      return { type, data: fromHex(data) };
+      return new MsgpackExtension(type, fromHex(data));
     }
     default:
       return value;
@@ -81,7 +81,7 @@ function expected(entry: Entry): unknown {
 /** Whether a JS value can carry the entry exactly, so that encoding it is a meaningful check. */
 function encodable(entry: Entry): unknown {
   const kind = kindOf(entry);
-  if (kind === "ext" || kind === "bignum") return undefined; // no JS value encodes to these
+  if (kind === "bignum") return undefined; // no JS value encodes to these
   if (kind === "timestamp") {
     const [, nsec] = entry.timestamp as [number, number];
     if (nsec % 1e6 !== 0) return undefined; // below a millisecond: a Date cannot hold it

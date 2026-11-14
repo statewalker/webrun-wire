@@ -86,7 +86,12 @@
     "vite": "catalog:",
     "vitest": "catalog:"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/relay-sw.js",
+    "./dist/sw-worker.js",
+    "./src/relay-sw.ts",
+    "./src/sw-worker.ts"
+  ],
   "publishConfig": {
     "access": "public"
   }

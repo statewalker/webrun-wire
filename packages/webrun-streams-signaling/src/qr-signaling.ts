@@ -67,15 +67,49 @@ function expandSdp(compressed: string): string {
   return `${lines.join("\r\n")}\r\n`;
 }
 
-/** Compress an ICE candidate to its essential parts. */
+/**
+ * Candidate attributes after `typ` that a connection needs: the related
+ * address of a srflx/relay candidate and the TCP type of a TCP one. Others
+ * (`generation`, `ufrag`, `network-id`, ...) are dropped to keep the QR small.
+ */
+const KEPT_CANDIDATE_ATTRIBUTES = new Set(["raddr", "rport", "tcptype"]);
+
+/** An `sdpMLineIndex` as it travels: empty for null. */
+function indexToString(index: number | null): string {
+  return index == null ? "" : String(index);
+}
+
+function indexFromString(text: string | undefined): number | null {
+  if (!text) return null;
+  const index = Number.parseInt(text, 10);
+  return Number.isNaN(index) ? null : index;
+}
+
+/**
+ * Compress an ICE candidate to its essential parts. A candidate that carries
+ * attributes a connection needs (see {@link KEPT_CANDIDATE_ATTRIBUTES}) goes
+ * in the raw (`R:`) form, with only those attributes kept.
+ */
 function compressCandidate(candidate: IceCandidate): string {
   const { candidate: c, sdpMid, sdpMLineIndex } = candidate;
-  const match = c.match(/candidate:(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+typ\s+(\S+)/);
+  const index = indexToString(sdpMLineIndex);
+  const match = c.match(
+    /candidate:(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+typ\s+(\S+)(.*)$/,
+  );
   if (!match) {
-    return `R:${sdpMid ?? ""}:${sdpMLineIndex ?? 0}:${c}`;
+    return `R:${sdpMid ?? ""}:${index}:${c}`;
   }
-  const [, foundation, component, protocol, priority, ip, port, type] = match;
-  return `${foundation}|${component}|${protocol}|${priority}|${ip}|${port}|${type}|${sdpMid ?? ""}|${sdpMLineIndex ?? 0}`;
+  const [base, foundation, component, protocol, priority, ip, port, type, rest] = match;
+  const words = rest.trim().split(/\s+/).filter(Boolean);
+  const kept: string[] = [];
+  for (let i = 0; i + 1 < words.length; i += 2) {
+    if (KEPT_CANDIDATE_ATTRIBUTES.has(words[i])) kept.push(words[i], words[i + 1]);
+  }
+  if (kept.length) {
+    const head = base.slice(0, base.length - rest.length);
+    return `R:${sdpMid ?? ""}:${index}:${head} ${kept.join(" ")}`;
+  }
+  return `${foundation}|${component}|${protocol}|${priority}|${ip}|${port}|${type}|${sdpMid ?? ""}|${index}`;
 }
 
 /** Expand a compressed ICE candidate. */
@@ -85,7 +119,7 @@ function expandCandidate(compressed: string): IceCandidate {
     return {
       candidate: rest.join(":"),
       sdpMid: sdpMid || null,
-      sdpMLineIndex: Number.parseInt(sdpMLineIndexStr, 10) || null,
+      sdpMLineIndex: indexFromString(sdpMLineIndexStr),
     };
   }
   const parts = compressed.split("|");
@@ -98,7 +132,7 @@ function expandCandidate(compressed: string): IceCandidate {
   return {
     candidate,
     sdpMid: sdpMid || null,
-    sdpMLineIndex: sdpMLineIndexStr ? Number.parseInt(sdpMLineIndexStr, 10) : null,
+    sdpMLineIndex: indexFromString(sdpMLineIndexStr),
   };
 }
 
@@ -181,7 +215,6 @@ export class QrSignaling {
   /** Create an offer QR; `accept(answerQr)` finishes the handshake. */
   async offer(): Promise<{ qr: string; accept(answerQr: string): Promise<ByteChannel> }> {
     const pc = new PeerConnection("initiator", this.connection);
-    const channel = pc.open();
     await pc.connect();
     await pc.waitForIceGathering();
 
@@ -194,10 +227,19 @@ export class QrSignaling {
     return {
       qr,
       accept: async (answerQr: string): Promise<ByteChannel> => {
-        const parsed = parseCompressedSignal(decodeSignal(answerQr));
-        await pc.handleSignal({ type: "answer", sdp: parsed.description.sdp });
-        for (const candidate of parsed.candidates) {
-          await pc.handleSignal({ type: "candidate", candidate });
+        // The connection timeout starts here, not at offer time: the QR
+        // exchange between the two takes as long as the people take.
+        const channel = pc.open();
+        try {
+          const parsed = parseCompressedSignal(decodeSignal(answerQr));
+          await pc.handleSignal({ type: "answer", sdp: parsed.description.sdp });
+          for (const candidate of parsed.candidates) {
+            await pc.handleSignal({ type: "candidate", candidate });
+          }
+        } catch (err) {
+          channel.catch(() => undefined);
+          pc.close();
+          throw err;
         }
         return channel;
       },

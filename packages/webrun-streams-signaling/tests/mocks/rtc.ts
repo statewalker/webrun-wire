@@ -98,7 +98,7 @@ class MockPeerConnection {
   onconnectionstatechange: (() => void) | null = null;
   ondatachannel: ((e: { channel: unknown }) => void) | null = null;
   iceGatheringState: "new" | "gathering" | "complete" = "new";
-  connectionState: "new" | "connected" | "closed" = "new";
+  connectionState: "new" | "connected" | "failed" | "closed" = "new";
   localDescription: { type: string; sdp: string } | null = null;
 
   private localSet = false;
@@ -151,6 +151,12 @@ class MockPeerConnection {
     this.onconnectionstatechange?.();
   }
 
+  /** Simulate ICE failure: the connection state becomes `failed`. */
+  _fail(): void {
+    this.connectionState = "failed";
+    this.onconnectionstatechange?.();
+  }
+
   private scheduleGather(): void {
     if (this.gathered) return;
     this.gathered = true;
@@ -183,11 +189,22 @@ class MockPeerConnection {
   }
 }
 
+/** A mock factory; `instances` lists the connections it made, in order. */
+export type MockRtcFactory = RtcPeerConnectionFactory & {
+  readonly instances: Array<{ _fail(): void }>;
+};
+
 /**
  * A fresh mock factory with its own rendezvous map. Pass the SAME factory to
  * both peers/devices so their data channels can rendezvous.
  */
-export function makeMockRtc(): RtcPeerConnectionFactory {
+export function makeMockRtc(): MockRtcFactory {
   const rendezvous = new Map<string, MessagePort>();
-  return (() => new MockPeerConnection(rendezvous)) as unknown as RtcPeerConnectionFactory;
+  const instances: MockPeerConnection[] = [];
+  const factory = () => {
+    const pc = new MockPeerConnection(rendezvous);
+    instances.push(pc);
+    return pc;
+  };
+  return Object.assign(factory, { instances }) as unknown as MockRtcFactory;
 }

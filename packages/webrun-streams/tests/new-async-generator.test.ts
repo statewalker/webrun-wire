@@ -619,6 +619,25 @@ describe("newAsyncGenerator()", () => {
     expect(handled.length).toBe(list.length);
   });
 
+  it("keeps a queued done(err) when a value follows it (skipValues=true)", async () => {
+    let afterDone: Promise<boolean> | undefined;
+    let doneResult: Promise<boolean> | undefined;
+    const gen = newAsyncGenerator<number>((next, done) => {
+      doneResult = done(new Error("boom"));
+      afterDone = next(2);
+    }, true);
+
+    const list: number[] = [];
+    await expect(
+      (async () => {
+        for await (const v of gen) list.push(v);
+      })(),
+    ).rejects.toThrow("boom");
+    expect(list).toEqual([]);
+    expect(await afterDone).toBe(false);
+    expect(await doneResult).toBe(true);
+  });
+
   // =============================================================================
   // Tests for edge cases
   // =============================================================================
