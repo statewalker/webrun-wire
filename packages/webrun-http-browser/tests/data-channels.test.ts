@@ -49,4 +49,42 @@ describe("sendStream / handleStreams", () => {
       port2.close();
     }
   });
+
+  // A handler that fails before it returns a stream must reach the caller as
+  // that error, not as an empty stream plus an unhandled rejection here.
+  it("delivers a handler's failure to the caller", async () => {
+    const { port1, port2 } = new MessageChannel();
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    const cleanup = handleStreams<string>(asTarget(port1), async () => {
+      throw new Error("boom");
+    });
+    try {
+      async function* nothing() {}
+      const read = async () => {
+        const out: string[] = [];
+        for await (const v of sendStream<string>(asTarget(port2), nothing())) out.push(v);
+        return out;
+      };
+      await expect(read()).rejects.toThrow("boom");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      cleanup();
+      port1.close();
+      port2.close();
+    }
+  });
+});
+
+describe("misspelt names", () => {
+  it("newInvocationChannel is exported, and newInvokationChannel stays as its deprecated alias", async () => {
+    const lib = (await import("../src/index.js")) as Record<string, unknown>;
+    expect(typeof lib.newInvocationChannel).toBe("function");
+    expect(lib.newInvokationChannel).toBe(lib.newInvocationChannel);
+  });
 });
