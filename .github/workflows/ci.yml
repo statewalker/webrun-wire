@@ -94,6 +94,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm --filter @statewalker/webrun-streams-peerjs run test:browser
 
+  # The lockfile-only pull request that .github/workflows/statewalker-update.yml opens: merged
+  # once every other check on it passes, after checking it changes pnpm-lock.yaml alone
+  # (statewalker/statewalker-ci's merge-lockfile.yml; statewalker-root docs/process/merging.md).
+  lockfile:
+    needs: [ci, node22, browser]
+    # !cancelled(): also after a failed check job, so the pull request gets a comment saying why.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.head_ref == 'deps/statewalker-lockfile' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+      actions: read
+    uses: statewalker/statewalker-ci/.github/workflows/merge-lockfile.yml@main
+    secrets: inherit
+
   # Releases to npm in three jobs: `version` opens the version pull request, `pack` packs what
   # npm lacks once it is merged, `publish` uploads the tarballs. Nobody approves the upload:
   # merging the version pull request is the release decision.
@@ -330,3 +346,14 @@ jobs:
             gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && continue
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "Published to npm."
           done < "$RUNNER_TEMP/on-npm"
+
+  # What this run published reaches the other repositories of the statewalker-release App's
+  # installation as a `statewalker-published` dispatch; each dependent then moves its lockfile
+  # within its ranges (statewalker/statewalker-ci's notify-dependents.yml, which reads the
+  # published tarballs from the `packages` artifact). Also after a partly failed publish.
+  notify:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result != 'skipped' }}
+    permissions: {}
+    uses: statewalker/statewalker-ci/.github/workflows/notify-dependents.yml@main
+    secrets: inherit
