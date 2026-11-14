@@ -118,7 +118,7 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
   // run after every test has already passed.
   let startupOver = false;
   const exitedDuringStartup = new Promise<never>((_resolve, reject) => {
-    child.once("exit", (code) => {
+    const early = (code: number | string | null) => {
       if (startupOver) return;
       reject(
         new Error(
@@ -126,7 +126,11 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
             `https://docs.livekit.io/home/self-hosting/local/ — output:\n${stderr.trim()}`,
         ),
       );
-    });
+    };
+    child.once("exit", early);
+    // A binary missing from PATH emits "error" (ENOENT) and no "exit": without this the setup
+    // waited out the health check and reported a timeout instead of the install hint.
+    child.once("error", (err: NodeJS.ErrnoException) => early(err.code ?? err.message));
   });
   // Nothing awaits this once startup is over; claim the rejection either way.
   exitedDuringStartup.catch(() => {});

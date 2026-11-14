@@ -1,0 +1,27 @@
+name: Nightly
+
+# The browser suites the CI of a pull request does not run (statewalker/statewalker-ci's
+# nightly.yml): root `test:nightly` runs the `test:browser` suites of webrun-streams-livekit,
+# webrun-streams-peerjs and webrun-http-events, each to the end even when one fails. A failure opens
+# one `bug` + `ci-baseline` issue here; later failures comment on it while it is open.
+#
+# webrun-streams-livekit's suite starts `livekit-server` itself (its global setup), so the setup
+# installs the server binary with LiveKit's documented install script, next to Chromium.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly:
+    uses: statewalker/statewalker-ci/.github/workflows/nightly.yml@main
+    with:
+      setup: |
+        pnpm --filter @statewalker/webrun-streams-peerjs exec playwright install --with-deps chromium
+        curl -sSfL https://get.livekit.io | bash
+        livekit-server --version
