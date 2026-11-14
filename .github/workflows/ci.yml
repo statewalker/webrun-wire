@@ -23,6 +23,9 @@ jobs:
       secret-scan: true
       # A publish step anywhere but the `publish` job below fails.
       release-path: true
+      # Each public package's types against npm's latest: a breaking change needs a declared bump
+      # (a minor on 0.x). webrun-wire is layer L0, the lowest: nothing below it to switch on first.
+      api-diff: true
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
