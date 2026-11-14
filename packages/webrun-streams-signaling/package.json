@@ -50,6 +50,7 @@
     "@statewalker/webrun-msgpack": "workspace:^",
     "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams": "workspace:^",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "livekit-client": "catalog:",
     "rimraf": "catalog:",

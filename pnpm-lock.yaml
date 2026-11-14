@@ -573,6 +573,9 @@ importers:
       '@statewalker/webrun-streams':
         specifier: workspace:^
         version: link:../webrun-streams
+      '@statewalker/webrun-streams-conformance':
+        specifier: workspace:^
+        version: link:../webrun-streams-conformance
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4

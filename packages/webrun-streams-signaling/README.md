@@ -282,7 +282,10 @@ that joins, and ends at `leave()`. Departures are not reported. Only the most re
 ### Dependencies
 
 Zero runtime dependencies: the bundle imports nothing, and `ByteChannel` is declared here.
-`@statewalker/webrun-rpc`, `-msgpack` and `-streams` are dev dependencies of the tests. `livekit-client` is an optional peer, used only through the
+`@statewalker/webrun-rpc`, `-msgpack`, `-streams` and `-streams-conformance` are dev dependencies of the tests:
+`tests/conformance.test.ts` runs the conformance suite over `messageTargetOverByteChannel` and the
+port stack, on `byteChannelFromDataChannel` and on `byteChannelFromRoom` (in-process stand-ins for
+the data channel and the room). `livekit-client` is an optional peer, used only through the
 `RoomLike` shape you inject. A neutrality test (`tests/neutrality.test.ts`) keeps the source from
 importing anything else.
 
