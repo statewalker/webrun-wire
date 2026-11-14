@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { MessageTarget } from "../src/core/message-target.js";
-import { handleHttpRequests, sendHttpRequest } from "../src/http/http-send-recieve.js";
+import { handleHttpRequests, sendHttpRequest } from "../src/http/http-send-receive.js";
 
 function asTarget(port: MessagePort): MessageTarget {
   return port as unknown as MessageTarget;

@@ -4,7 +4,7 @@ import { get, set } from "idb-keyval";
 import { callChannel, handleChannelCalls, withTransfer } from "../core/data-calls.js";
 import { handleClaimRequests } from "../core/service-worker-control.js";
 import type { FetchEventLike, ServiceWorkerScope } from "../core/sw-scope.js";
-import { sendHttpRequest } from "../http/http-send-recieve.js";
+import { sendHttpRequest } from "../http/http-send-receive.js";
 import { errorMessage } from "../link/errors.js";
 import {
   connectHttpLink,

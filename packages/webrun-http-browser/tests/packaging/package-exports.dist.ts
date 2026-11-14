@@ -18,11 +18,25 @@ const packageRoot = new URL("../../", import.meta.url);
 async function manifest(): Promise<{
   exports: Record<string, Record<string, string>>;
   files: string[];
+  sideEffects: boolean | string[];
 }> {
   return JSON.parse(await readFile(new URL("package.json", packageRoot), "utf8"));
 }
 
 describe("the package's exports map", () => {
+  // `./relay-sw` and `./sw-worker` exist only for what they do on load (they
+  // start a worker runtime); `"sideEffects": false` lets a bundler drop an
+  // `import "@statewalker/webrun-http-browser/relay-sw"` entirely.
+  it("declares the side-effect-only subpaths as side effects", async () => {
+    const { exports, sideEffects } = await manifest();
+    expect(Array.isArray(sideEffects)).toBe(true);
+    for (const subpath of ["./relay-sw", "./sw-worker"]) {
+      for (const file of Object.values(exports[subpath] ?? {})) {
+        expect(sideEffects).toContain(file);
+      }
+    }
+  });
+
   it("every target exists in dist", async () => {
     const { exports } = await manifest();
     const missing: string[] = [];
