@@ -2,7 +2,7 @@ import { type IteratorChunk, recieveIterator } from "@statewalker/webrun-streams
 import { type ListenPortOptions, listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 
-export interface RecieveOptions extends ListenPortOptions {
+export interface ReceiveOptions extends ListenPortOptions {
   /**
    * Optional cancel signal. When fired, the currently-active
    * `recieveIterator` is force-closed (its producer is signalled `done`
@@ -34,19 +34,37 @@ export interface RecieveOptions extends ListenPortOptions {
  * marker so the consumer wakes up immediately rather than waiting for the
  * next inbound chunk (or `callPort` timeout).
  */
-export async function* recieve<T>(
+export async function* receive<T>(
   port: MessageTarget,
-  options: RecieveOptions = {},
+  options: ReceiveOptions = {},
 ): AsyncGenerator<AsyncGenerator<T>> {
   const { signal, ...listenOptions } = options;
-  let onMessage: ((chunk: IteratorChunk<T>) => Promise<boolean>) | undefined;
+  type Deliver = (chunk: IteratorChunk<T>) => Promise<boolean>;
+  let onMessage: Deliver | undefined;
   let currentIter: AsyncGenerator<T> | undefined;
   let forceClose: (() => void) | undefined;
+  let finished = false;
+  // `recieveIterator`'s installer runs lazily, on the consumer's first
+  // `.next()`. A chunk that arrives before that must wait for it: replying
+  // first would acknowledge a chunk nobody took (the same race
+  // `duplexOverPort` closes with its own `ready()`).
+  const waiting: Array<() => void> = [];
+  const ready = (): Promise<void> =>
+    onMessage || finished ? Promise.resolve() : new Promise<void>((r) => waiting.push(r));
+  const wake = () => {
+    for (const r of waiting.splice(0)) r();
+  };
 
   const close = listenPort<IteratorChunk<T>, void>(
     port,
     async ({ done, value, error }) => {
-      await onMessage?.({ done, value, error });
+      await ready();
+      const deliver = onMessage;
+      if (!deliver) throw new Error("receive: the receiving side is closed");
+      // The stream this chunk ends is over: a chunk after it belongs to the
+      // next stream, and waits for that stream's consumer.
+      if (done || error) onMessage = undefined;
+      await deliver({ done, value, error });
     },
     listenOptions,
   );
@@ -66,10 +84,17 @@ export async function* recieve<T>(
   try {
     while (true) {
       currentIter = recieveIterator<T>((deliver) => {
-        onMessage = deliver;
         forceClose = () => {
           void deliver({ done: true });
         };
+        if (signal?.aborted) {
+          // The signal fired before this installer ran: end at once instead
+          // of waiting for a chunk the peer will not send.
+          forceClose();
+          return;
+        }
+        onMessage = deliver;
+        wake();
       });
       yield currentIter;
     }
@@ -77,6 +102,8 @@ export async function* recieve<T>(
     close();
     signal?.removeEventListener("abort", onAbort);
     onMessage = undefined;
+    finished = true;
+    wake();
     forceClose = undefined;
     if (currentIter) {
       try {
@@ -87,3 +114,9 @@ export async function* recieve<T>(
     }
   }
 }
+
+/** @deprecated Misspelt name kept for compatibility; use {@link ReceiveOptions}. */
+export type RecieveOptions = ReceiveOptions;
+
+/** @deprecated Misspelt name kept for compatibility; use {@link receive}. */
+export const recieve = receive;

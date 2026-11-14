@@ -65,7 +65,9 @@ export function callPort<TResult = unknown, TParams = unknown>(
   let timerId: ReturnType<typeof setTimeout> | undefined;
   let onMessage: ((event: MessageEvent) => void) | undefined;
   let onAbort: (() => void) | undefined;
+  let fail: (reason: unknown) => void = () => {};
   const promise = new Promise<TResult>((resolve, reject) => {
+    fail = reject;
     if (combinedSignal?.aborted) {
       reject(abortReason(combinedSignal));
       return;
@@ -97,7 +99,13 @@ export function callPort<TResult = unknown, TParams = unknown>(
       if (onMessage) port.removeEventListener("message", onMessage);
       if (onAbort && combinedSignal) combinedSignal.removeEventListener("abort", onAbort);
     });
-  port.postMessage({ type: "request", channelName, callId, params });
+  try {
+    port.postMessage({ type: "request", channelName, callId, params });
+  } catch (e) {
+    // A synchronous post failure (e.g. DataCloneError) means no reply can
+    // come: settle the call so the cleanup above removes its listeners.
+    fail(e);
+  }
   return promise;
 }
 

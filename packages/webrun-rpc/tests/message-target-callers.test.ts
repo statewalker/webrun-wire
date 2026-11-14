@@ -6,7 +6,7 @@ import { ioSend } from "../src/io-send.js";
 import { listenBidi } from "../src/listen-bidi.js";
 import { listenPort } from "../src/listen-port.js";
 import type { MessageListener, MessageTarget } from "../src/message-target.js";
-import { recieve } from "../src/recieve.js";
+import { receive } from "../src/receive.js";
 import { send } from "../src/send.js";
 
 /**
@@ -92,13 +92,13 @@ describe("ioSend / ioHandle over a plain MessageTarget", () => {
   });
 });
 
-describe("send / recieve over a plain MessageTarget", () => {
+describe("send / receive over a plain MessageTarget", () => {
   it("transports values with no MessagePort involved", async () => {
     const { a, b } = newTargetPair();
     void send<number>(b, [1, 2, 3], { channelName: "" });
 
     const values: number[] = [];
-    for await (const input of recieve<number>(a, { channelName: "" })) {
+    for await (const input of receive<number>(a, { channelName: "" })) {
       for await (const value of input) values.push(value);
       break;
     }

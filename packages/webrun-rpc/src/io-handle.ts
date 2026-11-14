@@ -1,7 +1,7 @@
-import { listenCancelChannel } from "./cancel-channel.js";
+import { listenCancelChannel, postCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
-import { recieve } from "./recieve.js";
+import { receive } from "./receive.js";
 import { send } from "./send.js";
 
 /**
@@ -15,7 +15,9 @@ import { send } from "./send.js";
  * If the peer (the consumer of our outbound send) posts a `cancel-channel`
  * message on the same sub-channel, we abort `send` immediately. This makes
  * `ioSend`'s `iter.return()` propagate cleanly without waiting for
- * `callPort` timeouts.
+ * `callPort` timeouts. The other way round, when the handler stops without
+ * reading its input to the end, we post `cancel-channel` so the peer's
+ * `ioSend` stops sending chunks nobody will answer.
  */
 export async function* ioHandle<T, U = T>(
   port: MessageTarget,
@@ -24,16 +26,25 @@ export async function* ioHandle<T, U = T>(
 ): AsyncGenerator<number> {
   let counter = 0;
   const channelName = options.channelName ?? "";
-  for await (const input of recieve<T>(port, options)) {
+  for await (const input of receive<T>(port, options)) {
     const sendAbort = new AbortController();
     const unsubscribeCancel = channelName
       ? listenCancelChannel(port, channelName, () => sendAbort.abort())
       : () => {};
+    // Whether the handler read its input to the end. If it stopped early, this
+    // side no longer answers the peer's chunk calls, and the peer's `send`
+    // (no per-chunk deadline) would wait for ever: tell it to stop.
+    let inputEnded = false;
+    const tracked = (async function* () {
+      yield* input;
+      inputEnded = true;
+    })();
     try {
-      const output = await handler(input);
+      const output = await handler(tracked);
       await send<U>(port, output, { ...options, signal: sendAbort.signal });
     } finally {
       unsubscribeCancel();
+      if (!inputEnded) postCancelChannel(port, channelName);
     }
     yield counter++;
   }
