@@ -53,8 +53,8 @@ jobs:
         run: pnpm -r run test
 
   # The shared CI runs the Node suites only. webrun-http-browser's browser
-  # suites (ServiceWorkers, workers, relays, WebSockets) and webrun-streams-webrtc's
-  # (RTCPeerConnection) need real browsers:
+  # suites (ServiceWorkers, workers, relays, WebSockets), webrun-streams-webrtc's
+  # (RTCPeerConnection) and webrun-streams-peerjs's need real browsers:
   # Chromium and Firefox, installed by Playwright on the runner.
   browser:
     name: Browser tests (webrun-http-browser)
@@ -86,6 +86,13 @@ jobs:
         # also when the step above failed: one package's failures must not hide the other's
         if: ${{ !cancelled() }}
         run: pnpm --filter @statewalker/webrun-streams-webrtc run test:browser
+
+      # Conformance L0–L6, the message pipe and its ceiling over PeerJS DataConnections, against a
+      # loopback PeerJS broker the suite starts itself. livekit's suite needs a livekit-server
+      # binary downloaded on the runner: it runs in the nightly workflow instead.
+      - name: Test (webrun-streams-peerjs)
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @statewalker/webrun-streams-peerjs run test:browser
 
   # Releases to npm in three jobs: `version` opens the version pull request, `pack` packs what
   # npm lacks once it is merged, `publish` uploads the tarballs after a maintainer approves.
