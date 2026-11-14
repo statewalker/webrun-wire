@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   ci:
-    uses: statewalker/.github/.github/workflows/ci.yml@main
+    uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
@@ -92,7 +92,7 @@ jobs:
   # version is published by hand, with the maintainer's 2FA, before `publish` is approved; `pack`
   # or `publish` then skips it.
 
-  # Writes the changesets nobody wrote by hand (statewalker/.github's
+  # Writes the changesets nobody wrote by hand (statewalker/statewalker-ci's
   # scripts/release-changesets.mjs: a patch for every package whose packed files or published
   # manifest differ from npm's `latest`, a minor (0.x) / major when a dependency moved to another
   # breaking line), then opens or updates the "chore: version packages" pull request. Never
@@ -117,7 +117,7 @@ jobs:
       - name: Release scripts
         uses: actions/checkout@v7
         with:
-          repository: statewalker/.github
+          repository: statewalker/statewalker-ci
           ref: main
           path: .statewalker-ci
 
