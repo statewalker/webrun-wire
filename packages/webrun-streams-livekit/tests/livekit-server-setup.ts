@@ -89,6 +89,9 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
     `  tcp_port: ${tcpPort}`,
     `  udp_port: ${udpPort}`,
     "  use_external_ip: false",
+    // `--dev` would turn this on: without it the server drops its own loopback ICE candidates,
+    // and with `--node-ip 127.0.0.1` it has no others, so no peer connection forms (#169).
+    "  enable_loopback_candidate: true",
     "keys:",
     `  ${DEV_API_KEY}: ${DEV_API_SECRET}`,
     "logging:",
