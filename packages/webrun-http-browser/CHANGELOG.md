@@ -1,5 +1,39 @@
 # @statewalker/webrun-http-browser
 
+## 0.14.0
+
+### Minor Changes
+
+- 029ff67: Relay handshake robustness and leaks:
+  
+  - The relay page accepts a `CONNECT` only from its embedding window (`window.parent`), and `newRemoteRelayChannel` posts it to the relay's origin instead of `"*"`.
+  - New `newRemoteRelayChannel({ timeout })`: waits for the relay page to acknowledge the connection and rejects (removing the iframe) when it does not, e.g. a missing or `frame-ancestors`-blocked `relay.html`. The acknowledgement travels on an optional second port that older relay pages ignore; leave `timeout` unset with them. Without `timeout` nothing changes, except that an iframe load failure is no longer an unhandled rejection.
+  - A relay worker that fails to start no longer surfaces as an unhandled rejection, and a later `CONNECT` is accepted and retries.
+  - `newServiceWorkerPort(registration, { signal })`: aborting the signal (or closing the port, where the browser reports it) removes its `navigator.serviceWorker` listener, which previously leaked.
+  - The relay worker drops the mount of a holder it finds gone together with its registry entry, so its path falls through to the network instead of answering 410 until the worker restarts.
+  - `handleStreams` delivers a failing handler's error to the caller instead of an empty stream plus an unhandled rejection.
+  - `package.json` lists `./relay-sw` and `./sw-worker` under `sideEffects`, so bundlers keep a bare import of them.
+- 029ff67: Correct spellings: `newInvocationChannel` is exported, with `newInvokationChannel` kept as a deprecated alias. The internal stream channel's `recieveAll` and the module `src/http/http-send-recieve.ts` are renamed to `receiveAll` and `http-send-receive.ts` (neither was reachable through the package's exports map).
+
+### Patch Changes
+
+- 029ff67: `SwHttpAdapter`: a request goes to the handler of the longest registered prefix (not the first registered one), prefixes match only on whole path segments (`demo/api` no longer serves `/demo/apiary`), and `remove()` of a registration replaced by a newer one of the same prefix no longer deletes the newer handler.
+- 029ff67: Relay ServiceWorker: REGISTER and UNREGISTER calls on the same key now run one after another, so two pages registering a key at the same moment under `takeover: "first-wins"` no longer both succeed (the first keeps the key, the second gets `"<key>" is already served by another client`).
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+  - @statewalker/webrun-http-streams@0.6.0
+  - @statewalker/webrun-streams@0.4.0
+  - @statewalker/webrun-rpc@0.12.0
+
 ## 0.13.1
 
 ### Patch Changes

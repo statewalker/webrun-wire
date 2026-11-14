@@ -1,5 +1,21 @@
 # @statewalker/webrun-http-streams
 
+## 0.6.0
+
+### Minor Changes
+
+- cb56b7d: The `x-webrun-error` header of a 400 or 500 no longer carries the error's `stack` by default, so a peer that sends a malformed request does not learn the server's file paths. New option `includeErrorStack: true` (on `httpServe` / `serveFetchOverDuplex`) restores it.
+- cb56b7d: Stubs and `HttpError`: `newHttpServerStub` forwards only the known `RequestInit` fields of the envelope (a `body` key on a GET no longer makes `new Request` throw). `SerializedHttpResponse` gains an optional `headerEntries: [string, string][]`, set by the server stub next to the unchanged `headers` record and preferred by the client stub, so repeated headers such as `set-cookie` survive. `HttpError.fromError` now uses the reason "Internal Server Error" for its 500 instead of "Bad Request".
+
+### Patch Changes
+
+- cb56b7d: The HTTP/1.1 decoder joins a head line once, when its LF arrives, instead of concatenating the buffer on every pull: a long header line sent in tiny frames no longer costs quadratic CPU.
+- cb56b7d: `fetchOverDuplex` no longer throws `RangeError` / `TypeError` for a peer's status line, and no longer leaves the call held when it refuses one. The HTTP/1.1 decoder refuses a status outside 100–599 and an invalid reason phrase with `HttpParseError`, skips interim 1xx responses (100 Continue, 103 Early Hints; at most 16) and refuses 101; `fetchOverDuplex` turns any status line `new Response` rejects (for example from the JSON envelope) into an `HttpParseError` and releases the call.
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+  - @statewalker/webrun-streams@0.4.0
+
 ## 0.5.1
 
 ### Patch Changes

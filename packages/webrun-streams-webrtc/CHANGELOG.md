@@ -1,5 +1,22 @@
 # @statewalker/webrun-streams-webrtc
 
+## 0.4.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- e86fe11: `serve`: a handler that reads its input no longer hangs when the caller cancels or the caller's input throws. The handler's input now ends with the error (its next read throws it instead of reporting a clean end) before the responder waits for its outbound pump, so the handler's `finally` runs (#124).
+- e86fe11: `connect()`'s `close()` removes the `connectionstatechange` listener it added to the peer connection, so repeated `connect()` calls no longer accumulate listeners. The receiver now enforces `RECEIVE_WINDOW`: a peer that ignores credit and sends past the window fails the call (queued payload dropped, channel closed) instead of growing the inbound queue without bound (#148).
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+  - @statewalker/webrun-streams@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

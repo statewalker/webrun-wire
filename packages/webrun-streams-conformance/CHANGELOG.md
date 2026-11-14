@@ -1,5 +1,18 @@
 # @statewalker/webrun-streams-conformance
 
+## 0.5.0
+
+### Minor Changes
+
+- e86fe11: Two new L3 cases, run by every adapter: a handler that reads its input while the caller cancels (its `finally` must run), and while the caller's input throws (its read must throw that error, not end cleanly) (#124, #141).
+
+### Patch Changes
+
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+  - @statewalker/webrun-streams@0.4.0
+
 ## 0.4.0
 
 ### Minor Changes

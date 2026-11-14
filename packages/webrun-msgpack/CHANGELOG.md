@@ -1,5 +1,21 @@
 # @statewalker/webrun-msgpack
 
+## 0.11.0
+
+### Minor Changes
+
+- cb56b7d: Extension values: the ext type is read as a signed int8, as the spec defines it (type `-2` no longer reads as `254`), and `MsgpackExtension` is now a class exported as a value that `serialize` writes back as an ext, so extension values round-trip. A plain `{ type, data }` object is still written as a map.
+- cb56b7d: `decodeMsgpack` / `decodeFloat32Arrays`: reassembly is now linear (chunks are kept in a list and copied once per frame instead of concatenated on every chunk), and the peer-supplied frame length is bounded by a new `maxFrameBytes` option (default `DEFAULT_MAX_FRAME_BYTES`, 64 MiB). A header above it throws a `RangeError` before any payload is buffered. New exports: `DEFAULT_MAX_FRAME_BYTES`, `DecodeMsgpackOptions`.
+
+### Patch Changes
+
+- cb56b7d: Add a `prepack` script that builds `dist`, as `webrun-rpc` and `webrun-streams` have.
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+- Updated dependencies [359ff10]
+  - @statewalker/webrun-rpc@0.12.0
+
 ## 0.10.1
 
 ### Patch Changes
