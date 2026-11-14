@@ -78,7 +78,8 @@ const claimed = new WeakSet<RTCDataChannel>();
  * ```
  *
  * Messages that arrive before a port's first listener are held for it and delivered after that
- * tick, to every listener added by then.
+ * tick, to every listener added by then. Messages posted before a port's channel opens are queued
+ * and sent, in order, when it opens.
  */
 export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebRtcPortMux> {
   const { pc, codec, onPort } = options;
@@ -132,6 +133,26 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
       if (held) held.push(data);
       else deliver(data);
     };
+    // Posts made while the channel is still connecting, sent in order when it opens, as a
+    // MessagePort queues them (statewalker/statewalker-root#57). `undefined` once the channel has
+    // opened, or when it was open already.
+    let queued: Uint8Array[] | undefined = dc.readyState === "connecting" ? [] : undefined;
+    const send = (bytes: Uint8Array) => {
+      try {
+        dc.send(bytes as Uint8Array<ArrayBuffer>);
+      } catch (err) {
+        // a send queue full, or a channel closing meanwhile: the port is broken
+        end(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    const onOpen = () => {
+      const pending = queued;
+      queued = undefined;
+      for (const bytes of pending ?? []) {
+        if (closeSignal.aborted) return;
+        send(bytes);
+      }
+    };
     const onClose = () => end(new Error("webrun-streams-webrtc: the data channel closed"));
     const onError = (ev: Event) =>
       end(
@@ -140,6 +161,7 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
         ),
       );
     dc.addEventListener("message", onMessage);
+    dc.addEventListener("open", onOpen);
     dc.addEventListener("close", onClose);
     dc.addEventListener("error", onError);
     if (dc.readyState === "closing" || dc.readyState === "closed") onClose();
@@ -147,6 +169,8 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
     const cleanUp = () => {
       live.delete(port);
       dc.removeEventListener("message", onMessage);
+      dc.removeEventListener("open", onOpen);
+      queued = undefined;
       listeners.clear();
       held = undefined;
       if (dc.readyState !== "closed") dc.close();
@@ -170,7 +194,9 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
         });
       },
       postMessage(message) {
-        if (closeSignal.aborted || dc.readyState !== "open") return; // `closeSignal` says so
+        if (closeSignal.aborted) return; // `closeSignal` says so
+        // a channel closing or closed: its close event aborts `closeSignal`
+        if (!queued && dc.readyState !== "open") return;
         const bytes = codec.encode(message);
         if (bytes.byteLength > maxFrameBytes) {
           const err = new RangeError(
@@ -179,12 +205,8 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
           end(err);
           throw err;
         }
-        try {
-          dc.send(bytes as Uint8Array<ArrayBuffer>);
-        } catch (err) {
-          // a send queue full, or a channel closing meanwhile: the port is broken
-          end(err instanceof Error ? err : new Error(String(err)));
-        }
+        if (queued) queued.push(bytes);
+        else send(bytes);
       },
       addEventListener(_type, listener) {
         listeners.add(listener);
