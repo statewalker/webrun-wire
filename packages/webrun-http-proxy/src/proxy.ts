@@ -214,11 +214,34 @@ const HOP_BY_HOP = [
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
- * Content codings `fetch` implementations decode (Fetch spec "handle content
- * codings"; undici, Deno, Bun and browsers). When the upstream used only these,
- * the body handed to the proxy is already decoded.
+ * Content codings every `fetch` the proxy runs on decodes (Fetch spec "handle
+ * content codings": undici, Deno, Bun and browsers). When the upstream used only
+ * these, the body handed to the proxy is already decoded. `zstd` is NOT here:
+ * Node 22's fetch (undici 6) does not decode it, so a zstd body arrives raw and
+ * must keep its `content-encoding`.
  */
-const DECODED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "zstd", "identity"]);
+const DECODED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "identity"]);
+
+/** The coding name of one `accept-encoding` / `content-encoding` element, without parameters. */
+function codingName(element: string): string {
+  return (element.split(";")[0] ?? "").trim().toLowerCase();
+}
+
+/**
+ * Narrow the caller's `accept-encoding` to codings `fetch` decodes, so the
+ * upstream is never invited to send one that would come back raw. With nothing
+ * left, ask for `identity`. (In a browser the header is forbidden and the
+ * browser sets its own; this only matters elsewhere.)
+ */
+function narrowAcceptEncoding(headers: Headers): void {
+  const accept = headers.get("accept-encoding");
+  if (accept === null) return;
+  const kept = accept
+    .split(",")
+    .filter((element) => DECODED_CODINGS.has(codingName(element)))
+    .map((element) => element.trim());
+  headers.set("accept-encoding", kept.length > 0 ? kept.join(", ") : "identity");
+}
 
 /** Delete the hop-by-hop headers and every header the `Connection` header names. */
 function dropHopByHop(headers: Headers): void {
@@ -240,10 +263,7 @@ function responseHeaders(upstream: Headers, forwardCookies: boolean): Headers {
   // gunzip plain text.
   const coding = headers.get("content-encoding");
   if (coding !== null) {
-    const codings = coding
-      .split(",")
-      .map((c) => c.trim().toLowerCase())
-      .filter(Boolean);
+    const codings = coding.split(",").map(codingName).filter(Boolean);
     if (codings.every((c) => DECODED_CODINGS.has(c))) {
       headers.delete("content-encoding");
       headers.delete("content-length");
@@ -280,6 +300,7 @@ function buildOutbound(init: UrlUpstreamInit, request: Request): { target: URL; 
   // and neither are the ones the caller's `Connection` header names.
   dropHopByHop(headers);
   if (!init.forwardCookies) headers.delete("cookie");
+  narrowAcceptEncoding(headers);
   if (init.via != null) headers.set("via", init.via);
   // Operator configuration last, so it wins over anything a caller sent.
   for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);

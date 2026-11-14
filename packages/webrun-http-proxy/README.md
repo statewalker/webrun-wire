@@ -105,6 +105,7 @@ incoming Request
   ├─ delete stripRequestHeaders            (caller's own identity)
   ├─ delete hop-by-hop headers             (RFC 9110 §7.6.1, and those `Connection` names)
   ├─ delete cookie                          (unless forwardCookies)
+  ├─ narrow accept-encoding                 (to codings fetch decodes)
   ├─ set via                                (if configured)
   ├─ set headers                            (operator configuration)
   ├─ set credential()                       (read now, wins over everything)
@@ -166,11 +167,17 @@ The caller's `signal` is forwarded, so an abandoned request abandons the
 upstream call.
 
 The response body streams back as `fetch` hands it over. `fetch` has already
-decoded a `gzip`, `deflate`, `br` or `zstd` body, so the proxy drops the
-upstream's `content-encoding` and `content-length`, which describe the encoded
-bytes; a client served through a Node adapter would otherwise wait for missing
-bytes or try to gunzip plain text. A coding outside that list is left as it is,
-with its body.
+decoded a `gzip`, `deflate` or `br` body, so the proxy drops the upstream's
+`content-encoding` and `content-length`, which describe the encoded bytes; a
+client served through a Node adapter would otherwise wait for missing bytes or
+try to gunzip plain text. Any other coding, `zstd` included (Node 22's `fetch`
+does not decode it), is left as it is, with its raw body and its headers.
+
+So that the upstream is not invited to send such a coding, the caller's
+`accept-encoding` is narrowed to `gzip`, `x-gzip`, `deflate`, `br` and
+`identity` (a caller sending only `zstd` gets `identity`). In a browser the
+header is forbidden and the browser sets its own, so this only matters outside
+one.
 
 ### Failures are responses, not exceptions
 

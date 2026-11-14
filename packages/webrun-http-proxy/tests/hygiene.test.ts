@@ -5,7 +5,7 @@
  */
 
 import { createServer, type Server } from "node:http";
-import { gzipSync } from "node:zlib";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MARKER, urlUpstream } from "../src/proxy.js";
 
@@ -24,6 +24,18 @@ beforeAll(async () => {
         "content-encoding": "gzip",
         "content-length": String(zipped.byteLength),
         "x-kept": "yes",
+      });
+      res.end(zipped);
+      return;
+    }
+    if (url.pathname === "/zstd") {
+      // Answers zstd whatever the request asked for, as a misbehaving upstream would.
+      const zipped = zstdCompressSync(PLAIN);
+      res.writeHead(200, {
+        "content-type": "text/plain",
+        "content-encoding": "zstd",
+        "content-length": String(zipped.byteLength),
+        "x-asked": req.headers["accept-encoding"] ?? "",
       });
       res.end(zipped);
       return;
@@ -91,6 +103,32 @@ describe("response headers", () => {
     expect(faked.headers.get("x-private")).toBeNull();
     expect(faked.headers.get("connection")).toBeNull();
     expect(faked.headers.get("x-public")).toBe("2");
+  });
+
+  it("does not ask the upstream for zstd, which Node's fetch does not decode", async () => {
+    const res = await urlUpstream({ base: origin })(
+      new Request("http://in/echo", { headers: { "accept-encoding": "zstd, gzip;q=0.9, br" } }),
+    );
+    const { headers } = (await res.json()) as { headers: Record<string, string> };
+    expect(headers["accept-encoding"]).toBe("gzip;q=0.9, br");
+
+    const only = await urlUpstream({ base: origin })(
+      new Request("http://in/echo", { headers: { "accept-encoding": "zstd" } }),
+    );
+    const onlyBody = (await only.json()) as { headers: Record<string, string> };
+    expect(onlyBody.headers["accept-encoding"]).toBe("identity");
+  });
+
+  it("keeps content-encoding: zstd with the raw zstd body when an upstream sends it anyway", async () => {
+    const res = await urlUpstream({ base: origin })(
+      new Request("http://in/zstd", { headers: { "accept-encoding": "zstd" } }),
+    );
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(res.headers.get("x-asked")).toBe("identity");
+    expect(res.headers.get("content-encoding")).toBe("zstd");
+    expect(Number(res.headers.get("content-length"))).toBe(bytes.byteLength);
+    // zstd frame magic number: 28 b5 2f fd.
+    expect(Array.from(bytes.slice(0, 4))).toEqual([0x28, 0xb5, 0x2f, 0xfd]);
   });
 
   it("keeps content-encoding for a coding fetch does not decode", async () => {
