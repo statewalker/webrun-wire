@@ -32,10 +32,18 @@ export interface PubSub {
   topicCount(): number;
 }
 
-/** The topic is the final non-empty path segment: /_events/build -> "build". */
-function topicOf(request: Request): string {
+/**
+ * The topic is the final non-empty path segment, percent-decoded:
+ * /_events/build -> "build", /_events/a%2Fb -> "a/b". `undefined` when the segment
+ * holds a malformed escape.
+ */
+function topicOf(request: Request): string | undefined {
   const segments = new URL(request.url).pathname.split("/").filter(Boolean);
-  return segments.at(-1) ?? "";
+  try {
+    return decodeURIComponent(segments.at(-1) ?? "");
+  } catch {
+    return undefined;
+  }
 }
 
 export interface SseSourceOptions {
@@ -132,7 +140,7 @@ export function newPubSub(options: PubSubOptions = {}): PubSub {
     }
 
     const topic = topicOf(request);
-    if (topic === "" || (allowed !== undefined && !allowed.has(topic))) {
+    if (topic === undefined || topic === "" || (allowed !== undefined && !allowed.has(topic))) {
       return new Response("no such topic", { status: 404 });
     }
 

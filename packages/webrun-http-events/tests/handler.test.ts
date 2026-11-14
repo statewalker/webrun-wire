@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { newBroker } from "../src/broker.js";
+import { newPubSubClient } from "../src/client.js";
 import { createSseSource, newPubSub } from "../src/handler.js";
 
 /** Read exactly `count` SSE frames off a response body, then release it. */
@@ -133,6 +134,41 @@ describe("newPubSub handler — hostile input", () => {
     const ok = await ps.handler(new Request("http://h/_events/build"));
     expect(ok.status).toBe(200);
     await ok.body?.cancel();
+  });
+
+  // #136: the client sent topics unencoded and the server read the raw segment.
+  it.each(["my topic", "a/b", "what?", "50%", "x#y"])(
+    "round-trips the topic %j between client and server",
+    async (topic) => {
+      // Capture the URL the real client opens, then serve it with the real handler.
+      const urls: string[] = [];
+      const Capture = class {
+        constructor(url: string) {
+          urls.push(url);
+        }
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+      };
+      const client = newPubSubClient("http://h/_events", {
+        EventSourceImpl: Capture as unknown as typeof EventSource,
+      });
+      client.subscribe(topic, () => {});
+      const ps = newPubSub({ topics: [topic] });
+      const res = await ps.handler(new Request(urls[0] as string));
+      expect(res.status).toBe(200);
+      expect(ps.subscriberCount(topic)).toBe(1);
+      const frames = readFrames(res, 1);
+      ps.publish(topic, { ok: true });
+      expect((await frames)[0]).toContain('data: {"ok":true}');
+    },
+  );
+
+  it("answers 404 to a topic segment with a malformed percent-escape", async () => {
+    const ps = newPubSub();
+    expect((await ps.handler(new Request("http://h/_events/bad%E0%A4%A"))).status).toBe(404);
+    expect((await ps.handler(new Request("http://h/_events/%"))).status).toBe(404);
+    expect(ps.topicCount()).toBe(0);
   });
 
   // I-6: any GET /_events/<random> allocated a topic that was never reclaimed.

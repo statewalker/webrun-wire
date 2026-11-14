@@ -92,7 +92,8 @@ export function newPubSubClient(
       const names =
         options.events === undefined ? defaultEvents : checkEvents(options.events, "subscribe");
 
-      const source = new Impl(`${base}/${topic}`);
+      // One path segment, so a space, `/`, `?` or `#` in the topic survives the trip.
+      const source = new Impl(`${base}/${encodeURIComponent(topic)}`);
       open.add(source);
 
       const listeners: Array<[string, (e: Event) => void]> = [];

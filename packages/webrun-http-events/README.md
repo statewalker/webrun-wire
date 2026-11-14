@@ -52,7 +52,8 @@ import { newPubSub } from "@statewalker/webrun-http-events";
 
 const events = newPubSub({ topics: ["build"], bufferSize: 64 });
 
-// Mount the handler on any fetch-style router; the topic is the last path segment.
+// Mount the handler on any fetch-style router; the topic is the last path segment,
+// percent-decoded (GET /_events/my%20topic serves the topic "my topic").
 // GET /_events/build  ->  text/event-stream
 export const fetch = (request: Request) => events.handler(request);
 
@@ -67,7 +68,8 @@ events.publish("build", { changed: ["/index.html"] }, "rebuilt");
 | `onSubscriberError` | none | `(error, event)`, called when a subscriber throws. Delivery to the others continues either way. |
 
 The handler answers `405 method not allowed` (with `allow: GET`) to anything
-but `GET`, and `404 no such topic` to an empty or unlisted topic. A stream
+but `GET`, and `404 no such topic` to an empty or unlisted topic, or to a last
+path segment with a malformed percent-escape. A stream
 response carries `cache-control: no-cache` and `x-accel-buffering: no`, which
 stops proxy buffering from stalling delivery.
 
@@ -91,7 +93,9 @@ off(); // one subscription
 client.close(); // every subscription of this client
 ```
 
-Each `subscribe` opens one `EventSource` on `<baseUrl>/<topic>`. Options:
+Each `subscribe` opens one `EventSource` on
+`<baseUrl>/<encodeURIComponent(topic)>`, so a topic may hold a space, `/`, `?`
+or `#`. Options:
 `events`, `onGap`, `onError`, `onOpen`, and `EventSourceImpl` for runtimes
 without a global `EventSource`. With no `EventSource` at all,
 `newPubSubClient` throws `no EventSource available; pass options.EventSourceImpl`.

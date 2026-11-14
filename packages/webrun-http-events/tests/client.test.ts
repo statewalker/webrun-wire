@@ -53,6 +53,21 @@ describe("newPubSubClient", () => {
     expect(FakeEventSource.instances[0]!.url).toBe("http://h/_events/build");
   });
 
+  it("percent-encodes the topic into one path segment", () => {
+    FakeEventSource.instances.length = 0;
+    const client = newPubSubClient("http://h/_events/", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+    });
+    client.subscribe("my topic", () => {});
+    client.subscribe("a/b", () => {});
+    client.subscribe("what?#x", () => {});
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual([
+      "http://h/_events/my%20topic",
+      "http://h/_events/a%2Fb",
+      "http://h/_events/what%3F%23x",
+    ]);
+  });
+
   it("parses the JSON payload and reports the event id", () => {
     FakeEventSource.instances.length = 0;
     const client = newPubSubClient("http://h/_events", {
