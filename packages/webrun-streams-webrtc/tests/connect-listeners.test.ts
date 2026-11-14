@@ -7,8 +7,8 @@ function countingPc() {
   const pc = {
     connectionState: "connected",
     addEventListener(type: string, fn: unknown) {
-      let set = listeners.get(type);
-      if (!set) listeners.set(type, (set = new Set()));
+      const set = listeners.get(type) ?? new Set();
+      listeners.set(type, set);
       set.add(fn);
     },
     removeEventListener(type: string, fn: unknown) {
