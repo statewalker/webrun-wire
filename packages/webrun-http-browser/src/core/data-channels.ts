@@ -161,8 +161,19 @@ export function handleStreams<T>(
     try {
       await channel.start();
       const input = channel.recieveAll();
-      const response = await handler(input, params ?? {});
+      let response: AsyncIterable<T>;
+      try {
+        response = await handler(input, params ?? {});
+      } catch (error) {
+        // Sent as the stream's error, so the caller sees why instead of an
+        // empty stream (and this listener leaves no unhandled rejection).
+        response = {
+          [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(error) }),
+        };
+      }
       await channel.sendAll(response);
+    } catch (error) {
+      console.error("[handleStreams] stream call failed", error);
     } finally {
       await channel.close();
     }

@@ -1,5 +1,9 @@
 import type { HttpHandler } from "@statewalker/webrun-http-streams";
-import { serializeError } from "@statewalker/webrun-streams";
+import {
+  deserializeError,
+  type SerializedError,
+  serializeError,
+} from "@statewalker/webrun-streams";
 import {
   type ChannelCallHandler,
   callChannel,
@@ -40,21 +44,45 @@ export * from "./split-service-url.js";
  */
 const moduleUrl: string = import.meta.url;
 
+export interface ServiceWorkerPortOptions {
+  /**
+   * Ends the bridge: the port stops receiving the worker's messages and is
+   * closed. Without it the bridge lasts as long as the page (or until the
+   * returned port is closed, where the browser reports that).
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * Returns a MessagePort that transparently bridges messages to/from the
  * page's ServiceWorker: the one controlling the page, or — when the page is
  * not controlled (a hard reload, or a page Firefox left uncontrolled) — the
  * active worker of `registration`, which answers messages all the same.
  */
-export function newServiceWorkerPort(registration?: ServiceWorkerRegistration): MessagePort {
+export function newServiceWorkerPort(
+  registration?: ServiceWorkerRegistration,
+  { signal }: ServiceWorkerPortOptions = {},
+): MessagePort {
+  const container = navigator.serviceWorker;
   const channel = new MessageChannel();
   channel.port1.onmessage = (event) => {
-    const worker = navigator.serviceWorker.controller ?? registration?.active;
+    const worker = container.controller ?? registration?.active;
     worker?.postMessage(event.data, [...event.ports]);
   };
-  navigator.serviceWorker.addEventListener("message", (event) => {
+  const listener = (event: MessageEvent) => {
     channel.port1.postMessage(event.data, [...event.ports]);
-  });
+  };
+  container.addEventListener("message", listener);
+  // EACH BRIDGE LISTENS TO EVERY WORKER MESSAGE: one left behind keeps
+  // copying them to a port nobody reads, for the life of the page.
+  const stop = () => {
+    container.removeEventListener("message", listener);
+    channel.port1.close();
+  };
+  if (signal?.aborted) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
+  // Fired where supported once the other end is closed or collected.
+  channel.port1.addEventListener("close", stop, { once: true });
   return channel.port2;
 }
 
@@ -278,10 +306,16 @@ export interface RelayWindowHandlerOptions {
 
 /**
  * Returns a `window.onmessage` handler for use inside the relay iframe:
- * it accepts a CONNECT message, starts the relay ServiceWorker, and bridges
- * the parent's MessagePort with the SW. If the worker cannot be started, every
- * call the parent makes on that port is answered with the error, so the
- * parent's `initHttpService` / `callHttpService` reject instead of waiting.
+ * it accepts a CONNECT message from the parent window, starts the relay
+ * ServiceWorker, and bridges the parent's MessagePort with the SW. If the
+ * worker cannot be started, every call the parent makes on that port is
+ * answered with the error, so the parent's `initHttpService` /
+ * `callHttpService` reject instead of waiting, and a later CONNECT is accepted
+ * and tries again.
+ *
+ * A CONNECT may carry a second port: the handler then acknowledges on it,
+ * `{ ok: true }` once the bridge is up or `{ error }` if the worker could not
+ * start (`newRemoteRelayChannel` with a `timeout` waits for this).
  */
 export function getRelayWindowMessageHandler({
   swUrl = `${new URL("./relay-sw.js", moduleUrl)}`,
@@ -291,28 +325,43 @@ export function getRelayWindowMessageHandler({
   let externalPort: MessagePort | undefined;
   return async (ev) => {
     if (ev.data?.type !== "CONNECT") return;
-    const newExternalPort = ev.ports?.[0];
+    // ONLY THE EMBEDDING PAGE MAY CONNECT. Any window holding a reference to
+    // this frame can post to it, and the first CONNECT wins: another one
+    // landing first would leave the parent's calls hanging.
+    if (ev.source !== window.parent) return;
+    const [newExternalPort, ackPort] = ev.ports ?? [];
     if (!newExternalPort) return;
     if (externalPort) {
       newExternalPort.close();
+      ackPort?.close();
       return;
     }
-    externalPort = newExternalPort;
+    const port = newExternalPort;
+    externalPort = port;
     let registration: ServiceWorkerRegistration;
     try {
       ({ registration } = await registerServiceWorker({ swUrl, scopeUrl, timeout }));
     } catch (error) {
       const serialized = serializeError(error);
-      externalPort.onmessage = (event) => event.ports[0]?.postMessage({ error: serialized });
-      throw error;
+      port.onmessage = (event) => event.ports[0]?.postMessage({ error: serialized });
+      ackPort?.postMessage({ error: serialized });
+      ackPort?.close();
+      // Not rethrown: nothing awaits this handler, so a rethrow is only an
+      // unhandled rejection. The port answers with the error, and a later
+      // CONNECT may try again.
+      externalPort = undefined;
+      console.error("[relay] the relay ServiceWorker failed to start", error);
+      return;
     }
     const serviceWorkerPort = newServiceWorkerPort(registration);
     serviceWorkerPort.onmessage = (event) => {
-      externalPort?.postMessage(event.data, [...event.ports]);
+      port.postMessage(event.data, [...event.ports]);
     };
-    externalPort.onmessage = (event) => {
+    port.onmessage = (event) => {
       serviceWorkerPort.postMessage(event.data, [...event.ports]);
     };
+    ackPort?.postMessage({ ok: true });
+    ackPort?.close();
   };
 }
 
@@ -320,6 +369,16 @@ export interface RemoteRelayChannelOptions {
   baseUrl?: URL;
   url?: URL;
   container?: HTMLElement;
+  /**
+   * Wait, at most this many ms, for the relay page to acknowledge the
+   * connection (its worker started) before resolving, and reject — removing
+   * the iframe — if it does not: a missing `relay.html`, one a
+   * `frame-ancestors` policy blocks, or a worker that fails to start. Needs a
+   * relay page running this version or later; one that predates the
+   * acknowledgement always times out. Default: resolve at once, without
+   * waiting, as before.
+   */
+  timeout?: number;
 }
 
 export interface RemoteRelayChannel {
@@ -336,6 +395,7 @@ export async function newRemoteRelayChannel({
   baseUrl = new URL("../public-relay/", moduleUrl),
   url = new URL("relay.html", baseUrl),
   container = document.body,
+  timeout,
 }: RemoteRelayChannelOptions = {}): Promise<RemoteRelayChannel> {
   const messageChannel = new MessageChannel();
   const { iframe, promise } = newIFrame(url);
@@ -351,18 +411,52 @@ export async function newRemoteRelayChannel({
     outline: "none",
   });
   container.appendChild(iframe);
-  promise.then(() => {
-    iframe.contentWindow?.postMessage({ type: "CONNECT" }, "*", [messageChannel.port1]);
-  });
-  return {
-    baseUrl,
-    port: messageChannel.port2,
-    close: () => {
-      iframe.parentElement?.removeChild(iframe);
-      messageChannel.port1.close();
-      messageChannel.port2.close();
-    },
+  // Only the relay's own origin may receive the port: the frame may have been
+  // navigated elsewhere by the time it loads. An opaque origin cannot be
+  // named, so `"*"` stays for it.
+  const targetOrigin = url.origin === "null" ? "*" : url.origin;
+  const ack = timeout == null ? undefined : new MessageChannel();
+  const close = () => {
+    iframe.parentElement?.removeChild(iframe);
+    messageChannel.port1.close();
+    messageChannel.port2.close();
+    ack?.port1.close();
   };
+  const connected = promise.then(() => {
+    // The acknowledgement port goes second: a relay page of an earlier
+    // version reads only the first and ignores it.
+    const ports = ack ? [messageChannel.port1, ack.port2] : [messageChannel.port1];
+    iframe.contentWindow?.postMessage({ type: "CONNECT" }, targetOrigin, ports);
+  });
+  if (ack == null) {
+    // Nothing awaits it, so a load failure must not become an unhandled
+    // rejection; the calls on the port are what fail then.
+    connected.catch(() => {});
+  } else {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`The relay at ${url} did not answer within ${timeout} ms`)),
+          timeout,
+        );
+        connected.catch((error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        ack.port1.onmessage = (event) => {
+          clearTimeout(timer);
+          const { error } = (event.data ?? {}) as { error?: SerializedError };
+          if (error) reject(deserializeError(error));
+          else resolve();
+        };
+      });
+    } catch (error) {
+      close();
+      throw error;
+    }
+    ack.port1.close();
+  }
+  return { baseUrl, port: messageChannel.port2, close };
 
   function newIFrame(src: URL): { iframe: HTMLIFrameElement; promise: Promise<HTMLIFrameElement> } {
     const iframe = document.createElement("iframe");

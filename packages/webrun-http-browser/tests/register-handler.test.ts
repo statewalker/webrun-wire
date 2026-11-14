@@ -45,6 +45,10 @@ class FakeClients {
     this.byId.set(id, client);
     return client;
   }
+  /** The client went away: a closed tab, a navigation. */
+  remove(id: string): void {
+    this.byId.delete(id);
+  }
   /**
    * A client backed by a real `MessagePort`, so the worker's own CONNECT call
    * (`callChannel(client, "CONNECT", ...)`) actually reaches something.
@@ -183,6 +187,41 @@ describe('REGISTER: takeover "first-wins" under concurrency', () => {
       expect(registered).toEqual({ result: true });
       expect(unregistered).toEqual({ result: true });
       expect(idbStore.get("clientsIds")).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe("a holder that went away", () => {
+  // Its registry entry is dropped once the relay finds it gone; the mount it
+  // made must go with it, or its path keeps answering 410 instead of falling
+  // through to the network until the worker restarts.
+  it("loses its mount along with its registry entry", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self);
+    try {
+      expect(await register(self, "A", "svc", "/dyn/")).toEqual({ result: true });
+      clients.remove("A");
+      const gone = await dispatchFetch(self, "https://relay.example/dyn/x");
+      expect(gone.status).toBe(410);
+      expect(idbStore.get("clientsIds")).toEqual([]);
+      await expectNotTheRelays(self, "https://relay.example/dyn/x");
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps a host-declared mount", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, { mounts: [{ key: "app", path: "/app/" }] });
+    try {
+      expect(await register(self, "A", "app")).toEqual({ result: true });
+      clients.remove("A");
+      expect((await dispatchFetch(self, "https://relay.example/app/x")).status).toBe(410);
+      await expectTheRelays(self, "https://relay.example/app/x");
     } finally {
       stop();
     }

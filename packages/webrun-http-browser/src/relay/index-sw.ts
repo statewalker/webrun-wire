@@ -227,7 +227,12 @@ export function startRelayServiceWorker(
     });
   }
 
-  const clientsRegistry = newClientsRegistry({ self });
+  const clientsRegistry = newClientsRegistry({
+    self,
+    // A holder found gone loses its mount with its entry: otherwise its path
+    // answers 410 until the worker restarts, and goes to the network after.
+    onStale: (key) => removeRegisteredMount(mounts, key, hostKeys),
+  });
 
   // A RESTARTED WORKER HAS AN EMPTY TABLE AND A FULL DATABASE. The registry
   // survives in IndexedDB; the mounts are in memory, so they must be read back
@@ -426,6 +431,8 @@ export function startRelayServiceWorker(
 interface ClientsRegistryOptions {
   self: ServiceWorkerGlobalScope;
   key?: string;
+  /** Called when `getClient` drops the entry of a holder that went away. */
+  onStale?: (clientKey: string) => void;
 }
 
 interface ClientsRegistry {
@@ -436,7 +443,11 @@ interface ClientsRegistry {
   restoreMounts(table: MountTable, hostKeys?: ReadonlySet<string>): Promise<void>;
 }
 
-function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions): ClientsRegistry {
+function newClientsRegistry({
+  self,
+  key = "clientsIds",
+  onStale,
+}: ClientsRegistryOptions): ClientsRegistry {
   let _index: Record<string, RegisteredClient> | undefined;
 
   async function loadClientsIndex(): Promise<Record<string, RegisteredClient>> {
@@ -499,8 +510,11 @@ function newClientsRegistry({ self, key = "clientsIds" }: ClientsRegistryOptions
     const entry = index[clientKey];
     if (!entry) return undefined;
     const client = await self.clients.get(entry.clientId);
-    if (!client) {
+    // Only if the entry is still the one looked up: a REGISTER may have
+    // replaced it while `clients.get` was pending.
+    if (!client && index[clientKey] === entry) {
       delete index[clientKey];
+      onStale?.(clientKey);
       await storeClientsIndex();
     }
     return client ?? undefined;

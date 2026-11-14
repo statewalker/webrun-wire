@@ -110,8 +110,14 @@ connection.
 
 `newRemoteRelayChannel(options?)` takes `baseUrl` (default: the package's own
 `public-relay/` directory, resolved from the module URL), `url` (default
-`relay.html` under `baseUrl`) and `container` (default `document.body`). It
-resolves `{ baseUrl, port, close() }`.
+`relay.html` under `baseUrl`), `container` (default `document.body`) and
+`timeout`. It resolves `{ baseUrl, port, close() }`, at once by default. With
+`timeout` (ms) it first waits for the relay page to acknowledge the connection
+(its worker started) and rejects, removing the iframe, if it does not within
+that time: a missing `relay.html`, one a `frame-ancestors` policy blocks, or a
+worker that fails to start. The acknowledgement needs a relay page of this
+version or later; an older one never sends it, so leave `timeout` unset with
+those. The `CONNECT` is posted to the relay's origin only.
 
 ### Relay mode: mount services at paths
 
@@ -236,7 +242,10 @@ widest scope a script there may claim without a `Service-Worker-Allowed`
 header. A relay page that serves services anywhere else passes both, as above.
 `timeout` bounds the wait for the worker to activate. If the worker cannot start, every call the parent makes on the port
 is answered with that error, so the parent's `initHttpService` /
-`callHttpService` reject instead of hanging.
+`callHttpService` reject instead of hanging, and a later `CONNECT` is accepted
+and tries again. Only a `CONNECT` from the embedding window (`window.parent`)
+is accepted; another window holding a reference to the frame cannot take the
+connection first.
 
 ### Same-origin mode
 
@@ -838,7 +847,7 @@ Relay, page side:
 
 | Export | Purpose |
 | --- | --- |
-| `newRemoteRelayChannel(opts?)` / `RemoteRelayChannel`, `RemoteRelayChannelOptions` | Embed the relay iframe; resolves `{ baseUrl, port, close() }`. |
+| `newRemoteRelayChannel(opts?)` / `RemoteRelayChannel`, `RemoteRelayChannelOptions` | Embed the relay iframe; resolves `{ baseUrl, port, close() }`. Options `baseUrl`, `url`, `container`, `timeout`. |
 | `initHttpService(handler, { key, path?, port, streamTimeout? })` | Register a service (HTTP and sockets); resolves a function that unregisters it, whose promise settles once the relay acknowledged. |
 | `callHttpService(request, { key, port })` | Call a service through the port. |
 | `callWebSocketService(url, protocols, { key, port })` / `relayWebSocketClass({ key, port }, options?)` | Open a socket to a service through the port. |
@@ -854,7 +863,7 @@ ServiceWorker lifecycle:
 | Export | Purpose |
 | --- | --- |
 | `initServiceWorker({ swUrl, scopeUrl?, type?, timeout? })` / `InitServiceWorkerOptions` | Register a worker; resolves the controller, or the active worker if the page is not controlled. |
-| `newServiceWorkerPort(registration?)` | A `MessagePort` bridged to the controller, or to `registration.active`. |
+| `newServiceWorkerPort(registration?, { signal }?)` / `ServiceWorkerPortOptions` | A `MessagePort` bridged to the controller, or to `registration.active`. Aborting `signal` ends the bridge. |
 | `awaitActiveServiceWorker(registration, { timeout? })` | Resolves once `activated`. |
 | `awaitServiceWorkerControl(registration, { timeout?, reloadIfUncontrolled? })` | Resolves once the page is controlled, asking the worker to claim it. |
 | `handleClaimRequests(self)` | Worker side: answer `CLAIM` with `clients.claim()`. |
