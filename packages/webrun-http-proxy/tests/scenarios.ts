@@ -201,12 +201,15 @@ export async function runScenarios(origin: string): Promise<Outcome[]> {
 
   // 7 — THE REDIRECT DEFECT: a redirecting upstream must not be reported as
   // "unreachable". The shipping proxy returns 502 `upstream-unreachable`.
+  // ONE outcome on every platform: a browser's opaque redirect (status 0) and
+  // Node's or Deno's real 3xx both become `502 upstream-redirect`, so the
+  // upstream's absolute `Location` never reaches the caller.
   {
     const res = await call("/proxy/redirects/go");
     const marker = res.headers.get("x-webrun-proxy");
     check(
       "url upstream: a redirect is reported as a redirect, not as unreachable",
-      marker === "upstream-redirect" || (res.status >= 300 && res.status < 400),
+      res.status === 502 && marker === "upstream-redirect" && !res.headers.has("location"),
       `status=${res.status} marker=${marker}`,
     );
   }

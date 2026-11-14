@@ -63,6 +63,13 @@ export interface UrlUpstreamInit {
   fetchImpl?: typeof fetch;
   /** `Via` value; omitted, no `Via` is added. */
   via?: string;
+  /**
+   * Forward the caller's `cookie` request header and return the upstream's
+   * `set-cookie` response header. Off by default: the proxy origin's own
+   * session cookies are not the upstream's business, and an upstream must not
+   * plant cookies on the proxy's origin.
+   */
+  forwardCookies?: boolean;
 }
 
 /**
@@ -76,30 +83,22 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
   const doFetch = init.fetchImpl ?? globalThis.fetch;
 
   return async (request: Request): Promise<Response> => {
-    const from = new URL(request.url);
-    const target = new URL(`.${from.pathname}${from.search}`, ensureSlash(init.base));
-
-    const headers = new Headers(request.headers);
-    // WHATEVER THE CALLER'S SYSTEM TREATS AS ITS OWN CREDENTIAL OR IDENTITY
-    // is consumed by this hop, the way `Proxy-Authorization` is consumed by the
-    // proxy it names. This proxy knows nothing about the caller's trust model,
-    // so the names are configuration: httpeers passes its membership-token and
-    // proven-peer headers here, because re-issuing to a third party must hand
-    // it neither a mesh token (an upstream once echoed one back) nor which
-    // mesh peer called. Without this a caller would have to post-process the
-    // request, by which point it has already gone.
-    //
-    // `authorization` is NOT on any built-in list. It belongs to the
-    // application talking to the upstream -- a page calling an API with that
-    // API's own key -- and dropping it made such a call impossible through the
-    // proxy. A system that does put its credential there names it here.
-    for (const name of init.stripRequestHeaders ?? []) headers.delete(name);
-    // Hop-by-hop headers (RFC 9110 §7.6.1) are not the upstream's business.
-    for (const hop of HOP_BY_HOP) headers.delete(hop);
-    if (init.via != null) headers.set("via", init.via);
-    // Operator configuration last, so it wins over anything a caller sent.
-    for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
-    for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
+    let target: URL;
+    let headers: Headers;
+    try {
+      ({ target, headers } = buildOutbound(init, request));
+    } catch {
+      // An invalid `base`, a `headers` or `credential()` value that is not a
+      // valid header, or a `credential()` that throws: the request cannot be
+      // built. Answered like any other failure, never as a rejected promise.
+      // The underlying message is NOT echoed: for an invalid header value it
+      // quotes the value, and that value may be the credential.
+      return new Response(
+        `upstream ${init.base} could not be reached: the outbound request could not be built ` +
+          "(check the proxy's base, headers and credential)",
+        { status: 502, headers: { [MARKER]: "upstream-unreachable" } },
+      );
+    }
 
     // FIREFOX HAS NO `Request.prototype.body` (checked against 155):
     // `request.body` reads as `undefined` there even for a genuine payload, so
@@ -166,7 +165,19 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
       // AN OPAQUE REDIRECT HAS STATUS 0, and `new Response(body, {status: 0})`
       // throws — which is how the shipping proxy reports a redirecting
       // upstream as `502 upstream-unreachable`. Reported as what it is.
-      if (upstream.type === "opaqueredirect" || upstream.status === 0) {
+      //
+      // OUTSIDE A BROWSER `redirect: "manual"` returns the real 3xx instead,
+      // with the upstream's absolute `Location`: passed on, it would expose the
+      // upstream and send the caller around the proxy and its credential. It is
+      // reported the same way, so every platform gives one outcome. 304 and the
+      // other non-redirect 3xx statuses pass through.
+      if (
+        upstream.type === "opaqueredirect" ||
+        upstream.status === 0 ||
+        REDIRECT_STATUSES.has(upstream.status)
+      ) {
+        // Release the connection; the redirect's body is never read.
+        upstream.body?.cancel().catch(() => {});
         return new Response("upstream redirected; the proxy does not follow redirects", {
           status: 502,
           headers: { [MARKER]: "upstream-redirect" },
@@ -175,7 +186,7 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
       return new Response(upstream.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: upstream.headers,
+        headers: responseHeaders(upstream.headers, init.forwardCookies === true),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -199,6 +210,79 @@ const HOP_BY_HOP = [
   "upgrade",
 ];
 
+/** The Fetch spec's redirect statuses; `fetch` follows exactly these. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Content codings `fetch` implementations decode (Fetch spec "handle content
+ * codings"; undici, Deno, Bun and browsers). When the upstream used only these,
+ * the body handed to the proxy is already decoded.
+ */
+const DECODED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "zstd", "identity"]);
+
+/** Delete the hop-by-hop headers and every header the `Connection` header names. */
+function dropHopByHop(headers: Headers): void {
+  for (const token of (headers.get("connection") ?? "").split(",")) {
+    const name = token.trim();
+    if (name !== "") headers.delete(name);
+  }
+  for (const hop of HOP_BY_HOP) headers.delete(hop);
+}
+
+/** The upstream's response headers, as they may be handed to the caller. */
+function responseHeaders(upstream: Headers, forwardCookies: boolean): Headers {
+  const headers = new Headers(upstream);
+  dropHopByHop(headers);
+  if (!forwardCookies) headers.delete("set-cookie");
+  // `fetch` has already decoded the body, so the upstream's coding and its
+  // length (of the encoded bytes) no longer describe it. A client served
+  // through a Node adapter would otherwise wait for missing bytes or try to
+  // gunzip plain text.
+  const coding = headers.get("content-encoding");
+  if (coding !== null) {
+    const codings = coding
+      .split(",")
+      .map((c) => c.trim().toLowerCase())
+      .filter(Boolean);
+    if (codings.every((c) => DECODED_CODINGS.has(c))) {
+      headers.delete("content-encoding");
+      headers.delete("content-length");
+    }
+  }
+  return headers;
+}
+
 function ensureSlash(base: string): string {
   return base.endsWith("/") ? base : `${base}/`;
+}
+
+/** The upstream URL and the outbound headers. Throws on bad configuration. */
+function buildOutbound(init: UrlUpstreamInit, request: Request): { target: URL; headers: Headers } {
+  const from = new URL(request.url);
+  const target = new URL(`.${from.pathname}${from.search}`, ensureSlash(init.base));
+
+  const headers = new Headers(request.headers);
+  // WHATEVER THE CALLER'S SYSTEM TREATS AS ITS OWN CREDENTIAL OR IDENTITY
+  // is consumed by this hop, the way `Proxy-Authorization` is consumed by the
+  // proxy it names. This proxy knows nothing about the caller's trust model,
+  // so the names are configuration: httpeers passes its membership-token and
+  // proven-peer headers here, because re-issuing to a third party must hand
+  // it neither a mesh token (an upstream once echoed one back) nor which
+  // mesh peer called. Without this a caller would have to post-process the
+  // request, by which point it has already gone.
+  //
+  // `authorization` is NOT on any built-in list. It belongs to the
+  // application talking to the upstream -- a page calling an API with that
+  // API's own key -- and dropping it made such a call impossible through the
+  // proxy. A system that does put its credential there names it here.
+  for (const name of init.stripRequestHeaders ?? []) headers.delete(name);
+  // Hop-by-hop headers (RFC 9110 §7.6.1) are not the upstream's business,
+  // and neither are the ones the caller's `Connection` header names.
+  dropHopByHop(headers);
+  if (!init.forwardCookies) headers.delete("cookie");
+  if (init.via != null) headers.set("via", init.via);
+  // Operator configuration last, so it wins over anything a caller sent.
+  for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
+  for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
+  return { target, headers };
 }

@@ -17,14 +17,19 @@
  *     third-party origin has no business seeing them. `authorization` is not
  *     special: it belongs to the application calling the upstream and is
  *     forwarded unless named;
- *   - hop-by-hop headers (RFC 9110 §7.6.1) are dropped;
+ *   - hop-by-hop headers (RFC 9110 §7.6.1), and those `Connection` names,
+ *     are dropped both ways, and cookies too unless `forwardCookies` is set;
+ *   - a body `fetch` has decoded loses its `content-encoding` and
+ *     `content-length`;
  *   - the credential is read at REQUEST time, so it can be typed while traffic
  *     flows;
  *   - the body streams rather than buffering, and the caller's `signal` is
  *     forwarded so an abandoned request abandons the upstream call;
  *   - an opaque redirect (status 0) is reported as a redirect rather than as
  *     `502 upstream-unreachable`, which is what constructing a `Response` with
- *     status 0 throwing inside a `try` used to produce.
+ *     status 0 throwing inside a `try` used to produce; a real 3xx redirect
+ *     (Node, Deno) is reported the same way;
+ *   - a bad `base`, header or credential answers 502 rather than rejecting.
  *
  * Persisting route configuration went with the router, for the same reason:
  * the shape of that configuration belongs to whoever defines the routes.
