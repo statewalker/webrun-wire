@@ -62,7 +62,7 @@ event names used), `ParticipantInfo` (exported, not used by any API here).
 | option | default | meaning |
 | --- | --- | --- |
 | `iceServers` | `DEFAULT_ICE_SERVERS` | ICE servers. |
-| `connectionTimeout` | 30000 ms | How long `open()` waits for the data channel. |
+| `connectionTimeout` | 30000 ms | How long `open()` waits for the data channel (for `QrSignaling`'s initiator, from `accept`). |
 | `iceGatheringTimeout` | 5000 ms | How long `QrSignaling` waits for ICE gathering before using what it has. |
 | `channelLabel` | `"webrun-data"` | Data channel label. |
 | `ordered` | `true` | Ordered delivery. |
@@ -209,9 +209,9 @@ the initiator has applied the answer, which needs the answer QR. So `answer()` r
 above does not complete. The test suite uses a mock `RTCPeerConnection` that opens the channel as
 soon as both descriptions are set on one side, so it does not exercise this ordering.
 
-`offer()` starts waiting for its channel immediately. If `accept` is never called, that wait
-rejects after `connectionTimeout` with nothing attached to it: an unhandled rejection, which
-terminates a Node process.
+`offer()` does not wait for its channel: `accept` does, so `connectionTimeout` counts from
+`accept`, not from the offer, and the people scanning the codes can take as long as they need.
+If applying the answer fails, `accept` closes the connection and rejects.
 
 ### How QR payloads stay small
 

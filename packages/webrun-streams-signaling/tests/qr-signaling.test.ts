@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCompressedSignal,
   decodeSignal,
@@ -66,5 +66,30 @@ describe("QrSignaling", () => {
 
     chB.send(new Uint8Array([42]));
     expect(await readOne(chA)).toEqual(new Uint8Array([42]));
+  });
+
+  describe("(#128) the connection timeout", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("does not run while the people exchange QR codes", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      const rtc = makeMockRtc();
+      const deviceA = new QrSignaling({ sessionId: "slow", connection: { rtc } });
+      const deviceB = new QrSignaling({ sessionId: "slow", connection: { rtc } });
+
+      const offered = deviceA.offer();
+      await vi.advanceTimersByTimeAsync(100);
+      const { qr: offerQr, accept } = await offered;
+      // Two QR scans take longer than the 30 s connection timeout.
+      await vi.advanceTimersByTimeAsync(45_000);
+      vi.useRealTimers();
+
+      const { qr: answerQr, channel: chB } = await deviceB.answer(offerQr);
+      const chA = await accept(answerQr);
+      chA.send(new Uint8Array([1]));
+      expect(await readOne(chB)).toEqual(new Uint8Array([1]));
+    });
   });
 });

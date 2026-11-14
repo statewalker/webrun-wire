@@ -181,7 +181,6 @@ export class QrSignaling {
   /** Create an offer QR; `accept(answerQr)` finishes the handshake. */
   async offer(): Promise<{ qr: string; accept(answerQr: string): Promise<ByteChannel> }> {
     const pc = new PeerConnection("initiator", this.connection);
-    const channel = pc.open();
     await pc.connect();
     await pc.waitForIceGathering();
 
@@ -194,10 +193,19 @@ export class QrSignaling {
     return {
       qr,
       accept: async (answerQr: string): Promise<ByteChannel> => {
-        const parsed = parseCompressedSignal(decodeSignal(answerQr));
-        await pc.handleSignal({ type: "answer", sdp: parsed.description.sdp });
-        for (const candidate of parsed.candidates) {
-          await pc.handleSignal({ type: "candidate", candidate });
+        // The connection timeout starts here, not at offer time: the QR
+        // exchange between the two takes as long as the people take.
+        const channel = pc.open();
+        try {
+          const parsed = parseCompressedSignal(decodeSignal(answerQr));
+          await pc.handleSignal({ type: "answer", sdp: parsed.description.sdp });
+          for (const candidate of parsed.candidates) {
+            await pc.handleSignal({ type: "candidate", candidate });
+          }
+        } catch (err) {
+          channel.catch(() => undefined);
+          pc.close();
+          throw err;
         }
         return channel;
       },
