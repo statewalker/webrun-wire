@@ -1,5 +1,16 @@
 # @statewalker/webrun-streams
 
+## 0.4.0
+
+### Minor Changes
+
+- cb56b7d: `recieveIterator` is renamed `receiveIterator` (source file `receive-iterator.ts`). The misspelt name stays exported as a `@deprecated` alias of the same function, so existing importers keep working.
+
+### Patch Changes
+
+- cb56b7d: `deserializeError` copies the payload key by key and skips `__proto__` and `constructor`, so a peer can no longer choose the prototype of the rejected error (it is always an `instanceof Error`).
+- cb56b7d: `newAsyncGenerator(init, true)`: a queued `done(error?)` is no longer dropped when a value is pushed after it. The consumer now sees the completion and its error; the later value resolves `false`.
+
 ## 0.3.0
 
 ### Minor Changes

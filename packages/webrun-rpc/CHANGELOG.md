@@ -1,5 +1,23 @@
 # @statewalker/webrun-rpc
 
+## 0.12.0
+
+### Minor Changes
+
+- 359ff10: Rename the misspelt `recieve` / `RecieveOptions` to `receive` / `ReceiveOptions` (source file `receive.ts`). The old names stay exported as deprecated aliases, so nothing breaks.
+
+### Patch Changes
+
+- 359ff10: `listenPort` no longer turns a reply it cannot post (an unclonable result or error field) into an unhandled rejection with a caller that waits until its timeout: the caller now gets a `response:error` naming the reason. `callPort` whose `postMessage` throws synchronously now rejects and removes its message and abort listeners instead of leaving them installed.
+- 359ff10: `recieve` (and so `listenBidi`, `ioHandle`, `ioSend`) no longer acknowledges and drops a chunk that arrives before the consumer starts reading its input: the reply is withheld until the chunk is taken. A handler that awaited anything before pulling its input used to lose the first chunks, or hang when the final `done` was lost too.
+- 359ff10: The stream tier (`send`, and so `ioSend`, `ioHandle`, `callBidi`, `listenBidi`) no longer fails a consumer that spends more than 1 s on one item: its chunk calls default to `NO_TIMEOUT`, as the docs already described. An explicit `timeout` option still bounds each chunk call.
+  
+  A handler that stops without reading all of its input no longer leaves the caller waiting for chunk replies that never come: `ioHandle` then posts `cancel-channel` and `ioSend` stops sending, and `callBidi` stops sending once the peer's outer call settles (so an older peer that posts no `cancel-channel` is covered too).
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+  - @statewalker/webrun-streams@0.4.0
+
 ## 0.11.1
 
 ### Patch Changes

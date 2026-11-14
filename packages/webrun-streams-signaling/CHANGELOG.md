@@ -1,5 +1,18 @@
 # @statewalker/webrun-streams-signaling
 
+## 0.3.0
+
+### Minor Changes
+
+- 337b572: Channels over a data channel end instead of losing messages silently, and the port stack can pace them. `byteChannelFromDataChannel` ends the channel on a non-byte message (it threw inside the listener, dropping the message, so a call waited for ever) and on a `send` that throws (Chrome's full send queue was silent loss). `ByteChannel` gains optional `bufferedAmount` / `whenDrained()`; `byteChannelFromDataChannel` provides them from the data channel, and `messageTargetOverByteChannel`'s `target` exposes them, as the ws, peerjs, livekit and webrtc adapters do, so `overPipe` with `frameSize` waits for the transport. New export `DRAIN_LOW_WATER` (256 KiB).
+- 337b572: `PeerManager` no longer leaves failures as unhandled rejections, and forgets failed connections. A signal a connection rejects (an offer during glare, malformed SDP or candidates) and an inbound connection whose channel never opens now close and forget the connection and are reported through the new optional `onError(error, peerId)` option; a failed `connect()` rejects and forgets its connection. A connection whose state becomes `failed` or `closed` is forgotten too, and a new offer from a peer replaces the old connection to it when this side answered that peer or already applied its answer, so either side can reconnect at once; `connect()` replaces any existing connection to the peer. New `PeerConnection.hasRemoteDescription()`. `PeerConnection.open()` rejects when the connection is closed before the channel opens.
+- 337b572: `byteChannelFromRoom` now follows `webrun-streams-livekit`'s conventions instead of duplicating its older behaviour. Its packets carry a topic (`options.topic`, default `DEFAULT_ROOM_TOPIC`, `"webrun/port-stack"`) and packets on any other topic are ignored, so another pipe's packets in the same room no longer leak in. Closing one end publishes a goodbye on `<topic>/close`, so the peer's channel ends while the room stays connected. A `send` past `options.maxFrameBytes` (default `DEFAULT_ROOM_MAX_FRAME_BYTES`, 64 000) ends the channel and throws `RangeError`. It also reports `bufferedAmount` / `whenDrained()`. `RoomManager.channelTo(peerId, options?)` passes the options through. Packets now carry a topic, so both ends must upgrade together: an older end's untopiced packets are ignored.
+
+### Patch Changes
+
+- 337b572: `QrSignaling.offer()` no longer starts the connection timeout at offer time. The 30 s `connectionTimeout` ran while people scanned the two QR codes, so a slower exchange made `accept()` return an already-rejected channel, and until `accept()` was called that rejection was unhandled. The timeout now starts in `accept()`, which also closes the connection and rejects if the answer cannot be applied.
+- 337b572: QR payloads keep what a candidate needs. `compressCandidate` dropped `raddr` / `rport` / `tcptype`, producing invalid TCP candidates; such a candidate now goes in the existing raw `R:` form with just those attributes. An `sdpMLineIndex` of 0 in a raw candidate no longer comes back as null, and a null one travels as an empty field. Payloads stay readable by older versions.
+
 ## 0.2.0
 
 ### Minor Changes

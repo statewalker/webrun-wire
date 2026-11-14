@@ -1,5 +1,19 @@
 # @statewalker/webrun-streams-libp2p
 
+## 0.4.0
+
+### Minor Changes
+
+- e86fe11: `duplexOverStream` (and so `connect` / `serve`): the frame parser now caps a frame's payload with a new `maxFrameBytes` option (default `DEFAULT_MAX_FRAME_BYTES`, 64 MiB, newly exported), reassembles frames in a doubling buffer instead of re-copying the whole buffer per incoming piece, and fails the call and aborts the stream on a malformed frame length instead of buffering for ever. Outbound producer chunks larger than 64 KiB are sent as several frames; frames are self-delimiting, so older receivers reassemble the same bytes (#125).
+
+### Patch Changes
+
+- e86fe11: `messageTargetOverStream`'s `postMessage` throws `TypeError` for anything but bytes (`Uint8Array`, `ArrayBuffer` or a view), as the other adapters' byte pipes do, instead of sending an empty frame (#148).
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+- Updated dependencies [cb56b7d]
+  - @statewalker/webrun-streams@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-http-proxy",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Re-issue an HTTP request to an outside origin, safely: credentials consumed, hop-by-hop headers dropped, body streamed.",
   "bugs": {
