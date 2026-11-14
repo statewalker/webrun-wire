@@ -42,6 +42,12 @@ export type HttpDataOptions = {
    * takes.
    */
   requestIdleMs?: number;
+  /**
+   * `httpServe` / `serveFetchOverDuplex` only: include the error's `stack` in the
+   * `x-webrun-error` header of a 400 or 500. Off by default: a stack trace shows the
+   * serving side's file paths to any peer that sends one malformed request.
+   */
+  includeErrorStack?: boolean;
 };
 
 export interface HttpFetchResult {
@@ -147,10 +153,12 @@ function encodeErrorResponse(
   codec: MessageCodec,
   error: unknown,
   method: string,
+  includeStack: boolean,
   status = 500,
   statusText = "Internal Server Error",
 ): AsyncGenerator<Uint8Array> {
   const serialized = serializeError(error);
+  if (!includeStack) delete serialized.stack;
   let detail = asciiJson(serialized);
   if (detail.length > MAX_DETAIL_CHARS) detail = asciiJson({ message: serialized.message });
   // The fallback above is itself unbounded — a >64 KiB handler message would
@@ -372,6 +380,7 @@ async function drain(output: AsyncGenerator<Uint8Array>): Promise<void> {
  */
 export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {}): Duplex {
   const codec = options.codec ?? defaultCodec;
+  const includeStack = options.includeErrorStack === true;
   return (input) => {
     const abandoned = new AbortController();
     return abortingOnReturn(
@@ -404,7 +413,7 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
       // The method is unknowable — the request line may be what failed — so
       // encode as if for GET, which permits a body and so lets the peer read
       // why it was refused.
-      yield* encodeErrorResponse(refusalCodec, error, "GET", 400, "Bad Request");
+      yield* encodeErrorResponse(refusalCodec, error, "GET", includeStack, 400, "Bad Request");
       return;
     }
     // Reply in kind: answer with the codec that actually read the request, so a
@@ -414,7 +423,7 @@ export function httpServe(handler: HttpDataHandler, options: HttpDataOptions = {
     try {
       result = await handler(decoded.envelope, decoded.body, context);
     } catch (error) {
-      yield* encodeErrorResponse(replyCodec, error, decoded.envelope.method);
+      yield* encodeErrorResponse(replyCodec, error, decoded.envelope.method, includeStack);
       return;
     }
     let completed = false;

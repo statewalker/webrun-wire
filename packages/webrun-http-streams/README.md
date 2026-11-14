@@ -400,14 +400,17 @@ it can:
 
 | Situation | On the wire | What a webrun caller sees |
 | --- | --- | --- |
-| Handler throws | `500 Internal Server Error`, message in the body | `httpFetch` rejects with the peer's error; `name`, `message`, `stack` and custom fields preserved |
+| Handler throws | `500 Internal Server Error`, message in the body | `httpFetch` rejects with the peer's error; `name`, `message` and custom fields preserved (`stack` only with `includeErrorStack`) |
 | Request cannot be parsed | `400 Bad Request`, reason in the body | `httpFetch` rejects with the parse error |
 | Transport fails | nothing | the transport error propagates unchanged |
 
 Both error responses carry the serialised error in the `x-webrun-error` header
 (`PEER_ERROR_HEADER`). A webrun peer re-throws it; any other client reads a
 normal response. The header value is escaped to printable ASCII and capped at
-4096 characters. Without the cap a huge message would push the head past the
+4096 characters. It carries no `stack` unless the serving side passes
+`includeErrorStack: true` to `httpServe` / `serveFetchOverDuplex`: a stack
+trace would show the server's file paths to any peer that sends one malformed
+request line. Without the cap a huge message would push the head past the
 reader's `maxHeaderBytes`, and the caller would see
 `head section exceeds 65536 bytes` instead of the real error. On this path the
 caller also cancels the `Duplex` output, which frees the call's slot on a
@@ -416,7 +419,7 @@ multiplexing transport.
 `instanceof HttpParseError` holds only when this side's decoder refused the
 peer's bytes. When the peer refuses your request, its 400 comes back through
 the header, and `deserializeError` builds a plain `Error` with the original
-`name`, `message`, `stack` and fields, not the original class. The same is true
+`name`, `message` and fields (and `stack`, if the peer sends it), not the original class. The same is true
 of every error class crossing this boundary, including your handler's own
 `Error` subclasses. A refusal is answered in the format the peer was speaking.
 

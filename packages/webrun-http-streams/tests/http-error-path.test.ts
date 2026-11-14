@@ -291,3 +291,55 @@ describe("codec selection", () => {
     expect(await text(body)).toBe("saw GET");
   });
 });
+
+describe("x-webrun-error carries no stack trace by default (#144)", () => {
+  const peerError = async (call: Duplex) => {
+    const wire = call(httpCodec.encodeRequest({ url: "http://h.test/x", method: "GET", headers: [] }));
+    const decoded = await httpCodec.decodeResponse(wire, { method: "GET" });
+    await text(decoded.body);
+    const found = decoded.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
+    return JSON.parse(found?.[1] ?? "{}") as Record<string, unknown>;
+  };
+
+  it("omits the stack of a handler error (500)", async () => {
+    const call = httpServe(async () => {
+      throw Object.assign(new Error("boom"), { code: "E_BOOM" });
+    });
+    const detail = await peerError(call);
+    expect(detail).toMatchObject({ message: "boom", code: "E_BOOM" });
+    expect(detail).not.toHaveProperty("stack");
+  });
+
+  it("omits the stack of a refused request (400)", async () => {
+    const call = httpServe(async () => ({ envelope: { status: 200, statusText: "OK", headers: [] } }));
+    const out = call([new TextEncoder().encode("NOT A REQUEST LINE\r\n\r\n")]);
+    const decoded = await httpCodec.decodeResponse(out, { method: "GET" });
+    expect(decoded.envelope.status).toBe(400);
+    const found = decoded.envelope.headers.find(([k]) => k.toLowerCase() === PEER_ERROR_HEADER);
+    const detail = JSON.parse(found?.[1] ?? "{}");
+    expect(detail.message).toBeTruthy();
+    expect(detail).not.toHaveProperty("stack");
+  });
+
+  it("includes it with includeErrorStack: true", async () => {
+    const call = httpServe(
+      async () => {
+        throw new Error("boom");
+      },
+      { includeErrorStack: true },
+    );
+    const detail = await peerError(call);
+    expect(typeof detail.stack).toBe("string");
+  });
+
+  it("serveFetchOverDuplex honours the option too", async () => {
+    const throwing = async (): Promise<Response> => {
+      throw new Error("boom");
+    };
+    expect(await peerError(serveFetchOverDuplex(throwing))).not.toHaveProperty("stack");
+    expect(
+      typeof (await peerError(serveFetchOverDuplex(throwing, { includeErrorStack: true })))
+        .stack,
+    ).toBe("string");
+  });
+});
