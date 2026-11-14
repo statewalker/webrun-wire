@@ -225,6 +225,7 @@ One runtime dependency, `@statewalker/webrun-streams`, for `serializeError` /
 
 ```sh
 pnpm test             # vitest run
+pnpm run typecheck    # tsc --noEmit
 pnpm run build        # rolldown + tsc --emitDeclarationOnly
 pnpm run lint         # biome check src tests
 ```
