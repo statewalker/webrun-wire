@@ -1,4 +1,4 @@
-import { postCancelChannel } from "./cancel-channel.js";
+import { listenCancelChannel, postCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 import { type ReceiveOptions, receive } from "./receive.js";
@@ -46,25 +46,37 @@ export async function* ioSend<T, U = T>(
     else cancelSignal.addEventListener("abort", () => sendAbort.abort(), { once: true });
   }
 
+  // The peer's `ioHandle` posts `cancel-channel` when its handler stopped
+  // without reading all of our output: nothing answers our chunk calls any
+  // more, so stop sending. (An older peer never posts it; `callBidi` also
+  // stops the send once the peer's outer call settles.)
+  const unsubscribeCancel = channelName
+    ? listenCancelChannel(port, channelName, () => sendAbort.abort())
+    : () => {};
+
   // Combine outer cancel signal with receive's force-close mechanism.
   const receiveOpts: ReceiveOptions = { ...receiveOptions, signal: cancelSignal };
 
-  for await (const input of receive<T>(port, receiveOpts)) {
-    const sendPromise = send<U>(port, output, { ...receiveOptions, signal: sendAbort.signal });
-    try {
-      yield* input;
-      inputEndedNormally = true;
-    } finally {
-      if (!inputEndedNormally) {
-        postCancelChannel(port, channelName);
-        sendAbort.abort();
-      }
+  try {
+    for await (const input of receive<T>(port, receiveOpts)) {
+      const sendPromise = send<U>(port, output, { ...receiveOptions, signal: sendAbort.signal });
       try {
-        await sendPromise;
-      } catch {
-        /* swallow — consumer is done either way */
+        yield* input;
+        inputEndedNormally = true;
+      } finally {
+        if (!inputEndedNormally) {
+          postCancelChannel(port, channelName);
+          sendAbort.abort();
+        }
+        try {
+          await sendPromise;
+        } catch {
+          /* swallow — consumer is done either way */
+        }
       }
+      break;
     }
-    break;
+  } finally {
+    unsubscribeCancel();
   }
 }

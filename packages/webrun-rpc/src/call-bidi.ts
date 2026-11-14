@@ -47,10 +47,16 @@ export async function* callBidi<TIn, TOut>(
   });
 
   let outerError: unknown;
-  promise.catch((err) => {
-    outerError = err;
-    cancelInner.abort();
-  });
+  promise.then(
+    // The peer's handler has finished, and our consumer has already taken
+    // its last chunk (its reply comes after ours to that chunk). Whatever
+    // input the handler did not read nobody will answer: stop sending it.
+    () => cancelInner.abort(),
+    (err) => {
+      outerError = err;
+      cancelInner.abort();
+    },
+  );
 
   try {
     yield* sendIter;

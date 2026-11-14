@@ -850,9 +850,12 @@ yields one async generator per inbound stream and never ends on its own. A chunk
 before the consumer starts reading is held, unacknowledged, until it is taken, so a handler may
 await anything before it pulls its input. `ioSend` / `ioHandle`
 pair them in both directions, and `ioSend` posts `{ type: "cancel-channel", channelName }` when
-its consumer stops early so the producer stops without waiting for timeouts. `callBidi` picks a
-random sub-channel, announces it with an outer `callPort` (timeout `bidiTimeout`), and runs
-`ioSend` on it; if the outer call rejects, the inner stream is cancelled and the error rethrown.
+its consumer stops early so the producer stops without waiting for timeouts; `ioHandle` posts the
+same when its handler stops without reading its input to the end, and `ioSend` then stops
+sending. `callBidi` picks a random sub-channel, announces it with an outer `callPort` (timeout
+`bidiTimeout`), and runs `ioSend` on it; once the outer call settles, any input the handler did
+not read is no longer sent (this also covers an older peer that posts no `cancel-channel`), and
+if the outer call rejects, the inner stream is cancelled and the error rethrown.
 
 ### Conformance
 
