@@ -19,6 +19,8 @@ jobs:
       baseline: library
       # publint (errors fail) and attw (default profile esm-only) on every packed public package.
       package-checks: true
+      # gitleaks on the files and on every commit of the pull request, before the install.
+      secret-scan: true
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
