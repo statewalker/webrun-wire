@@ -23,6 +23,21 @@ function checkEvents(events: readonly string[], where: string): readonly string[
   return events;
 }
 
+/** Characters RFC 3986 allows raw in a path segment (`pchar`), which the URL parser leaves alone. */
+const NOT_PCHAR = /[^A-Za-z0-9\-._~!$&'()*+,;=:@]/gu;
+
+/**
+ * The topic as one path segment, percent-encoding only what the URL parser
+ * would otherwise mangle: `%`, `/`, `?`, `#`, a space and anything else that is
+ * not a path character. Every other topic keeps the form it always had on the
+ * wire (`user:42` stays `/user:42`), so a new client still reaches an old handler.
+ * The handler percent-decodes the segment. (`.` and `..` cannot be topics: the
+ * URL parser resolves them away, encoded or not.)
+ */
+function topicSegment(topic: string): string {
+  return topic.replace(NOT_PCHAR, (c) => encodeURIComponent(c));
+}
+
 export interface PubSubClientOptions {
   /** Injected for tests, and for runtimes with a non-global EventSource. */
   EventSourceImpl?: typeof EventSource;
@@ -92,8 +107,7 @@ export function newPubSubClient(
       const names =
         options.events === undefined ? defaultEvents : checkEvents(options.events, "subscribe");
 
-      // One path segment, so a space, `/`, `?` or `#` in the topic survives the trip.
-      const source = new Impl(`${base}/${encodeURIComponent(topic)}`);
+      const source = new Impl(`${base}/${topicSegment(topic)}`);
       open.add(source);
 
       const listeners: Array<[string, (e: Event) => void]> = [];

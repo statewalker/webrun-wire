@@ -137,7 +137,7 @@ describe("newPubSub handler — hostile input", () => {
   });
 
   // #136: the client sent topics unencoded and the server read the raw segment.
-  it.each(["my topic", "a/b", "what?", "50%", "x#y"])(
+  it.each(["my topic", "a/b", "what?", "50%", "x#y", "user:42", "café", "😀"])(
     "round-trips the topic %j between client and server",
     async (topic) => {
       // Capture the URL the real client opens, then serve it with the real handler.

@@ -68,6 +68,18 @@ describe("newPubSubClient", () => {
     ]);
   });
 
+  it("keeps the old wire form for topics the URL parser leaves alone", () => {
+    FakeEventSource.instances.length = 0;
+    const client = newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+    });
+    const topics = ["user:42", "a@b", "x$y&z+w,v;u=t", "it's(ok)!*", "a-b_c.d~e"];
+    for (const topic of topics) client.subscribe(topic, () => {});
+    expect(FakeEventSource.instances.map((s) => new URL(s.url).pathname)).toEqual(
+      topics.map((t) => `/_events/${t}`),
+    );
+  });
+
   it("parses the JSON payload and reports the event id", () => {
     FakeEventSource.instances.length = 0;
     const client = newPubSubClient("http://h/_events", {

@@ -93,9 +93,12 @@ off(); // one subscription
 client.close(); // every subscription of this client
 ```
 
-Each `subscribe` opens one `EventSource` on
-`<baseUrl>/<encodeURIComponent(topic)>`, so a topic may hold a space, `/`, `?`
-or `#`. Options:
+Each `subscribe` opens one `EventSource` on `<baseUrl>/<topic>`, with the
+topic as one path segment: `%`, `/`, `?`, `#`, a space and any other character
+that is not valid in a path segment are percent-encoded, and the handler
+decodes them. Other topics go on the wire as they are (`user:42` is
+`/user:42`). `.` and `..` cannot be topics: the URL parser resolves them away.
+Options:
 `events`, `onGap`, `onError`, `onOpen`, and `EventSourceImpl` for runtimes
 without a global `EventSource`. With no `EventSource` at all,
 `newPubSubClient` throws `no EventSource available; pass options.EventSourceImpl`.
