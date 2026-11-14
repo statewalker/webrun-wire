@@ -39,14 +39,32 @@ export async function* recieve<T>(
   options: RecieveOptions = {},
 ): AsyncGenerator<AsyncGenerator<T>> {
   const { signal, ...listenOptions } = options;
-  let onMessage: ((chunk: IteratorChunk<T>) => Promise<boolean>) | undefined;
+  type Deliver = (chunk: IteratorChunk<T>) => Promise<boolean>;
+  let onMessage: Deliver | undefined;
   let currentIter: AsyncGenerator<T> | undefined;
   let forceClose: (() => void) | undefined;
+  let finished = false;
+  // `recieveIterator`'s installer runs lazily, on the consumer's first
+  // `.next()`. A chunk that arrives before that must wait for it: replying
+  // first would acknowledge a chunk nobody took (the same race
+  // `duplexOverPort` closes with its own `ready()`).
+  const waiting: Array<() => void> = [];
+  const ready = (): Promise<void> =>
+    onMessage || finished ? Promise.resolve() : new Promise<void>((r) => waiting.push(r));
+  const wake = () => {
+    for (const r of waiting.splice(0)) r();
+  };
 
   const close = listenPort<IteratorChunk<T>, void>(
     port,
     async ({ done, value, error }) => {
-      await onMessage?.({ done, value, error });
+      await ready();
+      const deliver = onMessage;
+      if (!deliver) throw new Error("recieve: the receiving side is closed");
+      // The stream this chunk ends is over: a chunk after it belongs to the
+      // next stream, and waits for that stream's consumer.
+      if (done || error) onMessage = undefined;
+      await deliver({ done, value, error });
     },
     listenOptions,
   );
@@ -66,10 +84,17 @@ export async function* recieve<T>(
   try {
     while (true) {
       currentIter = recieveIterator<T>((deliver) => {
-        onMessage = deliver;
         forceClose = () => {
           void deliver({ done: true });
         };
+        if (signal?.aborted) {
+          // The signal fired before this installer ran: end at once instead
+          // of waiting for a chunk the peer will not send.
+          forceClose();
+          return;
+        }
+        onMessage = deliver;
+        wake();
       });
       yield currentIter;
     }
@@ -77,6 +102,8 @@ export async function* recieve<T>(
     close();
     signal?.removeEventListener("abort", onAbort);
     onMessage = undefined;
+    finished = true;
+    wake();
     forceClose = undefined;
     if (currentIter) {
       try {

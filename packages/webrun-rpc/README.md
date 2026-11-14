@@ -841,7 +841,9 @@ its transport closed can register a signal and pending calls reject instead of w
 timeout. The ports of `multiplexPort` register one, which fires when the port closes.
 
 `send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`; `recieve`
-yields one async generator per inbound stream and never ends on its own. `ioSend` / `ioHandle`
+yields one async generator per inbound stream and never ends on its own. A chunk that arrives
+before the consumer starts reading is held, unacknowledged, until it is taken, so a handler may
+await anything before it pulls its input. `ioSend` / `ioHandle`
 pair them in both directions, and `ioSend` posts `{ type: "cancel-channel", channelName }` when
 its consumer stops early so the producer stops without waiting for timeouts. `callBidi` picks a
 random sub-channel, announces it with an outer `callPort` (timeout `bidiTimeout`), and runs
