@@ -2,7 +2,12 @@ import { msgpackCodec } from "@statewalker/webrun-msgpack";
 import { connect, overPipe, serve } from "@statewalker/webrun-rpc";
 import { collectBytes } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
-import { byteChannelFromRoom } from "../src/byte-channel.js";
+import {
+  byteChannelFromRoom,
+  DEFAULT_ROOM_MAX_FRAME_BYTES,
+  DEFAULT_ROOM_TOPIC,
+  DRAIN_LOW_WATER,
+} from "../src/byte-channel.js";
 import { DEFAULT_MAX_MESSAGE_SIZE, messageTargetOverByteChannel } from "../src/message-target.js";
 import type { ByteChannel } from "../src/types.js";
 import { MockRoom, RoomBus } from "./mocks/room-bus.js";
@@ -167,9 +172,81 @@ describe("(review) byteChannelFromRoom ends, so the port stack over it does not 
   it("ignores packets with no participant", async () => {
     const { alice, a } = await roomPair();
     const it = a.recv[Symbol.asyncIterator]();
-    alice.emit("dataReceived", new Uint8Array([9]), undefined);
-    alice.emit("dataReceived", new Uint8Array([7]), { identity: "bob" });
+    alice.emit("dataReceived", new Uint8Array([9]), undefined, undefined, DEFAULT_ROOM_TOPIC);
+    alice.emit(
+      "dataReceived",
+      new Uint8Array([7]),
+      { identity: "bob" },
+      undefined,
+      DEFAULT_ROOM_TOPIC,
+    );
     expect([...((await it.next()).value as Uint8Array)]).toEqual([7]);
+  });
+
+  it("(#146) takes only its own topic, sent with the livekit adapter's default", async () => {
+    const { alice, a } = await roomPair();
+    expect(DEFAULT_ROOM_TOPIC).toBe("webrun/port-stack");
+    const it = a.recv[Symbol.asyncIterator]();
+    alice.emit("dataReceived", new Uint8Array([1]), { identity: "bob" }, undefined, "other-pipe");
+    alice.emit("dataReceived", new Uint8Array([2]), { identity: "bob" });
+    alice.emit(
+      "dataReceived",
+      new Uint8Array([3]),
+      { identity: "bob" },
+      undefined,
+      DEFAULT_ROOM_TOPIC,
+    );
+    expect([...((await it.next()).value as Uint8Array)]).toEqual([3]);
+  });
+
+  it("(#146) two pipes on different topics to the same participant stay apart", async () => {
+    const { alice, bob } = await roomPair();
+    const a1 = byteChannelFromRoom(alice, "bob", { topic: "one" });
+    const a2 = byteChannelFromRoom(alice, "bob", { topic: "two" });
+    const b1 = byteChannelFromRoom(bob, "alice", { topic: "one" });
+    const b2 = byteChannelFromRoom(bob, "alice", { topic: "two" });
+    a1.send(new Uint8Array([1]));
+    a2.send(new Uint8Array([2]));
+    expect([...((await b1.recv[Symbol.asyncIterator]().next()).value as Uint8Array)]).toEqual([1]);
+    expect([...((await b2.recv[Symbol.asyncIterator]().next()).value as Uint8Array)]).toEqual([2]);
+  });
+
+  it("(#146) closing one end says goodbye: the peer's channel ends while the room stays", async () => {
+    const { a, b } = await roomPair();
+    a.close();
+    expect(await settled(b.closed)).toBe(true);
+  });
+
+  it("(#146) an oversized send throws RangeError and ends both ends", async () => {
+    const { a, b } = await roomPair();
+    expect(DEFAULT_ROOM_MAX_FRAME_BYTES).toBe(64_000);
+    expect(() => a.send(new Uint8Array(DEFAULT_ROOM_MAX_FRAME_BYTES + 1))).toThrow(RangeError);
+    expect(await settled(a.closed)).toBe(true);
+    expect(await settled(b.closed)).toBe(true);
+    const small = await roomPair();
+    const c = byteChannelFromRoom(small.alice, "bob", { maxFrameBytes: 10 });
+    expect(() => c.send(new Uint8Array(11))).toThrow(RangeError);
+  });
+
+  it("(#146) bufferedAmount counts unsettled publishes; whenDrained waits for them", async () => {
+    const { alice, a } = await roomPair();
+    const pending: Array<() => void> = [];
+    alice.localParticipant.publishData = () =>
+      new Promise<void>((r) => {
+        pending.push(r);
+      });
+    const packet = 60_000;
+    const count = Math.ceil(DRAIN_LOW_WATER / packet) + 1;
+    for (let i = 0; i < count; i++) a.send(new Uint8Array(packet));
+    expect(a.bufferedAmount).toBe(count * packet);
+    const drained = a.whenDrained?.() ?? Promise.reject();
+    expect(await settled(drained)).toBe(false);
+    pending[0]();
+    pending[1]();
+    expect(await settled(drained)).toBe(true);
+    for (const release of pending.slice(2)) release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(a.bufferedAmount).toBe(0);
   });
 
   it("a call in flight over the port stack fails when the peer leaves", async () => {

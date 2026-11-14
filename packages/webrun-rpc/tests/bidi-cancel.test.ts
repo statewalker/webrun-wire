@@ -11,7 +11,7 @@ function newChannel() {
 
 /**
  * Diagnostic tests for the propagation of consumer-side cancellation
- * (iterator.return()) upstream through callBidi / ioSend / recieve.
+ * (iterator.return()) upstream through callBidi / ioSend / receive.
  *
  * The contract these tests probe:
  *   - When a `for await` loop over `callBidi`'s output breaks, the producer

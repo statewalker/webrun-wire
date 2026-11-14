@@ -114,6 +114,9 @@ export async function* newAsyncGenerator<T, E = Error>(
    */
   const enqueue = (params: IterationSlot<T, E>): Promise<boolean> => {
     if (skipValues) {
+      // A queued completion is final: nothing pushed after it can be consumed, and dropping it
+      // would lose the error it carries.
+      if (tail?.done) return Promise.resolve(false);
       // Remove any previous value slots
       drainQueue();
     }

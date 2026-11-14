@@ -61,7 +61,7 @@ runs in browsers, workers and Node.
 | `map(it, fn)` | Map an `AsyncIterable<I>` through `fn: (item) => O \| Promise<O>`. |
 | `newAsyncGenerator(init, skipValues?)` | Bridge `next(value)` / `done(error?)` callbacks into an `AsyncGenerator<T>`. Both callbacks return `Promise<boolean>`. |
 | `sendIterator(send, iterable)` | Drain an iterable into `send({ done, value, error })` calls, ending with exactly one `{ done: true }` chunk. |
-| `recieveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. |
+| `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. `recieveIterator` is a deprecated alias. |
 | `toReadableStream(iterator)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
 | `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as an `AsyncGenerator<Uint8Array>`. |
 | `normalizeToUint8Array(value)` | Coerce a `ByteLike` (`Uint8Array`, `ArrayBuffer`, `ArrayBufferView`, `Blob`, `string`) to `Uint8Array`. Synchronous, except a `Blob`, which returns a `Promise<Uint8Array>`. |
@@ -187,7 +187,7 @@ import {
   type ChunkReceiver,
   type IteratorChunk,
   collect,
-  recieveIterator,
+  receiveIterator,
   sendIterator,
 } from "@statewalker/webrun-streams";
 
@@ -197,7 +197,7 @@ const transport = async (chunk: IteratorChunk<number>) => {
   await deliver?.(chunk);
 };
 
-const iter = recieveIterator<number>((d) => {
+const iter = receiveIterator<number>((d) => {
   deliver = d;
 });
 
@@ -287,7 +287,9 @@ the cleanup function returned by `init` runs and every pending slot resolves
 `skipValues: true` keeps only the newest value: pushing a value drops any
 unconsumed older ones, whose promises resolve `false`. Use it where only the
 latest state matters (live previews, resize events). A producer cannot tell
-"skipped" from "consumer left"; both mean "not consumed".
+"skipped" from "consumer left"; both mean "not consumed". A queued
+`done(error?)` is never skipped: anything pushed after it resolves `false`
+and the consumer still sees the completion (and its error).
 
 ### Chunk protocol
 
@@ -298,13 +300,14 @@ latest state matters (live previews, resize events). A producer cannot tell
 
 `sendIterator` always sends exactly one `done` chunk. An error thrown by the
 source iterable is caught and travels in that chunk's `error` field;
-`recieveIterator` rethrows it into the consumer's `for await`. An error thrown
-by `send` itself propagates out of `sendIterator`. `recieveIterator` treats a
+`receiveIterator` rethrows it into the consumer's `for await`. An error thrown
+by `send` itself propagates out of `sendIterator`. `receiveIterator` treats a
 falsy `error` as no error, so a source that throws `0`, `""` or `null` ends the
 stream normally on the receiving side.
 
-The exported name `recieveIterator` is spelled that way, and dependents import
-it under that name.
+The function was first exported as `recieveIterator`. That misspelt name stays
+exported as a `@deprecated` alias of `receiveIterator`, so existing importers
+keep working.
 
 ### Why the `ReadableStream` adapters carry cancellation
 
@@ -328,7 +331,9 @@ Both assume `Uint8Array` chunks.
 
 - `serializeError` copies own enumerable properties; `deserializeError` returns
   a plain `Error` with those fields assigned, not an instance of the original
-  subclass. `name` is restored only if it was an own property.
+  subclass. `name` is restored only if it was an own property. The keys
+  `__proto__` and `constructor` are skipped, so a peer cannot change the
+  error's prototype: the result is always an `instanceof Error`.
 - `toChunks(size)` throws `RangeError: toChunks: size must be a positive integer, got <size>`.
   Empty input chunks are skipped; oversized ones are split with zero-copy
   `subarray` views.

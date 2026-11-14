@@ -54,10 +54,26 @@ export interface DeserializeOptions {
 /** The byte shapes {@link deserialize} accepts. */
 export type MsgpackInput = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
-/** An extension value whose type this implementation does not interpret (anything but a timestamp). */
-export interface MsgpackExtension {
+/**
+ * An extension value whose type this implementation does not interpret (anything but a
+ * timestamp). {@link deserialize} returns one for such a value, and {@link serialize} writes an
+ * instance back as an ext of the same type and bytes. A plain `{ type, data }` object is not an
+ * instance and is written as a map.
+ */
+export class MsgpackExtension {
+  /** The ext type, a signed 8-bit integer (-128 to 127); negative types are reserved by the spec. */
   type: number;
   data: Uint8Array;
+
+  constructor(type: number, data: Uint8Array) {
+    if (!Number.isInteger(type) || type < -128 || type > 127) {
+      throw new RangeError(
+        `MsgpackExtension: type must be an integer from -128 to 127, got ${type}`,
+      );
+    }
+    this.type = type;
+    this.data = data;
+  }
 }
 
 const pow32 = 0x100000000; // 2^32
@@ -102,6 +118,7 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
       case "object":
         if (data === null) appendNull();
         else if (data instanceof Date) appendDate(data);
+        else if (data instanceof MsgpackExtension) appendExt(data);
         else if (Array.isArray(data)) appendArray(data);
         else if (data instanceof Uint8Array || data instanceof Uint8ClampedArray)
           appendBinArray(data);
@@ -246,6 +263,23 @@ export function serialize(data: unknown, options?: SerializeOptions): Uint8Array
         append(value);
       }
     }
+  }
+
+  // Modified from upstream, which wrote an extension value as a plain map, so it did not survive
+  // a round trip.
+  function appendExt(ext: MsgpackExtension): void {
+    const { type, data } = ext;
+    const length = data.length;
+    if (length === 1) appendByte(0xd4);
+    else if (length === 2) appendByte(0xd5);
+    else if (length === 4) appendByte(0xd6);
+    else if (length === 8) appendByte(0xd7);
+    else if (length === 16) appendByte(0xd8);
+    else if (length <= 0xff) appendBytes([0xc7, length]);
+    else if (length <= 0xffff) appendBytes([0xc8, length >>> 8, length]);
+    else appendBytes([0xc9, length >>> 24, length >>> 16, length >>> 8, length]);
+    appendByte(type & 0xff);
+    appendBytes(data);
   }
 
   function appendDate(data: Date): void {
@@ -508,13 +542,15 @@ export function deserialize(input: MsgpackInput, options?: DeserializeOptions): 
 
   function readExt(size: number, lengthSize?: number): Date | MsgpackExtension {
     if (size < 0) size = readUInt(lengthSize as number);
-    const type = readUInt(1);
+    // Modified from upstream, which read the type unsigned (-2 came back as 254). The spec makes it
+    // a signed 8-bit integer; the timestamp is type -1.
+    const type = readInt(1);
     const data = readBin(size);
     switch (type) {
-      case 255:
+      case -1:
         return readExtDate(data);
     }
-    return { type: type, data: data };
+    return new MsgpackExtension(type, data);
   }
 
   // Modified from upstream, which built the Date from `sec * 1000 + ns / 1000000`. That sum is a

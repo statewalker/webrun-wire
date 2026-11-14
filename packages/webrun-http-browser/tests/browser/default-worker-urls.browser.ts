@@ -73,7 +73,7 @@ const RELAY_DEFAULTS = `(async () => {
   try {
     const lib = await import(location.origin + "/dist/index.js");
     const handler = lib.getRelayWindowMessageHandler();
-    await handler({ data: { type: "CONNECT" }, ports: [new MessageChannel().port1] });
+    await handler({ data: { type: "CONNECT" }, source: window.parent, ports: [new MessageChannel().port1] });
     const [registration] = await navigator.serviceWorker.getRegistrations();
     return { ok: true, scriptURL: registration.active.scriptURL, scope: registration.scope };
   } catch (error) {
