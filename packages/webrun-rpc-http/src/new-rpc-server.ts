@@ -46,6 +46,12 @@ export function newRpcServer(
         return jsonResponse(listMethods(index, serviceName));
       }
       if ((request.method === "GET" || request.method === "POST") && serviceName && methodName) {
+        if (!lookupMethod(index, serviceName, methodName)) {
+          return errorResponse(
+            new Error(`Method ${methodName} not found in service ${serviceName}`),
+            404,
+          );
+        }
         const { params, body } = await parseCallArgs(request);
         const result = await invoke(index, serviceName, methodName, subPath, params, body);
         return result instanceof Blob ? blobResponse(result) : jsonResponse(result);
@@ -57,11 +63,13 @@ export function newRpcServer(
   };
 }
 
+// Both levels are prototype-less, so a request for `constructor`, `toString`,
+// `__proto__` and the like finds nothing instead of an `Object.prototype` member.
 function buildServiceIndex(services: Record<string, object>): ServiceIndex {
-  const index: ServiceIndex = {};
+  const index: ServiceIndex = Object.create(null);
   for (const [serviceName, service] of Object.entries(services)) {
     const methods = getInstanceMethods(service);
-    const methodsIndex: Record<string, RpcMethod> = {};
+    const methodsIndex: Record<string, RpcMethod> = Object.create(null);
     for (const [methodName, method] of Object.entries(methods)) {
       methodsIndex[methodName] = async (params, body) =>
         (await method.call(service, params, body)) as Blob | Json;
@@ -69,6 +77,15 @@ function buildServiceIndex(services: Record<string, object>): ServiceIndex {
     index[serviceName] = methodsIndex;
   }
   return index;
+}
+
+function lookupMethod(
+  index: ServiceIndex,
+  serviceName: string,
+  methodName: string,
+): RpcMethod | undefined {
+  const service = Object.hasOwn(index, serviceName) ? index[serviceName] : undefined;
+  return service && Object.hasOwn(service, methodName) ? service[methodName] : undefined;
 }
 
 interface ParsedPath {
@@ -107,20 +124,27 @@ async function parseCallArgs(request: Request): Promise<{ params: Json; body?: B
   return { params: {}, body };
 }
 
+// Query segments that could reach a prototype; a key containing one is dropped.
+const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 /**
  * Expand dot-separated query keys (`a.b=c`) into nested JSON objects.
  * Repeated keys overwrite rather than merging — same as the original.
+ * Every level is a prototype-less object, and keys with a `__proto__`,
+ * `constructor` or `prototype` segment are ignored, so a query string cannot
+ * write to `Object.prototype`.
  */
 function parseQueryParams(search: URLSearchParams): JsonObject {
-  const root: JsonObject = {};
+  const root: JsonObject = Object.create(null);
   for (const [key, value] of search.entries()) {
     const segments = key.split(".");
+    if (segments.some((seg) => FORBIDDEN_SEGMENTS.has(seg))) continue;
     let cursor: JsonObject = root;
     for (let i = 0; i < segments.length - 1; i++) {
       const seg = segments[i];
-      const existing = cursor[seg];
+      const existing = Object.hasOwn(cursor, seg) ? cursor[seg] : undefined;
       if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
-        cursor[seg] = {};
+        cursor[seg] = Object.create(null);
       }
       cursor = cursor[seg] as JsonObject;
     }
@@ -140,7 +164,7 @@ async function invoke(
   if (params && typeof params === "object" && !Array.isArray(params)) {
     (params as JsonObject).$path = subPath;
   }
-  const method = index[serviceName]?.[methodName];
+  const method = lookupMethod(index, serviceName, methodName);
   if (!method) {
     throw new Error(`Method ${methodName} not found in service ${serviceName}`);
   }
@@ -161,7 +185,7 @@ function describeServices(index: ServiceIndex): JsonObject {
 }
 
 function listMethods(index: ServiceIndex, serviceName: string): Json[] {
-  const svc = index[serviceName];
+  const svc = Object.hasOwn(index, serviceName) ? index[serviceName] : undefined;
   return svc ? Object.keys(svc) : [];
 }
 

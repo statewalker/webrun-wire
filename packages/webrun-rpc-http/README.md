@@ -163,7 +163,7 @@ Call encoding:
 | --- | --- |
 | `POST /svc/method`, `multipart/form-data` | `params` field (JSON) and optional `body` field (`Blob`). |
 | `POST /svc/method`, any other content type | `params` is `{}`; the raw body becomes the `body` Blob. |
-| `GET /svc/method?k=v` | Query string as `params`. Dot-separated keys nest: `?a.b=c&a.d=e` gives `{ a: { b: "c", d: "e" } }`. Values stay strings; repeated keys overwrite. |
+| `GET /svc/method?k=v` | Query string as `params`. Dot-separated keys nest: `?a.b=c&a.d=e` gives `{ a: { b: "c", d: "e" } }`. Values stay strings; repeated keys overwrite. A key with a `__proto__`, `constructor` or `prototype` segment is ignored, and the objects are built without a prototype, so a query string cannot reach `Object.prototype`. |
 
 The URL tail after `/svc/method/` is set as `params.$path` (an empty string when
 there is none), so a method can serve REST-style paths such as
@@ -180,7 +180,7 @@ Every error is a JSON object `{ "type": "error", "message", "stack", ...custom f
 | Cause | HTTP status |
 | --- | --- |
 | The method throws | `200`; the call reached the method |
-| Unknown method: `Method <m> not found in service <s>` | `500` |
+| Unknown service or method: `Method <m> not found in service <s>` | `404` |
 | Path outside the prefix, or a method other than `GET`/`POST`: `Not found` | `404` |
 | Non-JSON error response | client throws `RPC call failed: <status> <statusText>` |
 
@@ -196,8 +196,9 @@ it.
   streaming. For streaming responses use `fetchOverDuplex` /
   `serveFetchOverDuplex` from `@statewalker/webrun-http-streams` directly.
 - **Only the prototype chain below `Object.prototype` is exposed.**
-  `toString`, `hasOwnProperty` and the like are never endpoints. Methods of
-  every ancestor class are.
+  `toString`, `hasOwnProperty`, `constructor`, `__proto__` and the like are
+  never endpoints, and never service names either: they answer `404`. Methods
+  of every ancestor class are.
 - **`baseUrl` takes no trailing slash.** The client builds
   `${baseUrl}/${service}/${method}`; a trailing slash doubles it and the call
   fails with `Not found`.
