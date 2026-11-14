@@ -119,16 +119,77 @@ describe("response headers", () => {
     expect(onlyBody.headers["accept-encoding"]).toBe("identity");
   });
 
-  it("keeps content-encoding: zstd with the raw zstd body when an upstream sends it anyway", async () => {
+  // Node 22's fetch hands a zstd body over raw, Node 24's decodes it. Either way
+  // the headers must describe the bytes the caller actually gets.
+  it("labels a zstd body an upstream sends anyway by what fetch handed over (this runtime)", async () => {
     const res = await urlUpstream({ base: origin })(
       new Request("http://in/zstd", { headers: { "accept-encoding": "zstd" } }),
     );
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(res.headers.get("x-asked")).toBe("identity");
+    if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) {
+      expect(res.headers.get("content-encoding")).toBe("zstd");
+      expect(Number(res.headers.get("content-length"))).toBe(bytes.byteLength);
+    } else {
+      expect(new TextDecoder().decode(bytes)).toBe(PLAIN);
+      expect(res.headers.get("content-encoding")).toBeNull();
+      expect(res.headers.get("content-length")).toBeNull();
+    }
+  });
+
+  /** A fetch that answers `content-encoding: zstd` with the given bytes, in two chunks. */
+  const zstdFetch = (bytes: Uint8Array) => async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Split inside the magic number: the check must look past one chunk.
+          controller.enqueue(bytes.slice(0, 2));
+          controller.enqueue(bytes.slice(2));
+          controller.close();
+        },
+      }),
+      {
+        headers: { "content-encoding": "zstd", "content-length": String(bytes.byteLength + 7) },
+      },
+    );
+
+  it("zstd body handed over raw (Node 22): keeps content-encoding and content-length", async () => {
+    const raw = new Uint8Array(zstdCompressSync(PLAIN));
+    const res = await urlUpstream({ base: "http://upstream.test", fetchImpl: zstdFetch(raw) })(
+      new Request("http://in/x"),
+    );
     expect(res.headers.get("content-encoding")).toBe("zstd");
-    expect(Number(res.headers.get("content-length"))).toBe(bytes.byteLength);
-    // zstd frame magic number: 28 b5 2f fd.
-    expect(Array.from(bytes.slice(0, 4))).toEqual([0x28, 0xb5, 0x2f, 0xfd]);
+    expect(res.headers.get("content-length")).toBe(String(raw.byteLength + 7));
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(raw);
+  });
+
+  it("zstd body already decoded (Node 24): drops content-encoding and content-length", async () => {
+    const decoded = new TextEncoder().encode(PLAIN);
+    const res = await urlUpstream({ base: "http://upstream.test", fetchImpl: zstdFetch(decoded) })(
+      new Request("http://in/x"),
+    );
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(res.headers.get("content-length")).toBeNull();
+    expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(PLAIN);
+  });
+
+  it("a zstd body that starts with a skippable frame counts as raw", async () => {
+    const skippable = new Uint8Array([0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0]);
+    const raw = new Uint8Array([...skippable, ...zstdCompressSync(PLAIN)]);
+    const res = await urlUpstream({ base: "http://upstream.test", fetchImpl: zstdFetch(raw) })(
+      new Request("http://in/x"),
+    );
+    expect(res.headers.get("content-encoding")).toBe("zstd");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(raw);
+  });
+
+  it("an empty zstd-labelled body loses the label", async () => {
+    const res = await urlUpstream({
+      base: "http://upstream.test",
+      fetchImpl: zstdFetch(new Uint8Array()),
+    })(new Request("http://in/x"));
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
   });
 
   it("keeps content-encoding for a coding fetch does not decode", async () => {

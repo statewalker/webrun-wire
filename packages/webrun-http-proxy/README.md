@@ -170,8 +170,11 @@ The response body streams back as `fetch` hands it over. `fetch` has already
 decoded a `gzip`, `deflate` or `br` body, so the proxy drops the upstream's
 `content-encoding` and `content-length`, which describe the encoded bytes; a
 client served through a Node adapter would otherwise wait for missing bytes or
-try to gunzip plain text. Any other coding, `zstd` included (Node 22's `fetch`
-does not decode it), is left as it is, with its raw body and its headers.
+try to gunzip plain text. Whether `fetch` decodes `zstd` depends on the
+runtime (Node 22 does not, Node 24 does), so for a `zstd` body the proxy looks
+at its first four bytes. If they start a zstd frame (or a skippable frame), the body is
+still raw and keeps its headers. Otherwise it was decoded and loses them. Any
+other coding is left as it is, with its raw body and its headers.
 
 So that the upstream is not invited to send such a coding, the caller's
 `accept-encoding` is narrowed to `gzip`, `x-gzip`, `deflate`, `br` and

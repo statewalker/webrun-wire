@@ -183,10 +183,11 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
           headers: { [MARKER]: "upstream-redirect" },
         });
       }
-      return new Response(upstream.body, {
+      const relayed = await relayResponse(upstream, init.forwardCookies === true);
+      return new Response(relayed.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: responseHeaders(upstream.headers, init.forwardCookies === true),
+        headers: relayed.headers,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -217,8 +218,9 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  * Content codings every `fetch` the proxy runs on decodes (Fetch spec "handle
  * content codings": undici, Deno, Bun and browsers). When the upstream used only
  * these, the body handed to the proxy is already decoded. `zstd` is NOT here:
- * Node 22's fetch (undici 6) does not decode it, so a zstd body arrives raw and
- * must keep its `content-encoding`.
+ * whether it is decoded depends on the runtime (Node 22's undici hands it over
+ * raw, Node 24's decodes it), so a zstd body is inspected instead; see
+ * {@link relayResponse}.
  */
 const DECODED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "identity"]);
 
@@ -252,24 +254,89 @@ function dropHopByHop(headers: Headers): void {
   for (const hop of HOP_BY_HOP) headers.delete(hop);
 }
 
-/** The upstream's response headers, as they may be handed to the caller. */
-function responseHeaders(upstream: Headers, forwardCookies: boolean): Headers {
-  const headers = new Headers(upstream);
+/**
+ * Whether `head` starts a raw zstd stream: a zstd frame (magic 0xFD2FB528,
+ * RFC 8878 §3.1.1) or a skippable frame (0x184D2A50..5F, §3.1.2), little-endian.
+ */
+function isZstdFrame(head: Uint8Array): boolean {
+  const [b0 = -1, b1, b2, b3] = head;
+  if (b0 === 0x28 && b1 === 0xb5 && b2 === 0x2f && b3 === 0xfd) return true;
+  return (b0 & 0xf0) === 0x50 && b1 === 0x2a && b2 === 0x4d && b3 === 0x18;
+}
+
+/** The upstream's response headers and body, as they may be handed to the caller. */
+async function relayResponse(
+  upstream: Response,
+  forwardCookies: boolean,
+): Promise<{ headers: Headers; body: ReadableStream<Uint8Array> | null }> {
+  const headers = new Headers(upstream.headers);
   dropHopByHop(headers);
   if (!forwardCookies) headers.delete("set-cookie");
-  // `fetch` has already decoded the body, so the upstream's coding and its
-  // length (of the encoded bytes) no longer describe it. A client served
-  // through a Node adapter would otherwise wait for missing bytes or try to
-  // gunzip plain text.
+  let body: ReadableStream<Uint8Array> | null = upstream.body;
+  // Once `fetch` has decoded the body, the upstream's coding and its length
+  // (of the encoded bytes) no longer describe it. A client served through a
+  // Node adapter would otherwise wait for missing bytes or try to gunzip plain
+  // text.
   const coding = headers.get("content-encoding");
   if (coding !== null) {
     const codings = coding.split(",").map(codingName).filter(Boolean);
-    if (codings.every((c) => DECODED_CODINGS.has(c))) {
+    let decoded = codings.every((c) => DECODED_CODINGS.has(c));
+    if (codings.length === 1 && codings[0] === "zstd") {
+      // Only a raw zstd body starts with the frame magic number; decoded
+      // content almost never does. That answers "did this runtime's fetch
+      // decode it?" the same way on every runtime.
+      const sniffed = await sniff(body, 4);
+      body = sniffed.body;
+      decoded = !isZstdFrame(sniffed.head);
+    }
+    if (decoded) {
       headers.delete("content-encoding");
       headers.delete("content-length");
     }
   }
-  return headers;
+  return { headers, body };
+}
+
+/**
+ * Read at least `count` bytes off the front of `body` (fewer if it ends), and
+ * return them with a stream that yields the whole body, those bytes included.
+ */
+async function sniff(
+  body: ReadableStream<Uint8Array> | null,
+  count: number,
+): Promise<{ head: Uint8Array; body: ReadableStream<Uint8Array> | null }> {
+  if (body === null) return { head: new Uint8Array(), body };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let done = false;
+  while (length < count) {
+    const result = await reader.read();
+    if (result.done) {
+      done = true;
+      break;
+    }
+    chunks.push(result.value);
+    length += result.value.byteLength;
+  }
+  const head = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    head.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = chunks.shift();
+      if (next !== undefined) return controller.enqueue(next);
+      if (done) return controller.close();
+      const result = await reader.read();
+      if (result.done) controller.close();
+      else controller.enqueue(result.value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return { head, body: replay };
 }
 
 function ensureSlash(base: string): string {
