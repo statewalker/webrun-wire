@@ -42,10 +42,11 @@ pass an `rtc` factory from a WebRTC implementation.
 | `QrSignalingOptions` | `{ sessionId?: string; connection?: WebRtcConnectionOptions }`. |
 | `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
 | `new PeerConnection(role, options?)` | One WebRTC connection's lifecycle, which `PeerManager` and `QrSignaling` build on. `connect()`, `handleSignal(msg)`, `open(): Promise<ByteChannel>`, `waitForIceGathering()`, `getLocalDescription()`, `getCollectedCandidates()`, `getState()`, `getRole()`, `getDataChannel()`, `on` / `off`, `close()`. |
-| `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`. |
+| `byteChannelFromDataChannel(dc)` | Wrap an `RTCDataChannel` as a `ByteChannel`, with the data channel's `bufferedAmount` and a `whenDrained()` that waits for `bufferedamountlow`. |
 | `byteChannelFromRoom(room, peerId)` | A `ByteChannel` to one participant of a `RoomLike`. It closes when the room disconnects, the participant leaves, or a reliable publish fails, so whatever runs on it learns the other end is gone. |
-| `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel; pass `maxMessageSize: 12 * 1024` for a `byteChannelFromRoom` channel). It must be the channel's only reader. |
-| `ByteChannel` | The channel type. It used to come from `@statewalker/webrun-streams`; it is declared here since `emulateMux` was removed. |
+| `messageTargetOverByteChannel(channel, options?)` | A `ByteChannel` as `{ target, signal, maxMessageSize }` for `webrun-rpc`'s `overPipe`: a `MessageTarget` of bytes, a signal aborted when the channel closes, and the payload ceiling (`DEFAULT_MAX_MESSAGE_SIZE`, 16 KiB − 256, what every browser pair delivers over a data channel; pass `maxMessageSize: 12 * 1024` for a `byteChannelFromRoom` channel). `target` also has the channel's `bufferedAmount` and `whenDrained()`, so `overPipe` with `frameSize` paces its frames by the transport. It must be the channel's only reader. |
+| `DRAIN_LOW_WATER` | `256 * 1024`. The channels' `whenDrained()` resolves once `bufferedAmount` is at most this. |
+| `ByteChannel` | The channel type: `send`, `recv`, `closed`, `close`, and optional `bufferedAmount` / `whenDrained()`. It used to come from `@statewalker/webrun-streams`; it is declared here since `emulateMux` was removed. |
 | `generateSessionId()`, `createCompressedSignal(...)`, `parseCompressedSignal(signal)`, `encodeSignal(signal)`, `decodeSignal(text)` | The pure QR payload functions. |
 
 Types and constants: `SignalingTransport` (`localId`, `send(to, msg)`,
@@ -231,9 +232,13 @@ version other than 1, and a malformed packed candidate throws
 - Both channels buffer inbound bytes from the moment they are created, so data that arrives
   before your `for await` starts is not lost.
 - `byteChannelFromDataChannel` sets `binaryType = "arraybuffer"` and copies every inbound payload.
-  A non-byte message (a string) throws `TypeError: byte channel received a non-byte payload`
-  inside the channel's `message` listener. `closed` resolves on the data channel's `close` event
-  or on `close()`. A `send` on a closed channel is swallowed.
+  A non-byte message (a string) ends the channel, as does a `send` that throws (a closed channel,
+  or Chrome's full 16 MiB send queue): either way the stream above lost a message. `closed`
+  resolves on the data channel's `close` event or on `close()`; a `send` after that is ignored.
+  It sets `bufferedAmountLowThreshold` to `DRAIN_LOW_WATER`; `whenDrained()` resolves on
+  `bufferedamountlow` or when the channel ends.
+- `messageTargetOverByteChannel`'s `whenDrained()` is the channel's, and resolves at once over a
+  channel without one or once the pipe has ended.
 - `byteChannelFromRoom` publishes with `reliable: true` to `destinationIdentities: [peerId]` and
   accepts `dataReceived` events from that participant (or with no participant). Its `closed`
   resolves only when you call `close()`; it does not watch for the participant leaving or the
