@@ -217,8 +217,11 @@ If applying the answer fails, `accept` closes the connection and rejects.
 
 `createCompressedSignal` keeps only the SDP lines needed to connect (`v=`, `o=`, `s=`, `t=`,
 `m=`, `c=`, `a=group:`, `a=ice-ufrag:`, `a=ice-pwd:`, `a=fingerprint:`, `a=setup:`, `a=mid:`,
-`a=sctp-port:`, `a=max-message-size:`) and packs each candidate into a `|`-separated string
-(unparseable candidates are kept raw, prefixed `R:`). `encodeSignal` is URL-safe base64 of the
+`a=sctp-port:`, `a=max-message-size:`) and packs each candidate into a `|`-separated string,
+dropping the attributes after `typ`. A candidate that carries `raddr`, `rport` or `tcptype` (a
+srflx, relay or TCP candidate) is kept raw instead, prefixed `R:`, with only those attributes, and
+so is a candidate that does not parse. A null `sdpMLineIndex` travels as an empty field, so 0
+stays 0. `encodeSignal` is URL-safe base64 of the
 JSON, without padding. `parseCompressedSignal` throws `Unsupported protocol version: <v>` for any
 version other than 1, and a malformed packed candidate throws
 `Invalid compressed candidate: <text>`.

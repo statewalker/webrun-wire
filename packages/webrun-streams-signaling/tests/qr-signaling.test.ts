@@ -44,6 +44,44 @@ describe("QrSignaling", () => {
     expect(parsed.candidates).toEqual(candidates);
   });
 
+  it("(#146) keeps sdpMLineIndex 0 and the candidate attributes a connection needs", () => {
+    const description = { type: "offer" as const, sdp: "v=0\r\no=- t 2 IN IP4 127.0.0.1" };
+    const candidates = [
+      {
+        candidate:
+          "candidate:2 1 tcp 1518280447 192.168.1.5 9 typ host tcptype active generation 0 ufrag abcd",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+      {
+        candidate:
+          "candidate:3 1 udp 1686052607 203.0.113.7 61000 typ srflx raddr 192.168.1.5 rport 61000 generation 0",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+      { candidate: "garbage that does not parse", sdpMid: "0", sdpMLineIndex: 0 },
+      { candidate: "garbage that does not parse", sdpMid: null, sdpMLineIndex: null },
+    ];
+    const parsed = parseCompressedSignal(
+      decodeSignal(encodeSignal(createCompressedSignal("s", "initiator", description, candidates))),
+    );
+    expect(parsed.candidates).toEqual([
+      {
+        candidate: "candidate:2 1 tcp 1518280447 192.168.1.5 9 typ host tcptype active",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+      {
+        candidate:
+          "candidate:3 1 udp 1686052607 203.0.113.7 61000 typ srflx raddr 192.168.1.5 rport 61000",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+      { candidate: "garbage that does not parse", sdpMid: "0", sdpMLineIndex: 0 },
+      { candidate: "garbage that does not parse", sdpMid: null, sdpMLineIndex: null },
+    ]);
+  });
+
   it("pairs two devices via offer/answer/accept and yields working ByteChannels", async () => {
     const rtc = makeMockRtc();
     const deviceA = new QrSignaling({ sessionId: "pair-1", connection: { rtc } });
