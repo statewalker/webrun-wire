@@ -101,6 +101,10 @@ describe("newRpcServer", () => {
         "http://x/s/echo?__proto__.polluted=yes",
         "http://x/s/echo?a.__proto__.polluted=yes",
         "http://x/s/echo?constructor.prototype.polluted=yes",
+        "http://x/s/echo?%5F%5Fproto%5F%5F.polluted=yes",
+        "http://x/s/echo?a.b.__proto__.polluted=yes",
+        "http://x/s/echo?__proto__[polluted]=yes",
+        "http://x/s/echo?__proto__=yes&__proto__.polluted=yes",
       ]) {
         const res = await handler(new Request(url));
         expect(res.status).toBe(200);
@@ -109,6 +113,32 @@ describe("newRpcServer", () => {
     } finally {
       delete (Object.prototype as Record<string, unknown>).polluted;
     }
+  });
+
+  it("hands a GET method ordinary objects, as POST does", async () => {
+    const handler = newRpcServer({
+      s: {
+        async inspect(params: Record<string, unknown>) {
+          const nested = params.a as Record<string, unknown>;
+          return {
+            // Called on the objects on purpose: that is what threw on a prototype-less object.
+            // biome-ignore lint/suspicious/noPrototypeBuiltins: the call under test
+            hasA: params.hasOwnProperty("a"),
+            // biome-ignore lint/suspicious/noPrototypeBuiltins: the call under test
+            nestedHasB: nested.hasOwnProperty("b"),
+            text: `${params}`,
+            plain:
+              Object.getPrototypeOf(params) === Object.prototype &&
+              Object.getPrototypeOf(nested) === Object.prototype,
+          };
+        },
+      },
+    });
+    const res = await handler(new Request("http://x/s/inspect?a.b=1"));
+    expect(await res.json()).toEqual({
+      type: "json",
+      result: { hasA: true, nestedHasB: true, text: "[object Object]", plain: true },
+    });
   });
 
   it("drops __proto__ / constructor / prototype query segments", async () => {

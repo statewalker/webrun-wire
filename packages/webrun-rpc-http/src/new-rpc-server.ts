@@ -130,12 +130,13 @@ const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
 /**
  * Expand dot-separated query keys (`a.b=c`) into nested JSON objects.
  * Repeated keys overwrite rather than merging — same as the original.
- * Every level is a prototype-less object, and keys with a `__proto__`,
- * `constructor` or `prototype` segment are ignored, so a query string cannot
- * write to `Object.prototype`.
+ * Keys with a `__proto__`, `constructor` or `prototype` segment are ignored and
+ * existing levels are found with `Object.hasOwn`, so a query string cannot
+ * write to `Object.prototype`. The objects themselves are ordinary ones, as a
+ * POST's `JSON.parse` gives, so a method may call `params.hasOwnProperty`.
  */
 function parseQueryParams(search: URLSearchParams): JsonObject {
-  const root: JsonObject = Object.create(null);
+  const root: JsonObject = {};
   for (const [key, value] of search.entries()) {
     const segments = key.split(".");
     if (segments.some((seg) => FORBIDDEN_SEGMENTS.has(seg))) continue;
@@ -144,7 +145,7 @@ function parseQueryParams(search: URLSearchParams): JsonObject {
       const seg = segments[i];
       const existing = Object.hasOwn(cursor, seg) ? cursor[seg] : undefined;
       if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
-        cursor[seg] = Object.create(null);
+        cursor[seg] = {};
       }
       cursor = cursor[seg] as JsonObject;
     }

@@ -164,7 +164,7 @@ Call encoding:
 | --- | --- |
 | `POST /svc/method`, `multipart/form-data` | `params` field (JSON) and optional `body` field (`Blob`). |
 | `POST /svc/method`, any other content type | `params` is `{}`; the raw body becomes the `body` Blob. |
-| `GET /svc/method?k=v` | Query string as `params`. Dot-separated keys nest: `?a.b=c&a.d=e` gives `{ a: { b: "c", d: "e" } }`. Values stay strings; repeated keys overwrite. A key with a `__proto__`, `constructor` or `prototype` segment is ignored, and the objects are built without a prototype, so a query string cannot reach `Object.prototype`. |
+| `GET /svc/method?k=v` | Query string as `params`. Dot-separated keys nest: `?a.b=c&a.d=e` gives `{ a: { b: "c", d: "e" } }`. Values stay strings; repeated keys overwrite. A key with a `__proto__`, `constructor` or `prototype` segment is ignored, so a query string cannot reach `Object.prototype`; the objects are ordinary ones, as with `POST`. |
 
 The URL tail after `/svc/method/` is set as `params.$path` (an empty string when
 there is none), so a method can serve REST-style paths such as

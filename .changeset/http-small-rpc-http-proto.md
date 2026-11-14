@@ -2,9 +2,8 @@
 "@statewalker/webrun-rpc-http": patch
 ---
 
-Security: a GET query string can no longer write to `Object.prototype`. Dotted query keys
-(`?__proto__.x=…`) are expanded into prototype-less objects and keys with a `__proto__`,
-`constructor` or `prototype` segment are ignored. The service and method maps are
-prototype-less too, so `constructor`, `toString`, `__proto__` and the like are never endpoints
-or services; an unknown service or method now answers `404` (was `500`), with the same
+Security: a GET query string can no longer write to `Object.prototype`. Dotted query keys with a
+`__proto__`, `constructor` or `prototype` segment (`?__proto__.x=…`) are ignored. The service and
+method maps are prototype-less, so `constructor`, `toString`, `__proto__` and the like are never
+endpoints or services; an unknown service or method now answers `404` (was `500`), with the same
 `Method <m> not found in service <s>` error body.
