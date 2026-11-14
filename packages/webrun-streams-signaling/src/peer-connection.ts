@@ -318,6 +318,7 @@ export class PeerConnection {
       const cleanup = () => {
         this.off("open", onOpen);
         this.off("error", onError);
+        this.off("stateChange", onState);
         clearTimeout(timer);
       };
       const onOpen = () => {
@@ -330,8 +331,15 @@ export class PeerConnection {
         cleanup();
         reject(error);
       };
+      // Closed before the channel opened: it never will.
+      const onState = (state: ConnectionState) => {
+        if (state !== "closed") return;
+        cleanup();
+        reject(new Error("Connection closed before the data channel opened"));
+      };
       this.on("open", onOpen);
       this.on("error", onError);
+      this.on("stateChange", onState);
       const timer = setTimeout(() => {
         cleanup();
         reject(new Error(`Connection timeout after ${timeout}ms`));

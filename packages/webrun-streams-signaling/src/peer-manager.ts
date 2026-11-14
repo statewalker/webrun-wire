@@ -17,7 +17,16 @@ import type {
   WebRtcConnectionOptions,
 } from "./types.js";
 
-export type PeerManagerOptions = WebRtcConnectionOptions;
+export type PeerManagerOptions = WebRtcConnectionOptions & {
+  /**
+   * Called when a connection fails with no caller to tell: a signal it
+   * rejects (an offer during glare, malformed SDP or candidates), or an
+   * inbound connection whose channel never opens. The connection has already
+   * been closed and forgotten, so the peer can dial again. Errors are dropped
+   * when unset. A failed `connect()` rejects instead.
+   */
+  onError?: (error: Error, peerId: string) => void;
+};
 
 export class PeerManager {
   private readonly signaling: SignalingTransport;
@@ -36,8 +45,14 @@ export class PeerManager {
   async connect(peerId: string): Promise<ByteChannel> {
     const pc = this.makeConnection(peerId, "initiator");
     const channel = pc.open();
-    await pc.connect();
-    return channel;
+    try {
+      await pc.connect();
+      return await channel;
+    } catch (err) {
+      channel.catch(() => undefined);
+      this.forget(peerId, pc);
+      throw err;
+    }
   }
 
   /** Register a handler for inbound connections. Returns an unsubscribe fn. */
@@ -49,30 +64,64 @@ export class PeerManager {
   /** Tear down all connections and stop listening for signaling. */
   close(): void {
     this.unsubscribe();
-    for (const pc of this.connections.values()) pc.close();
+    const all = [...this.connections.values()];
     this.connections.clear();
+    for (const pc of all) pc.close();
     this.connectionHandlers.clear();
   }
 
   private makeConnection(peerId: string, role: "initiator" | "responder"): PeerConnection {
     const pc = new PeerConnection(role, this.options);
     pc.on("signal", (msg) => this.signaling.send(peerId, msg));
-    pc.on("close", () => this.connections.delete(peerId));
+    pc.on("close", () => this.forget(peerId, pc));
+    // A failed connection never recovers: forget it so the peer's next offer
+    // starts a new one instead of reaching this one.
+    pc.on("stateChange", (state) => {
+      if (state === "failed" || state === "closed") this.forget(peerId, pc);
+    });
     this.connections.set(peerId, pc);
     return pc;
   }
 
+  /** Close `pc` and drop it, unless a newer connection to `peerId` replaced it. */
+  private forget(peerId: string, pc: PeerConnection): void {
+    if (this.connections.get(peerId) !== pc) return;
+    this.connections.delete(peerId);
+    pc.close();
+  }
+
+  private fail(peerId: string, pc: PeerConnection, err: unknown): void {
+    const live = this.connections.get(peerId) === pc;
+    this.forget(peerId, pc);
+    if (!live) return; // closed on purpose meanwhile
+    const error = err instanceof Error ? err : new Error(String(err), { cause: err });
+    try {
+      this.options.onError?.(error, peerId);
+    } catch {}
+  }
+
   private onSignal(from: string, msg: SignalingMessage): void {
     let pc = this.connections.get(from);
+    // A connection makes one offer, so a new offer from a peer we answered
+    // before means it started over: the old connection is stale.
+    if (pc && msg.type === "offer" && pc.getRole() === "responder") {
+      this.forget(from, pc);
+      pc = undefined;
+    }
     if (!pc) {
       // Only an inbound offer starts a new responder connection; stray
       // candidates/answers for an unknown peer are ignored.
       if (msg.type !== "offer") return;
-      pc = this.makeConnection(from, "responder");
-      void pc.open().then((channel) => {
-        for (const handler of this.connectionHandlers) handler(from, channel);
-      });
+      const responder = this.makeConnection(from, "responder");
+      pc = responder;
+      responder.open().then(
+        (channel) => {
+          for (const handler of this.connectionHandlers) handler(from, channel);
+        },
+        (err: unknown) => this.fail(from, responder, err),
+      );
     }
-    void pc.handleSignal(msg);
+    const target = pc;
+    target.handleSignal(msg).catch((err: unknown) => this.fail(from, target, err));
   }
 }

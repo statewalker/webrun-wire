@@ -37,7 +37,7 @@ pass an `rtc` factory from a WebRTC implementation.
 | Export | Purpose |
 | --- | --- |
 | `new PeerManager(signaling, options?)` | WebRTC connections keyed by peer id over a `SignalingTransport`. `connect(peerId): Promise<ByteChannel>`, `onConnection((peerId, ch) => void): () => void`, `close()`. |
-| `PeerManagerOptions` | Same as `WebRtcConnectionOptions`. |
+| `PeerManagerOptions` | `WebRtcConnectionOptions` plus `onError?: (error, peerId) => void`, called when a connection fails with no caller to tell (a signal it rejects, an inbound channel that never opens). |
 | `new QrSignaling(options?)` | Serverless pairing. `offer(): Promise<{ qr, accept(answerQr): Promise<ByteChannel> }>`, `answer(offerQr): Promise<{ qr, channel }>`, `getSessionId()`. |
 | `QrSignalingOptions` | `{ sessionId?: string; connection?: WebRtcConnectionOptions }`. |
 | `new RoomManager(options: RoomManagerOptions)` | Room membership. `join(room)`, `participants(): AsyncIterable<string>`, `channelTo(peerId): Promise<ByteChannel>`, `leave()`. |
@@ -192,7 +192,11 @@ data channel and offer, and resolves when the channel opens. An inbound `offer` 
 peer creates a responder; `onConnection` handlers are called when its channel opens. Answers and
 candidates from unknown peers are ignored. Candidates that arrive before the remote description
 is set are queued and applied after it. When ICE gathering completes, a `{ type: "ready" }`
-signal is sent; receivers ignore it. A connection is forgotten when its data channel closes.
+signal is sent; receivers ignore it. A connection is closed and forgotten when its data channel
+closes, when its state becomes `failed` or `closed`, when its channel does not open, or when it
+rejects a signal; the peer's next offer then starts a new responder. A new offer from a peer this
+side already answered replaces that connection: a connection makes one offer, so the peer started
+over.
 
 ### What `answer()` waits for
 
@@ -246,9 +250,12 @@ that joins, and ends at `leave()`. Departures are not reported. Only the most re
 - `connect()` on a responder throws `connect() should only be called by initiator`; an offer to an
   initiator throws `Received offer but not in responder role`; an answer to a responder throws
   `Received answer but not in initiator role`.
-- On the `PeerManager` responder side, a connection that never opens is never reported to
-  `onConnection`; its `open()` rejection has no handler attached and surfaces as an unhandled
-  rejection.
+- `PeerManager`: a failed `connect()` rejects and forgets the connection. A failure with no caller
+  (an offer during glare, malformed SDP or candidates, an inbound channel that never opens) closes
+  and forgets the connection and goes to `onError`; without `onError` it is dropped. Either way
+  `onConnection` is not called for it.
+- `PeerConnection.open()` also rejects with `Connection closed before the data channel opened`
+  when the connection is closed first.
 
 ### Dependencies
 
