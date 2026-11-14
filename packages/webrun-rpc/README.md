@@ -8,7 +8,7 @@ ones; a **stream tier** (`duplexOverPort` / `serveDuplexOverPort`) that runs one
 `@statewalker/webrun-streams` `Duplex` over one port with backpressure built into the protocol; a
 **`connect` / `serve` adapter** that plugs a source of ports into the `webrun-streams` `Connect` /
 `Serve` shape; and a **typed-JSON RPC tier** (`callPort` / `listenPort`, `callBidi` / `listenBidi`,
-`ioSend` / `ioHandle`, `send` / `recieve`) for request/response and iterator exchange over any
+`ioSend` / `ioHandle`, `send` / `receive`) for request/response and iterator exchange over any
 `MessageTarget`.
 
 ## Why it exists
@@ -91,11 +91,11 @@ Typed-JSON RPC:
 | `listenPort(port, handler, options?)` | Answers `callPort`. Returns an unsubscribe. |
 | `callBidi(port, input, args?)` / `listenBidi(port, action, accept?)` | Streaming call: send an iterable, receive an async generator. |
 | `ioSend(port, output, options?)` / `ioHandle(port, handler, options?)` | The full-duplex iterator exchange `callBidi` / `listenBidi` run on. |
-| `send(port, output, options?)` / `recieve(port, options?)` | One `callPort` per iterator chunk, and its receiving side. |
+| `send(port, output, options?)` / `receive(port, options?)` | One `callPort` per iterator chunk, and its receiving side.  `recieve` / `RecieveOptions` remain as deprecated aliases. |
 | `NO_TIMEOUT` | `Number.POSITIVE_INFINITY`; as `callPort`'s `timeout`, installs no deadline. |
 | `CallPortOptions` | `timeout` (default 1000 ms), `channelName`, `log`, `newCallId`, `signal`. |
 | `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call. |
-| `ListenPortOptions`, `PortHandler`, `BidiHandler`, `IoSendOptions`, `RecieveOptions`, `SendOptions` | Supporting types. |
+| `ListenPortOptions`, `PortHandler`, `BidiHandler`, `IoSendOptions`, `ReceiveOptions`, `SendOptions` | Supporting types. |
 | `postCancelChannel(port, channelName)` / `listenCancelChannel(port, channelName, onCancel)` / `CANCEL_CHANNEL_TYPE` | The `"cancel-channel"` message `ioSend` posts when its consumer stops early. |
 | `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. A port may also carry it as `closeSignal` (an adapter needing no import, e.g. `webrun-streams-libp2p`'s `libp2pPortMux`); a registered signal wins. |
 
@@ -840,7 +840,7 @@ finite number above zero installs no deadline. Errors cross as `webrun-streams`'
 its transport closed can register a signal and pending calls reject instead of waiting for their
 timeout. The ports of `multiplexPort` register one, which fires when the port closes.
 
-`send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`; `recieve`
+`send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`; `receive`
 yields one async generator per inbound stream and never ends on its own. A chunk that arrives
 before the consumer starts reading is held, unacknowledged, until it is taken, so a handler may
 await anything before it pulls its input. `ioSend` / `ioHandle`

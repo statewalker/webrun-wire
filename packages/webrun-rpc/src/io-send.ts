@@ -1,12 +1,12 @@
 import { postCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
-import { type RecieveOptions, recieve } from "./recieve.js";
+import { type ReceiveOptions, receive } from "./receive.js";
 import { send } from "./send.js";
 
 export interface IoSendOptions extends ListenPortOptions {
   /**
-   * Optional cancel signal threaded into `recieve` so the consumer can force
+   * Optional cancel signal threaded into `receive` so the consumer can force
    * an in-flight `input.next()` to resolve immediately (otherwise an
    * AsyncGenerator's `.return()` queues behind the pending `.next()` and
    * never preempts a hanging await). Used by `callBidi` to abort the inner
@@ -32,8 +32,8 @@ export async function* ioSend<T, U = T>(
   output: AsyncIterable<U> | Iterable<U>,
   options: IoSendOptions = {},
 ): AsyncGenerator<T> {
-  const { cancelSignal, ...recieveOptions } = options;
-  const channelName = recieveOptions.channelName ?? "";
+  const { cancelSignal, ...receiveOptions } = options;
+  const channelName = receiveOptions.channelName ?? "";
   let inputEndedNormally = false;
   const sendAbort = new AbortController();
 
@@ -46,11 +46,11 @@ export async function* ioSend<T, U = T>(
     else cancelSignal.addEventListener("abort", () => sendAbort.abort(), { once: true });
   }
 
-  // Combine outer cancel signal with recieve's force-close mechanism.
-  const recieveOpts: RecieveOptions = { ...recieveOptions, signal: cancelSignal };
+  // Combine outer cancel signal with receive's force-close mechanism.
+  const receiveOpts: ReceiveOptions = { ...receiveOptions, signal: cancelSignal };
 
-  for await (const input of recieve<T>(port, recieveOpts)) {
-    const sendPromise = send<U>(port, output, { ...recieveOptions, signal: sendAbort.signal });
+  for await (const input of receive<T>(port, receiveOpts)) {
+    const sendPromise = send<U>(port, output, { ...receiveOptions, signal: sendAbort.signal });
     try {
       yield* input;
       inputEndedNormally = true;

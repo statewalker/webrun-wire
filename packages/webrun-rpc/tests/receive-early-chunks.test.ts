@@ -14,7 +14,7 @@ function newChannel() {
   return c;
 }
 
-describe("recieve: chunks that arrive before the handler reads its input", () => {
+describe("receive: chunks that arrive before the handler reads its input", () => {
   for (const delay of [0, 15, 50]) {
     it(`delivers every chunk and ends normally when the handler waits ${delay} ms`, async () => {
       const { port1, port2 } = newChannel();

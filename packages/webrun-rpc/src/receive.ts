@@ -2,7 +2,7 @@ import { type IteratorChunk, recieveIterator } from "@statewalker/webrun-streams
 import { type ListenPortOptions, listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 
-export interface RecieveOptions extends ListenPortOptions {
+export interface ReceiveOptions extends ListenPortOptions {
   /**
    * Optional cancel signal. When fired, the currently-active
    * `recieveIterator` is force-closed (its producer is signalled `done`
@@ -34,9 +34,9 @@ export interface RecieveOptions extends ListenPortOptions {
  * marker so the consumer wakes up immediately rather than waiting for the
  * next inbound chunk (or `callPort` timeout).
  */
-export async function* recieve<T>(
+export async function* receive<T>(
   port: MessageTarget,
-  options: RecieveOptions = {},
+  options: ReceiveOptions = {},
 ): AsyncGenerator<AsyncGenerator<T>> {
   const { signal, ...listenOptions } = options;
   type Deliver = (chunk: IteratorChunk<T>) => Promise<boolean>;
@@ -60,7 +60,7 @@ export async function* recieve<T>(
     async ({ done, value, error }) => {
       await ready();
       const deliver = onMessage;
-      if (!deliver) throw new Error("recieve: the receiving side is closed");
+      if (!deliver) throw new Error("receive: the receiving side is closed");
       // The stream this chunk ends is over: a chunk after it belongs to the
       // next stream, and waits for that stream's consumer.
       if (done || error) onMessage = undefined;
@@ -114,3 +114,9 @@ export async function* recieve<T>(
     }
   }
 }
+
+/** @deprecated Misspelt name kept for compatibility; use {@link ReceiveOptions}. */
+export type RecieveOptions = ReceiveOptions;
+
+/** @deprecated Misspelt name kept for compatibility; use {@link receive}. */
+export const recieve = receive;

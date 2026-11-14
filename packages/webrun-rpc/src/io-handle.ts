@@ -1,7 +1,7 @@
 import { listenCancelChannel } from "./cancel-channel.js";
 import type { ListenPortOptions } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
-import { recieve } from "./recieve.js";
+import { receive } from "./receive.js";
 import { send } from "./send.js";
 
 /**
@@ -24,7 +24,7 @@ export async function* ioHandle<T, U = T>(
 ): AsyncGenerator<number> {
   let counter = 0;
   const channelName = options.channelName ?? "";
-  for await (const input of recieve<T>(port, options)) {
+  for await (const input of receive<T>(port, options)) {
     const sendAbort = new AbortController();
     const unsubscribeCancel = channelName
       ? listenCancelChannel(port, channelName, () => sendAbort.abort())
