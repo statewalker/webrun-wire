@@ -287,7 +287,9 @@ the cleanup function returned by `init` runs and every pending slot resolves
 `skipValues: true` keeps only the newest value: pushing a value drops any
 unconsumed older ones, whose promises resolve `false`. Use it where only the
 latest state matters (live previews, resize events). A producer cannot tell
-"skipped" from "consumer left"; both mean "not consumed".
+"skipped" from "consumer left"; both mean "not consumed". A queued
+`done(error?)` is never skipped: anything pushed after it resolves `false`
+and the consumer still sees the completion (and its error).
 
 ### Chunk protocol
 
@@ -328,7 +330,9 @@ Both assume `Uint8Array` chunks.
 
 - `serializeError` copies own enumerable properties; `deserializeError` returns
   a plain `Error` with those fields assigned, not an instance of the original
-  subclass. `name` is restored only if it was an own property.
+  subclass. `name` is restored only if it was an own property. The keys
+  `__proto__` and `constructor` are skipped, so a peer cannot change the
+  error's prototype: the result is always an `instanceof Error`.
 - `toChunks(size)` throws `RangeError: toChunks: size must be a positive integer, got <size>`.
   Empty input chunks are skipped; oversized ones are split with zero-copy
   `subarray` views.
