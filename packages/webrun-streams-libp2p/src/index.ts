@@ -11,6 +11,7 @@ export {
 export {
   DEFAULT_CLOSE_TIMEOUT_MS,
   DEFAULT_DRAIN_TIMEOUT_MS,
+  DEFAULT_MAX_FRAME_BYTES,
   type DuplexOverStreamOptions,
   duplexOverStream,
   PeerGoneError,

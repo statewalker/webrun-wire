@@ -12,11 +12,13 @@ reports failures as `502` responses instead of exceptions.
 
 Forwarding a request to a third-party origin looks like one line,
 `fetch(new Request(target, request))`, and is wrong in several quiet ways. The
-caller's own credential leaks to the upstream. Hop-by-hop headers go along. In
-Firefox the body is silently dropped. An upstream redirect throws inside the
-`try` and is reported as unreachable. An abandoned caller leaves the upstream
-call running. `urlUpstream` handles each of these, and a browser page and a
-Node process use the same code.
+caller's own credential leaks to the upstream, and so do the proxy origin's
+cookies. Hop-by-hop headers go along. In Firefox the body is silently dropped.
+An upstream redirect throws inside the `try` and is reported as unreachable,
+or, outside a browser, hands the caller the upstream's real address. Outside a
+browser the body comes back decoded under the upstream's `content-encoding`.
+An abandoned caller leaves the upstream call running. `urlUpstream` handles
+each of these, and a browser page and a Node process use the same code.
 
 Routing is not part of it. Prefix matching and path rewriting are what any
 router (Hono, a `URLPattern` table, a `switch`) already does, so the package
@@ -49,6 +51,13 @@ pnpm add @statewalker/webrun-http-proxy
 | `headers` | none | Static headers for this destination, set after the caller's. |
 | `credential` | none | `() => Record<string, string> \| undefined`, read on every request and set last. |
 | `via` | none | `Via` header value; omitted, no `Via` is added. |
+| `forwardCookies` | `false` | `true` forwards the caller's `cookie` header and returns the upstream's `set-cookie`. Off, both are dropped. |
+
+> **Changed in 0.4.0:** cookies are no longer forwarded by default. Up to
+> 0.3.x the caller's `cookie` went to the upstream and the upstream's
+> `set-cookie` came back. Pass `forwardCookies: true` to keep that behaviour.
+> Also since 0.4.0, a real `3xx` redirect in Node or Deno answers
+> `502 upstream-redirect` instead of being passed on.
 | `fetchImpl` | `globalThis.fetch` | Injected `fetch`, for tests. |
 
 ## Examples
@@ -94,15 +103,21 @@ const upstream = urlUpstream({
 ```
 incoming Request
   ├─ delete stripRequestHeaders            (caller's own identity)
-  ├─ delete hop-by-hop headers             (RFC 9110 §7.6.1)
+  ├─ delete hop-by-hop headers             (RFC 9110 §7.6.1, and those `Connection` names)
+  ├─ delete cookie                          (unless forwardCookies)
+  ├─ narrow accept-encoding                 (to codings fetch decodes)
   ├─ set via                                (if configured)
   ├─ set headers                            (operator configuration)
   ├─ set credential()                       (read now, wins over everything)
+  ├─ any of the above throws -> 502, x-webrun-proxy: upstream-unreachable
   ├─ body: stream, or buffer on Firefox     (never for GET/HEAD)
   └─ fetch(base + path + query, { signal, redirect: "manual" })
-        ├─ opaque redirect  -> 502, x-webrun-proxy: upstream-redirect
+        ├─ opaque redirect or 301/302/303/307/308
+        │                   -> 502, x-webrun-proxy: upstream-redirect
         ├─ throws           -> 502, x-webrun-proxy: upstream-unreachable
-        └─ otherwise        -> upstream status, headers and streamed body
+        └─ otherwise        -> upstream status and streamed body; headers minus
+                               hop-by-hop, set-cookie (unless forwardCookies),
+                               and content-encoding/content-length once decoded
 ```
 
 ### Your credential is consumed by this hop
@@ -119,9 +134,18 @@ key), and dropping it would make that call impossible through the proxy. A
 system that keeps its own credential in `authorization` names it in
 `stripRequestHeaders`. `credential` still overrides whatever the caller sent.
 
-Hop-by-hop headers are always dropped: `connection`, `keep-alive`,
-`proxy-authenticate`, `proxy-authorization`, `te`, `trailer`,
-`transfer-encoding`, `upgrade`.
+Hop-by-hop headers are always dropped, from the request and from the
+response: `connection`, `keep-alive`, `proxy-authenticate`,
+`proxy-authorization`, `te`, `trailer`, `transfer-encoding`, `upgrade`, and
+every header the `Connection` header names (RFC 9110 §7.6.1).
+
+Cookies are dropped by default: the caller's `cookie` is not sent upstream,
+and the upstream's `set-cookie` is not returned. Behind a router on the proxy's
+own origin, `cookie` carries that origin's session, which a third-party
+upstream has no business seeing, and a returned `set-cookie` would let the
+upstream plant cookies on the proxy's origin. `forwardCookies: true` passes
+both. In a browser neither header can cross `fetch` anyway (both are forbidden
+names), so the option only matters outside one.
 
 `credential` is called per request, so a key can be entered or rotated while
 traffic flows, and it is never stored in the proxy's configuration. If you
@@ -142,17 +166,38 @@ stream from another realm fails that check and `new Request` would then throw
 The caller's `signal` is forwarded, so an abandoned request abandons the
 upstream call.
 
+The response body streams back as `fetch` hands it over. `fetch` has already
+decoded a `gzip`, `deflate` or `br` body, so the proxy drops the upstream's
+`content-encoding` and `content-length`, which describe the encoded bytes; a
+client served through a Node adapter would otherwise wait for missing bytes or
+try to gunzip plain text. Whether `fetch` decodes `zstd` depends on the
+runtime (Node 22 does not, Node 24 does), so for a `zstd` body the proxy looks
+at its first four bytes. If they start a zstd frame (or a skippable frame), the body is
+still raw and keeps its headers. Otherwise it was decoded and loses them. Any
+other coding is left as it is, with its raw body and its headers.
+
+So that the upstream is not invited to send such a coding, the caller's
+`accept-encoding` is narrowed to `gzip`, `x-gzip`, `deflate`, `br` and
+`identity` (a caller sending only `zstd` gets `identity`). In a browser the
+header is forbidden and the browser sets its own, so this only matters outside
+one.
+
 ### Failures are responses, not exceptions
 
 | Situation | Response |
 | --- | --- |
-| Upstream answers with a redirect | `502`, `x-webrun-proxy: upstream-redirect`, body `upstream redirected; the proxy does not follow redirects` |
+| Upstream answers with a redirect (`301`, `302`, `303`, `307`, `308`) | `502`, `x-webrun-proxy: upstream-redirect`, body `upstream redirected; the proxy does not follow redirects` |
+| Invalid `base`, a `headers` or `credential()` value that is not a valid header value, or a `credential()` that throws | `502`, `x-webrun-proxy: upstream-unreachable`, body `upstream <base> could not be reached: the outbound request could not be built …`. The underlying message is not included: it may quote the credential. |
 | Network error, CORS refusal, body already read, any other throw | `502`, `x-webrun-proxy: upstream-unreachable`, body `upstream <base> could not be reached: <message>` and a line suggesting the upstream may not permit cross-origin requests |
 
-Redirects are not followed (`redirect: "manual"`). In a browser that yields an
-opaque redirect with status `0`, and `new Response(body, { status: 0 })`
-throws, which would otherwise surface as `upstream-unreachable`. The proxy
-checks for it first and reports it as a redirect.
+Redirects are not followed (`redirect: "manual"`), and every platform gives
+the same answer. In a browser that yields an opaque redirect with status `0`,
+and `new Response(body, { status: 0 })` throws, which would otherwise surface
+as `upstream-unreachable`. In Node and Deno it yields the real `3xx` with the
+upstream's absolute `Location`, which would expose the upstream and send the
+caller around the proxy and its credential. Both are reported as
+`upstream-redirect`. `304 Not Modified` and the other `3xx` statuses that are
+not redirects pass through.
 
 The `x-webrun-proxy` header marks responses the proxy made itself, so they are
 never mistaken for the upstream's.

@@ -63,6 +63,13 @@ export interface UrlUpstreamInit {
   fetchImpl?: typeof fetch;
   /** `Via` value; omitted, no `Via` is added. */
   via?: string;
+  /**
+   * Forward the caller's `cookie` request header and return the upstream's
+   * `set-cookie` response header. Off by default: the proxy origin's own
+   * session cookies are not the upstream's business, and an upstream must not
+   * plant cookies on the proxy's origin.
+   */
+  forwardCookies?: boolean;
 }
 
 /**
@@ -76,30 +83,22 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
   const doFetch = init.fetchImpl ?? globalThis.fetch;
 
   return async (request: Request): Promise<Response> => {
-    const from = new URL(request.url);
-    const target = new URL(`.${from.pathname}${from.search}`, ensureSlash(init.base));
-
-    const headers = new Headers(request.headers);
-    // WHATEVER THE CALLER'S SYSTEM TREATS AS ITS OWN CREDENTIAL OR IDENTITY
-    // is consumed by this hop, the way `Proxy-Authorization` is consumed by the
-    // proxy it names. This proxy knows nothing about the caller's trust model,
-    // so the names are configuration: httpeers passes its membership-token and
-    // proven-peer headers here, because re-issuing to a third party must hand
-    // it neither a mesh token (an upstream once echoed one back) nor which
-    // mesh peer called. Without this a caller would have to post-process the
-    // request, by which point it has already gone.
-    //
-    // `authorization` is NOT on any built-in list. It belongs to the
-    // application talking to the upstream -- a page calling an API with that
-    // API's own key -- and dropping it made such a call impossible through the
-    // proxy. A system that does put its credential there names it here.
-    for (const name of init.stripRequestHeaders ?? []) headers.delete(name);
-    // Hop-by-hop headers (RFC 9110 §7.6.1) are not the upstream's business.
-    for (const hop of HOP_BY_HOP) headers.delete(hop);
-    if (init.via != null) headers.set("via", init.via);
-    // Operator configuration last, so it wins over anything a caller sent.
-    for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
-    for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
+    let target: URL;
+    let headers: Headers;
+    try {
+      ({ target, headers } = buildOutbound(init, request));
+    } catch {
+      // An invalid `base`, a `headers` or `credential()` value that is not a
+      // valid header, or a `credential()` that throws: the request cannot be
+      // built. Answered like any other failure, never as a rejected promise.
+      // The underlying message is NOT echoed: for an invalid header value it
+      // quotes the value, and that value may be the credential.
+      return new Response(
+        `upstream ${init.base} could not be reached: the outbound request could not be built ` +
+          "(check the proxy's base, headers and credential)",
+        { status: 502, headers: { [MARKER]: "upstream-unreachable" } },
+      );
+    }
 
     // FIREFOX HAS NO `Request.prototype.body` (checked against 155):
     // `request.body` reads as `undefined` there even for a genuine payload, so
@@ -166,16 +165,29 @@ export function urlUpstream(init: UrlUpstreamInit): Upstream {
       // AN OPAQUE REDIRECT HAS STATUS 0, and `new Response(body, {status: 0})`
       // throws — which is how the shipping proxy reports a redirecting
       // upstream as `502 upstream-unreachable`. Reported as what it is.
-      if (upstream.type === "opaqueredirect" || upstream.status === 0) {
+      //
+      // OUTSIDE A BROWSER `redirect: "manual"` returns the real 3xx instead,
+      // with the upstream's absolute `Location`: passed on, it would expose the
+      // upstream and send the caller around the proxy and its credential. It is
+      // reported the same way, so every platform gives one outcome. 304 and the
+      // other non-redirect 3xx statuses pass through.
+      if (
+        upstream.type === "opaqueredirect" ||
+        upstream.status === 0 ||
+        REDIRECT_STATUSES.has(upstream.status)
+      ) {
+        // Release the connection; the redirect's body is never read.
+        upstream.body?.cancel().catch(() => {});
         return new Response("upstream redirected; the proxy does not follow redirects", {
           status: 502,
           headers: { [MARKER]: "upstream-redirect" },
         });
       }
-      return new Response(upstream.body, {
+      const relayed = await relayResponse(upstream, init.forwardCookies === true);
+      return new Response(relayed.body, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers: upstream.headers,
+        headers: relayed.headers,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -199,6 +211,166 @@ const HOP_BY_HOP = [
   "upgrade",
 ];
 
+/** The Fetch spec's redirect statuses; `fetch` follows exactly these. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Content codings every `fetch` the proxy runs on decodes (Fetch spec "handle
+ * content codings": undici, Deno, Bun and browsers). When the upstream used only
+ * these, the body handed to the proxy is already decoded. `zstd` is NOT here:
+ * whether it is decoded depends on the runtime (Node 22's undici hands it over
+ * raw, Node 24's decodes it), so a zstd body is inspected instead; see
+ * {@link relayResponse}.
+ */
+const DECODED_CODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "identity"]);
+
+/** The coding name of one `accept-encoding` / `content-encoding` element, without parameters. */
+function codingName(element: string): string {
+  return (element.split(";")[0] ?? "").trim().toLowerCase();
+}
+
+/**
+ * Narrow the caller's `accept-encoding` to codings `fetch` decodes, so the
+ * upstream is never invited to send one that would come back raw. With nothing
+ * left, ask for `identity`. (In a browser the header is forbidden and the
+ * browser sets its own; this only matters elsewhere.)
+ */
+function narrowAcceptEncoding(headers: Headers): void {
+  const accept = headers.get("accept-encoding");
+  if (accept === null) return;
+  const kept = accept
+    .split(",")
+    .filter((element) => DECODED_CODINGS.has(codingName(element)))
+    .map((element) => element.trim());
+  headers.set("accept-encoding", kept.length > 0 ? kept.join(", ") : "identity");
+}
+
+/** Delete the hop-by-hop headers and every header the `Connection` header names. */
+function dropHopByHop(headers: Headers): void {
+  for (const token of (headers.get("connection") ?? "").split(",")) {
+    const name = token.trim();
+    if (name !== "") headers.delete(name);
+  }
+  for (const hop of HOP_BY_HOP) headers.delete(hop);
+}
+
+/**
+ * Whether `head` starts a raw zstd stream: a zstd frame (magic 0xFD2FB528,
+ * RFC 8878 §3.1.1) or a skippable frame (0x184D2A50..5F, §3.1.2), little-endian.
+ */
+function isZstdFrame(head: Uint8Array): boolean {
+  const [b0 = -1, b1, b2, b3] = head;
+  if (b0 === 0x28 && b1 === 0xb5 && b2 === 0x2f && b3 === 0xfd) return true;
+  return (b0 & 0xf0) === 0x50 && b1 === 0x2a && b2 === 0x4d && b3 === 0x18;
+}
+
+/** The upstream's response headers and body, as they may be handed to the caller. */
+async function relayResponse(
+  upstream: Response,
+  forwardCookies: boolean,
+): Promise<{ headers: Headers; body: ReadableStream<Uint8Array> | null }> {
+  const headers = new Headers(upstream.headers);
+  dropHopByHop(headers);
+  if (!forwardCookies) headers.delete("set-cookie");
+  let body: ReadableStream<Uint8Array> | null = upstream.body;
+  // Once `fetch` has decoded the body, the upstream's coding and its length
+  // (of the encoded bytes) no longer describe it. A client served through a
+  // Node adapter would otherwise wait for missing bytes or try to gunzip plain
+  // text.
+  const coding = headers.get("content-encoding");
+  if (coding !== null) {
+    const codings = coding.split(",").map(codingName).filter(Boolean);
+    let decoded = codings.every((c) => DECODED_CODINGS.has(c));
+    if (codings.length === 1 && codings[0] === "zstd") {
+      // Only a raw zstd body starts with the frame magic number; decoded
+      // content almost never does. That answers "did this runtime's fetch
+      // decode it?" the same way on every runtime.
+      const sniffed = await sniff(body, 4);
+      body = sniffed.body;
+      decoded = !isZstdFrame(sniffed.head);
+    }
+    if (decoded) {
+      headers.delete("content-encoding");
+      headers.delete("content-length");
+    }
+  }
+  return { headers, body };
+}
+
+/**
+ * Read at least `count` bytes off the front of `body` (fewer if it ends), and
+ * return them with a stream that yields the whole body, those bytes included.
+ */
+async function sniff(
+  body: ReadableStream<Uint8Array> | null,
+  count: number,
+): Promise<{ head: Uint8Array; body: ReadableStream<Uint8Array> | null }> {
+  if (body === null) return { head: new Uint8Array(), body };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let done = false;
+  while (length < count) {
+    const result = await reader.read();
+    if (result.done) {
+      done = true;
+      break;
+    }
+    chunks.push(result.value);
+    length += result.value.byteLength;
+  }
+  const head = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    head.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = chunks.shift();
+      if (next !== undefined) return controller.enqueue(next);
+      if (done) return controller.close();
+      const result = await reader.read();
+      if (result.done) controller.close();
+      else controller.enqueue(result.value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return { head, body: replay };
+}
+
 function ensureSlash(base: string): string {
   return base.endsWith("/") ? base : `${base}/`;
+}
+
+/** The upstream URL and the outbound headers. Throws on bad configuration. */
+function buildOutbound(init: UrlUpstreamInit, request: Request): { target: URL; headers: Headers } {
+  const from = new URL(request.url);
+  const target = new URL(`.${from.pathname}${from.search}`, ensureSlash(init.base));
+
+  const headers = new Headers(request.headers);
+  // WHATEVER THE CALLER'S SYSTEM TREATS AS ITS OWN CREDENTIAL OR IDENTITY
+  // is consumed by this hop, the way `Proxy-Authorization` is consumed by the
+  // proxy it names. This proxy knows nothing about the caller's trust model,
+  // so the names are configuration: httpeers passes its membership-token and
+  // proven-peer headers here, because re-issuing to a third party must hand
+  // it neither a mesh token (an upstream once echoed one back) nor which
+  // mesh peer called. Without this a caller would have to post-process the
+  // request, by which point it has already gone.
+  //
+  // `authorization` is NOT on any built-in list. It belongs to the
+  // application talking to the upstream -- a page calling an API with that
+  // API's own key -- and dropping it made such a call impossible through the
+  // proxy. A system that does put its credential there names it here.
+  for (const name of init.stripRequestHeaders ?? []) headers.delete(name);
+  // Hop-by-hop headers (RFC 9110 §7.6.1) are not the upstream's business,
+  // and neither are the ones the caller's `Connection` header names.
+  dropHopByHop(headers);
+  if (!init.forwardCookies) headers.delete("cookie");
+  narrowAcceptEncoding(headers);
+  if (init.via != null) headers.set("via", init.via);
+  // Operator configuration last, so it wins over anything a caller sent.
+  for (const [name, value] of Object.entries(init.headers ?? {})) headers.set(name, value);
+  for (const [name, value] of Object.entries(init.credential?.() ?? {})) headers.set(name, value);
+  return { target, headers };
 }

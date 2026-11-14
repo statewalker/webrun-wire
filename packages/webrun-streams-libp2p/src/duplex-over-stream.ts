@@ -59,6 +59,22 @@ export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 export const DEFAULT_READ_HIGH_WATER_BYTES = 64 * 1024;
 
 /**
+ * Default for {@link DuplexOverStreamOptions.maxFrameBytes}: the largest frame payload accepted
+ * from the peer. Generous, because a sender before this package's outbound chunking sent each
+ * producer chunk as one frame; short of letting a peer declare a 4 GiB frame.
+ */
+export const DEFAULT_MAX_FRAME_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The largest payload this side puts in one outbound frame: a larger producer chunk crosses as
+ * several frames (they are self-delimiting, so a receiver of any version reassembles the bytes).
+ */
+export const OUTBOUND_FRAME_BYTES = 64 * 1024;
+
+/** The peer sent bytes that are not this framing: a malformed or oversized frame header. */
+class FramingError extends Error {}
+
+/**
  * The stream ended before the call finished: the peer died, the connection
  * dropped, or the stream was reset or refused before both sides ended it.
  * Distinct from a clean end on purpose — a response cut short must never read
@@ -116,6 +132,13 @@ export interface DuplexOverStreamOptions {
    * Defaults to {@link DEFAULT_READ_HIGH_WATER_BYTES}.
    */
   readHighWaterBytes?: number;
+  /**
+   * The largest frame payload accepted from the peer, in bytes. A frame header past it — or one
+   * whose length is not a valid varint — means the peer is not speaking this framing: the call
+   * fails and the stream is aborted, rather than buffering without bound. Defaults to
+   * {@link DEFAULT_MAX_FRAME_BYTES}.
+   */
+  maxFrameBytes?: number;
 }
 
 /**
@@ -232,6 +255,7 @@ export async function* duplexOverStream(
     try {
       for await (const frame of parseFrames(
         pacedSource(stream, opts.readHighWaterBytes ?? DEFAULT_READ_HIGH_WATER_BYTES),
+        opts.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES,
       )) {
         if (frame.type === TYPE_DATA) {
           yield frame.payload;
@@ -243,6 +267,11 @@ export async function* duplexOverStream(
       }
     } catch (err) {
       if (err === peerError) throw err;
+      if (err instanceof FramingError) {
+        // the peer is not speaking this framing: fail the call (the stream is aborted below)
+        firePeerInputEnd(err);
+        throw err;
+      }
       // The stream itself failed (reset, aborted, its connection dropped):
       // the call did not finish, whatever libp2p named the error.
       const gone = new PeerGoneError(err);
@@ -409,7 +438,11 @@ async function* framedOutbound(
     for (;;) {
       const next = await iterator.next();
       if (next.done === true) return;
-      yield frameData(normalizeChunk(next.value));
+      // in bounded frames, so a receiver never reassembles one huge frame
+      const chunk = normalizeChunk(next.value);
+      for (let at = 0; at < chunk.byteLength; at += OUTBOUND_FRAME_BYTES) {
+        yield frameData(chunk.subarray(at, Math.min(at + OUTBOUND_FRAME_BYTES, chunk.byteLength)));
+      }
     }
   } catch (err) {
     const e = err instanceof Error ? err : new Error(String(err));
@@ -547,37 +580,84 @@ async function* pacedSource(stream: Stream, highWater: number): AsyncGenerator<U
   }
 }
 
-async function* parseFrames(
+/**
+ * Frames out of the stream's chunks, as they complete. Unread bytes sit in a {@link ByteBuffer},
+ * which grows by doubling, so a large frame arriving in many chunks is copied a bounded number
+ * of times. A header whose length is malformed or past `maxFrameBytes` throws a `FramingError`.
+ */
+export async function* parseFrames(
   source: AsyncIterable<unknown>,
+  maxFrameBytes: number = DEFAULT_MAX_FRAME_BYTES,
 ): AsyncGenerator<{ type: number; payload: Uint8Array }> {
-  let buf = new Uint8Array(0);
+  const buf = new ByteBuffer();
   for await (const item of source) {
     const incoming = normalizeChunk(item);
     if (incoming.byteLength === 0) continue;
-    if (buf.byteLength === 0) {
-      buf = new Uint8Array(incoming);
-    } else {
-      const merged = new Uint8Array(buf.byteLength + incoming.byteLength);
-      merged.set(buf, 0);
-      merged.set(incoming, buf.byteLength);
-      buf = merged;
-    }
-    while (buf.byteLength > 0) {
-      if (buf.byteLength < 2) break; // need at least type + 1 varint byte
-      // biome-ignore lint/style/noNonNullAssertion: buf.byteLength >= 2, checked above, so index 0 exists.
-      const type = buf[0]!;
-      let lenInfo: { value: number; offset: number };
-      try {
-        lenInfo = decodeVarint(buf, 1);
-      } catch {
-        break; // varint truncated, need more bytes
+    buf.push(incoming);
+    for (;;) {
+      const bytes = buf.unread();
+      if (bytes.byteLength < 2) break; // need at least type + 1 varint byte
+      // biome-ignore lint/style/noNonNullAssertion: bytes.byteLength >= 2, checked above, so index 0 exists.
+      const type = bytes[0]!;
+      const header = readLength(bytes.subarray(1), "frame");
+      if (header === undefined) break; // the length is not all here yet
+      if (header.value > maxFrameBytes) {
+        throw new FramingError(
+          `webrun-streams-libp2p: a ${header.value}-byte frame exceeds maxFrameBytes (${maxFrameBytes})`,
+        );
       }
-      const total = lenInfo.offset + lenInfo.value;
-      if (buf.byteLength < total) break;
-      const payload = new Uint8Array(buf.subarray(lenInfo.offset, total));
+      const total = 1 + header.offset + header.value;
+      if (bytes.byteLength < total) break;
+      const payload = bytes.slice(1 + header.offset, total);
+      buf.consume(total);
       yield { type, payload };
-      buf = buf.byteLength === total ? new Uint8Array(0) : new Uint8Array(buf.subarray(total));
     }
+  }
+}
+
+/** Unread bytes `buf[start, end)` of a buffer that grows by doubling. */
+export class ByteBuffer {
+  private buf = new Uint8Array(0);
+  private start = 0;
+  private end = 0;
+
+  push(incoming: Uint8Array): void {
+    if (this.end + incoming.byteLength > this.buf.byteLength) {
+      const size = this.end - this.start + incoming.byteLength;
+      const next = new Uint8Array(Math.max(size, this.buf.byteLength * 2));
+      next.set(this.buf.subarray(this.start, this.end), 0);
+      this.buf = next;
+      this.end -= this.start;
+      this.start = 0;
+    }
+    this.buf.set(incoming, this.end);
+    this.end += incoming.byteLength;
+  }
+
+  /** a view of the unread bytes, valid until the next `push` */
+  unread(): Uint8Array {
+    return this.buf.subarray(this.start, this.end);
+  }
+
+  consume(n: number): void {
+    this.start += n;
+    if (this.start === this.end) this.start = this.end = 0;
+  }
+}
+
+/**
+ * The varint length prefix at the start of `bytes`, or `undefined` while it is incomplete; throws
+ * a `FramingError` when it is malformed (no varint of this framing runs past 5 bytes).
+ */
+export function readLength(
+  bytes: Uint8Array,
+  what: string,
+): { value: number; offset: number } | undefined {
+  try {
+    return decodeVarint(bytes, 0);
+  } catch (err) {
+    if (bytes.byteLength < 5) return undefined;
+    throw new FramingError(`webrun-streams-libp2p: a malformed ${what} length`, { cause: err });
   }
 }
 

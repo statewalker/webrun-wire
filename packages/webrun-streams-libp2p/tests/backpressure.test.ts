@@ -18,8 +18,7 @@ import { duplexOverStream } from "../src/duplex-over-stream.js";
 // review's own measurement (36 864 B) of the same bug.
 //
 // Uses `@libp2p/utils`'s in-memory `streamPair`, not a real libp2p node, so
-// unlike tests/conformance.test.ts it needs no network setup and is not
-// gated behind WEBRUN_STREAMS_LIBP2P.
+// unlike tests/conformance.test.ts it needs no network setup.
 describe("duplexOverStream backpressure", () => {
   it("keeps stream.writeBufferLength bounded across multiple backpressure cycles", async () => {
     // capacity: 2 makes the mock transport signal "buffer full" after just

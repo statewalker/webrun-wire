@@ -23,7 +23,8 @@ export interface RpcClient {
  * Build an RPC client that calls services exposed by {@link newRpcServer}.
  *
  * The descriptor at `GET {baseUrl}/` is fetched lazily on the first
- * `loadService` call and cached for subsequent calls.
+ * `loadService` call and cached for subsequent calls. A failed load is not
+ * cached; the next `loadService` call tries again.
  */
 export function newRpcClient({
   baseUrl,
@@ -52,7 +53,13 @@ export function newRpcClient({
 
   return {
     async loadService<T = Record<string, RpcMethod>>(serviceName: string): Promise<T> {
-      if (!apiPromise) apiPromise = loadApi();
+      // A failed load is not cached: the next call fetches the descriptor again.
+      if (!apiPromise) {
+        apiPromise = loadApi().catch((error) => {
+          apiPromise = null;
+          throw error;
+        });
+      }
       const apis = await apiPromise;
       const service = apis[serviceName];
       if (!service) throw new Error(`Service ${serviceName} not found`);

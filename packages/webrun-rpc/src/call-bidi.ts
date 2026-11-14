@@ -3,6 +3,11 @@ import { ioSend } from "./io-send.js";
 import type { MessageTarget } from "./message-target.js";
 
 export interface CallBidiOptions extends CallPortOptions {
+  /**
+   * Deadline in ms for each chunk call of the stream (default: none, see
+   * `SendOptions.timeout`). The outer call uses `bidiTimeout` instead.
+   */
+  timeout?: number;
   /** Timeout for the outer stream (default: `Number.MAX_SAFE_INTEGER` / max int). */
   bidiTimeout?: number;
 }
@@ -42,10 +47,16 @@ export async function* callBidi<TIn, TOut>(
   });
 
   let outerError: unknown;
-  promise.catch((err) => {
-    outerError = err;
-    cancelInner.abort();
-  });
+  promise.then(
+    // The peer's handler has finished, and our consumer has already taken
+    // its last chunk (its reply comes after ours to that chunk). Whatever
+    // input the handler did not read nobody will answer: stop sending it.
+    () => cancelInner.abort(),
+    (err) => {
+      outerError = err;
+      cancelInner.abort();
+    },
+  );
 
   try {
     yield* sendIter;

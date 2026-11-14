@@ -11,7 +11,7 @@
  * This module is the work-around: a transport-backed port (`newVirtualPort`,
  * behind `multiplexPort`) registers an `AbortSignal` that aborts when the
  * port closes.
- * Consumers (`callPort`, `recieve`, `send`, application code) look up the
+ * Consumers (`callPort`, `receive`, `send`, application code) look up the
  * signal via `getPortCloseSignal(port)` and combine it into their own
  * abort plumbing — typically with `AbortSignal.any([userSignal, closeSignal])`
  * — so pending awaits reject cleanly instead of hanging until a per-call

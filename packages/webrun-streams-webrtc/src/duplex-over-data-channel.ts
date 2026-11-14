@@ -26,6 +26,9 @@ export const LOW_WATER_MARK = 256 * 1024;
  * whether or not anyone reads, so without credit a slow reader's queue grows without bound. The
  * window is larger than the send buffer's high-water mark so a long round trip does not throttle a
  * fast link: the buffer limit is what bounds the sender's memory.
+ *
+ * The receiver enforces it: a peer that sends more than the window plus the credit returned fails
+ * the call (the queued payload is dropped, the stream throws, the channel is closed).
  */
 export const RECEIVE_WINDOW = 4 * 1024 * 1024;
 const FRAME_OVERHEAD = 1; // 1-byte type tag
@@ -96,9 +99,21 @@ export function duplexOverDataChannel(
   return runStream(dc, input);
 }
 
-async function* runStream(
+export interface RunStreamHooks {
+  /**
+   * Called once when the inbound side fails (the peer's `ERROR`, the channel closing, a peer
+   * past the receive window), before the stream waits for its outbound pump to settle. A
+   * responder ends its handler's input here: the pump may be waiting for the handler's next
+   * output while the handler waits for its next input.
+   */
+  onInboundFailed?(err: Error): void;
+}
+
+/** {@link duplexOverDataChannel}, with hooks for `serve` */
+export async function* runStream(
   dc: RTCDataChannel,
   input: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  hooks: RunStreamHooks = {},
 ): AsyncGenerator<Uint8Array> {
   dc.binaryType = "arraybuffer";
 
@@ -109,6 +124,9 @@ async function* runStream(
   // flow control: what the peer still lets us send, and what our consumer has pulled
   let credit = RECEIVE_WINDOW;
   let pulled = 0;
+  /** what the peer may still send us: the window plus the credit we returned, less what came */
+  let allowance = RECEIVE_WINDOW;
+  let overrun = false;
   let wakeSender: (() => void) | null = null;
   const nudge = (): void => {
     const w = wakeSender;
@@ -142,12 +160,13 @@ async function* runStream(
     const frame = new Uint8Array(5);
     frame[0] = TYPE_CREDIT;
     new DataView(frame.buffer).setUint32(1, pulled);
-    pulled = 0;
     try {
       sendRaw(frame);
+      allowance += pulled;
     } catch {
       /* closing */
     }
+    pulled = 0;
   };
 
   const maybeClose = (): void => {
@@ -173,6 +192,27 @@ async function* runStream(
     const type = bytes[0];
     const payload = bytes.subarray(1);
     if (type === TYPE_DATA) {
+      if (overrun) return;
+      allowance -= payload.byteLength;
+      if (allowance < 0) {
+        // the peer ignores credit: fail the call rather than queue without bound
+        overrun = true;
+        peerEnded = true;
+        incoming.fail(
+          new Error(
+            `webrun-streams-webrtc: the peer sent past the receive window (${RECEIVE_WINDOW} bytes) without credit`,
+          ),
+        );
+        // and tell the peer now, not once our consumer reaches the error
+        aborted = true;
+        nudge();
+        try {
+          dc.close();
+        } catch {
+          /* already closing */
+        }
+        return;
+      }
       incoming.push(new Uint8Array(payload));
     } else if (type === TYPE_END) {
       peerEnded = true;
@@ -257,12 +297,16 @@ async function* runStream(
   })();
 
   let inboundDrained = false;
+  let inboundError: Error | undefined;
   try {
     for await (const chunk of incoming.iterate()) {
       yield chunk;
       consumed(chunk.byteLength); // pulled: the peer may send that much again
     }
     inboundDrained = true;
+  } catch (err) {
+    inboundError = err instanceof Error ? err : new Error(String(err));
+    throw err;
   } finally {
     inboundFinished = true;
     detach();
@@ -300,6 +344,9 @@ async function* runStream(
       } catch {
         /* already closing */
       }
+      // A responder's pump may be waiting for the handler's next output while the handler waits
+      // for its next input: end that input (with the error) before waiting on the pump.
+      if (inboundError) hooks.onInboundFailed?.(inboundError);
       await outbound.catch(() => {});
     }
   }
@@ -308,6 +355,8 @@ async function* runStream(
 interface InboundQueue {
   push(chunk: Uint8Array): void;
   done(err?: Error): void;
+  /** drops what is queued and ends with `err` */
+  fail(err: Error): void;
   iterate(): AsyncGenerator<Uint8Array>;
 }
 
@@ -325,6 +374,12 @@ function makeInboundQueue(): InboundQueue {
     },
     done(err?: Error): void {
       if (closed) return;
+      slots.push({ type: "done", err });
+      wake?.();
+    },
+    fail(err: Error): void {
+      if (closed) return;
+      slots.length = 0;
       slots.push({ type: "done", err });
       wake?.();
     },

@@ -2,7 +2,7 @@ import { recieveIterator, sendIterator } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { callPort } from "../src/call-port.js";
 import { listenPort } from "../src/listen-port.js";
-import { recieve } from "../src/recieve.js";
+import { receive } from "../src/receive.js";
 import { send } from "../src/send.js";
 
 async function* makeAsync<T>(items: Iterable<T>, maxTimeout = 20): AsyncGenerator<T> {
@@ -78,7 +78,7 @@ describe("recieveIterator (transport-agnostic)", () => {
   });
 });
 
-describe("send + recieve over a MessageChannel", () => {
+describe("send + receive over a MessageChannel", () => {
   async function run<T>(
     dataToSend: AsyncIterable<T> | Iterable<T>,
     control: T[],
@@ -88,7 +88,7 @@ describe("send + recieve over a MessageChannel", () => {
     void send<T>(port2, dataToSend, { channelName });
 
     const values: T[] = [];
-    for await (const input of recieve<T>(port1, { channelName })) {
+    for await (const input of receive<T>(port1, { channelName })) {
       for await (const value of input) {
         await new Promise((r) => setTimeout(r, 5));
         values.push(value);
@@ -107,7 +107,7 @@ describe("send + recieve over a MessageChannel", () => {
     // Install both receivers first so no messages are missed.
     const xsPromise = (async () => {
       const xs: number[] = [];
-      for await (const input of recieve<number>(port1, { channelName: "x" })) {
+      for await (const input of receive<number>(port1, { channelName: "x" })) {
         for await (const v of input) xs.push(v);
         break;
       }
@@ -115,7 +115,7 @@ describe("send + recieve over a MessageChannel", () => {
     })();
     const ysPromise = (async () => {
       const ys: string[] = [];
-      for await (const input of recieve<string>(port1, { channelName: "y" })) {
+      for await (const input of receive<string>(port1, { channelName: "y" })) {
         for await (const v of input) ys.push(v);
         break;
       }

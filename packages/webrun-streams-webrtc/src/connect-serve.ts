@@ -1,5 +1,10 @@
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
-import { duplexOverDataChannel, holdEvents, markAnswering } from "./duplex-over-data-channel.js";
+import {
+  duplexOverDataChannel,
+  holdEvents,
+  markAnswering,
+  runStream,
+} from "./duplex-over-data-channel.js";
 import { PORT_LABEL_PREFIX } from "./port-mux.js";
 
 export interface WebRtcParams {
@@ -16,12 +21,10 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
   let counter = 0;
   let closed = false;
   const open = new Set<RTCDataChannel>();
-  const onConnectionClose = (): void => {
-    closed = true;
+  const onStateChange = (): void => {
+    if (pc.connectionState === "closed" || pc.connectionState === "failed") closed = true;
   };
-  pc.addEventListener("connectionstatechange", () => {
-    if (pc.connectionState === "closed" || pc.connectionState === "failed") onConnectionClose();
-  });
+  pc.addEventListener("connectionstatechange", onStateChange);
 
   const call: Duplex = (input) => {
     if (closed) {
@@ -45,6 +48,7 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
     call,
     async close() {
       closed = true;
+      pc.removeEventListener("connectionstatechange", onStateChange);
       for (const dc of open) {
         try {
           dc.close();
@@ -82,18 +86,23 @@ export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
           peek.release();
         }
       })();
-      // the next chunk is pulled (and its credit returned) only once the handler took this one
-      for await (const chunk of duplexOverDataChannel(dc, out)) {
-        await inputFromPeer.deliver(chunk);
+      // The next chunk is pulled (and its credit returned) only once the handler took this one.
+      // When the inbound side fails (the caller cancelled and closed the channel, or its input
+      // threw), the handler's input ends with that error before the stream waits for its outbound
+      // pump: the pump may be waiting for the handler's output, the handler for its input.
+      const inbound = runStream(dc, out, { onInboundFailed: (err) => peek.done(err) });
+      for await (const chunk of inbound) {
+        await peek.deliver(chunk);
       }
-      inputFromPeer.done();
-    })().catch(() => {
+      peek.done();
+    })().catch((err: unknown) => {
       // A caller that cancels mid-response closes the DataChannel, which
       // surfaces here as TransportClosedError. That is the cancellation
       // working, not a fault: this task is fire-and-forget, so without a
-      // catch it becomes an unhandled rejection that fails the page. Closing
-      // the handler's input is what runs the handler's own `finally`.
-      inputFromPeer?.done();
+      // catch it becomes an unhandled rejection that fails the page. Ending
+      // the handler's input (with the error, so a handler does not take a
+      // truncated upload for a complete one) is what runs its own `finally`.
+      inputFromPeer?.done(err instanceof Error ? err : new Error(String(err)));
     });
   };
   pc.addEventListener("datachannel", onChannel);
@@ -155,7 +164,8 @@ interface PeekInput {
   input: AsyncGenerator<Uint8Array>;
   /** resolves once the handler has taken the chunk (or stopped reading) */
   deliver(chunk: Uint8Array): Promise<void>;
-  done(): void;
+  /** ends the input after the chunks already delivered; with `err`, the handler's read throws it */
+  done(err?: Error): void;
   /** the handler is finished: pending and later chunks are dropped */
   release(): void;
 }
@@ -171,10 +181,12 @@ interface PeekInput {
  * the handler's input queue.
  */
 function peekInput(_dc: RTCDataChannel): PeekInput {
-  const slots: Array<{ type: "value"; value: Uint8Array; taken: () => void } | { type: "done" }> =
-    [];
+  const slots: Array<
+    { type: "value"; value: Uint8Array; taken: () => void } | { type: "done"; err?: Error }
+  > = [];
   let wake: (() => void) | null = null;
   let closed = false;
+  let ended = false;
   const input = (async function* () {
     try {
       while (true) {
@@ -187,7 +199,10 @@ function peekInput(_dc: RTCDataChannel): PeekInput {
         }
         const slot = slots.shift();
         if (!slot) continue;
-        if (slot.type === "done") return;
+        if (slot.type === "done") {
+          if (slot.err) throw slot.err;
+          return;
+        }
         slot.taken();
         yield slot.value;
       }
@@ -209,9 +224,10 @@ function peekInput(_dc: RTCDataChannel): PeekInput {
         wake?.();
       });
     },
-    done(): void {
-      if (closed) return;
-      slots.push({ type: "done" });
+    done(err?: Error): void {
+      if (closed || ended) return;
+      ended = true;
+      slots.push({ type: "done", err });
       wake?.();
     },
     release,

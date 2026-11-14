@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSseEvent } from "./sse.js";
+import { formatSseEvent } from "../src/sse.js";
 
 describe("formatSseEvent", () => {
   it("frames id, event name and data", () => {

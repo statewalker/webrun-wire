@@ -63,6 +63,7 @@ runs (Node or browser).
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
 | `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
+| `DEFAULT_MAX_FRAME_BYTES` | `67_108_864` (64 MiB), `duplexOverStream`'s default cap on one inbound frame's payload (`maxFrameBytes`). |
 | `ConnectLibp2pParams`, `ServeLibp2pParams`, `ConnectionContext`, `ServeConnectionsHandler`, `DuplexOverStreamOptions` | Types, below. |
 
 `ConnectLibp2pParams`:
@@ -73,10 +74,11 @@ runs (Node or browser).
 | `peer` | `PeerId \| Multiaddr` | required | Who to dial. |
 | `protocol` | `string` | `DEFAULT_PROTOCOL` | Protocol id. |
 | `drainTimeoutMs` | `number` | `300_000` | How long a backpressured send waits for `'drain'`. |
+| `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame payload accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
 | `maxOutboundStreams` | `number` | libp2p's (64) | Passed to `dialProtocol`. |
 | `runOnLimitedConnection` | `boolean` | unset | Passed to `dialProtocol`. Allows relayed or otherwise limited connections. |
 
-`ServeLibp2pParams`: `node`, `protocol`, `drainTimeoutMs`,
+`ServeLibp2pParams`: `node`, `protocol`, `drainTimeoutMs`, `maxFrameBytes`,
 `maxOutboundStreams` and `runOnLimitedConnection` as above (passed to
 `node.handle`), plus `maxInboundStreams` (libp2p default 32).
 
@@ -90,6 +92,7 @@ runs (Node or browser).
 | `onPeerInputEnd?(err?)` | Called once when the peer's side ends: closed, `ERROR` frame (passed as `err`) or torn down. `serveConnections` uses it to end the handler's input. |
 | `onSourceCompleted?()` | Called only when the peer's side ended normally. `connect` uses it to choose a graceful close over an abort. |
 | `drainTimeoutMs?` | As above. |
+| `maxFrameBytes?` | As above. |
 
 ## Examples
 
@@ -174,6 +177,18 @@ from whatever chunks arrive. Normal end of input is libp2p's own
 `close()` (close-write), not a frame. The `ERROR` frame exists because a yamux
 reset carries only "stream reset"; without it, a handler that throws would
 reach the caller as an anonymous reset. Frames of other types are skipped.
+
+A producer chunk larger than 64 KiB is sent as several `DATA` frames of at most
+64 KiB each. Frames are self-delimiting and a receiver yields each `DATA`
+payload as it completes, so a receiver of any version reassembles the same
+bytes; only the chunk boundaries the consumer sees change. The receiver keeps
+unread bytes in a buffer that grows by doubling, so a large frame arriving in
+many pieces is copied a bounded number of times. A frame length past
+`maxFrameBytes` (default 64 MiB), or one that is not a valid varint, fails the
+call with `webrun-streams-libp2p: a <n>-byte frame exceeds maxFrameBytes (<cap>)`
+or `webrun-streams-libp2p: a malformed frame length`, and aborts the stream:
+a peer not speaking this framing would otherwise make the receiver buffer
+without bound. On the serving side the handler's input throws that error.
 
 ### Why identity reaches the handler by closure
 
@@ -357,7 +372,9 @@ so this also covers a peer that dies while no data is flowing.
 
 Frames are `[varint length][bytes]`. Reading starts at once, so attach the
 `message` listener in the same tick (`multiplexPort` does). `postMessage`
-does not wait for room, and libp2p resets a stream whose write buffer passes
+takes a `Uint8Array`, an `ArrayBuffer` or another view, and throws `TypeError`
+for anything else, as the other adapters' byte pipes do. It does not wait for
+room, and libp2p resets a stream whose write buffer passes
 `maxWriteBufferLength`. The target reports its state instead:
 `bufferedAmount` is the stream's write buffer, and `whenDrained()` resolves
 on libp2p's `drain` (or the stream's `close`, so no sender is left waiting),
@@ -386,8 +403,8 @@ identity, burst, stream-limit and serving-resilience tests against two real
 in-process TCP nodes. `dead-peer.test.ts` kills the peer two ways, aborting
 its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
-each; every channel must fail with an error within 1 s. The shared conformance suite is opt-in because it spins
-up more nodes: `WEBRUN_STREAMS_LIBP2P=1 pnpm test`. It runs with
+each; every channel must fail with an error within 1 s. The shared conformance
+suite (`tests/conformance.test.ts`, about 7 s) runs in the same `pnpm test`, with
 `skipHugeBody`.
 
 **Run-ahead is bounded for `connect` / `serve`** (spec D17, L6;

@@ -192,6 +192,9 @@ importers:
 
   packages/webrun-http-events:
     devDependencies:
+      '@biomejs/biome':
+        specifier: 'catalog:'
+        version: 2.5.15
       '@statewalker/webrun-http-browser':
         specifier: workspace:^
         version: link:../webrun-http-browser
