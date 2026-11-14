@@ -44,4 +44,19 @@ describe("serializeError / deserializeError", () => {
     expect(out.message).toBe("roundtrip");
     expect(out.status).toBe(418);
   });
+
+  it("does not let a peer's __proto__ key change the error's prototype", () => {
+    // msgpack and structured clone both deliver `__proto__` as an own property.
+    const payload = JSON.parse(
+      '{"message":"evil","__proto__":{"isAdmin":true},"constructor":{"x":1},"code":7}',
+    );
+    expect(Object.hasOwn(payload, "__proto__")).toBe(true);
+    const err = deserializeError(payload) as Error & { isAdmin?: boolean; code?: number };
+    expect(err).toBeInstanceOf(Error);
+    expect(Object.getPrototypeOf(err)).toBe(Error.prototype);
+    expect(err.isAdmin).toBeUndefined();
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe("evil");
+    expect(err.code).toBe(7);
+  });
 });

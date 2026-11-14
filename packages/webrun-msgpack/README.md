@@ -49,7 +49,7 @@ codec or `serialize` / `deserialize`.
 | Shape | `Iterable<T> \| AsyncIterable<T>` ⇄ `AsyncGenerator<Uint8Array>` | one `PortEnvelope` ⇄ one `postMessage` |
 | Framing | 4-byte big-endian length prefix, added here | none: the transport's message boundaries are the framing |
 | Use it when | the transport is a byte stream: a TCP-like socket, a `ReadableStream`, a file | the transport preserves message boundaries: a WebSocket, an `RTCDataChannel`, a LiveKit data packet |
-| Malformed input | a truncated trailing frame is never emitted; the iteration just ends | dropped, never thrown |
+| Malformed input | a truncated trailing frame is never emitted; the iteration just ends. A header past `maxFrameBytes` throws a `RangeError` | dropped, never thrown |
 
 A length prefix on a transport that already frames is redundant. Relying on message boundaries
 where there are none is the truncation bug the stream codec exists to prevent.
@@ -59,17 +59,20 @@ where there are none is the truncation bug the stream codec exists to prevent.
 | Export | Direction | Use |
 | --- | --- | --- |
 | `encodeMsgpack<T>(input: Iterable<T> \| AsyncIterable<T>)` | values → frames | generic JSON-like values |
-| `decodeMsgpack<T>(input: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → values | inverse of `encodeMsgpack` |
+| `decodeMsgpack<T>(input: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>, options?: DecodeMsgpackOptions)` | frames → values | inverse of `encodeMsgpack` |
 | `encodeFloat32Arrays(input: Iterable<Float32Array> \| AsyncIterable<Float32Array>)` | arrays → frames | float vectors, no per-element conversion |
-| `decodeFloat32Arrays(input: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>)` | frames → arrays | inverse of `encodeFloat32Arrays` |
+| `decodeFloat32Arrays(input: Iterable<Uint8Array> \| AsyncIterable<Uint8Array>, options?: DecodeMsgpackOptions)` | frames → arrays | inverse of `encodeFloat32Arrays` |
+| `DEFAULT_MAX_FRAME_BYTES` | | the default `maxFrameBytes`, 64 MiB |
 | `msgpackCodec: PortCodec` | envelope ⇄ one message | `multiplexPort` over a byte transport |
 | `serialize(value, options?)` | one value → one MessagePack document | the format itself, no framing |
 | `deserialize(bytes, options?)` | one document → one value | inverse of `serialize` |
 
-Types: `SerializeOptions` (`multiple?: boolean`, `invalidTypeReplacement?: unknown`),
+Types: `DecodeMsgpackOptions` (`maxFrameBytes?: number`, the largest payload a frame header may
+announce, default `DEFAULT_MAX_FRAME_BYTES`), `SerializeOptions` (`multiple?: boolean`, `invalidTypeReplacement?: unknown`),
 `DeserializeOptions` (`multiple?: boolean`), `MsgpackInput` (`Uint8Array | ArrayBuffer |
-ArrayLike<number>`) and `MsgpackExtension` (`{ type: number; data: Uint8Array }`, an extension
-value other than a timestamp).
+ArrayLike<number>`). `MsgpackExtension` (`new MsgpackExtension(type, data)`, `type` an int8 from
+-128 to 127) is a class, exported as a value: an extension value other than a timestamp, which
+`deserialize` returns and `serialize` writes back as the same ext.
 
 The four stream functions accept synchronous iterables too, so an array needs no async wrapper.
 
@@ -273,13 +276,18 @@ listener, outside any consumer's reach, and one hostile frame could take the mul
 └──────────────┴────────────────────────────┘
 ```
 
-Big-endian 32-bit length, so at most 2³²−1 bytes per frame. A frame is built whole: one
+Big-endian 32-bit length, so at most 2³²−1 bytes per frame on the wire. The decoder accepts at
+most `maxFrameBytes` (default 64 MiB, like `webrun-rpc`'s `DEFAULT_MAX_REASSEMBLED_BYTES`): the
+length comes from the peer, and a header above the ceiling throws a `RangeError` as soon as it is
+read, before any of the payload is buffered. Raise it explicitly for larger values. A frame is built whole: one
 `serialize` call per value, no fragmentation. This layout belongs to the stream codec only;
 `msgpackCodec` prefixes nothing.
 
-The decoder keeps a rolling buffer. Each chunk is appended (one allocation per chunk), then: if
-fewer than 4 bytes are buffered, wait; read the length; if `4 + length` bytes are not buffered,
-wait; copy the payload out, `deserialize` it, yield; advance and repeat. Zero-length chunks are
+The decoder keeps the received chunks in a list with a byte count, without copying them. After
+each chunk: if fewer than 4 bytes are buffered, wait; read the length and check it against
+`maxFrameBytes`; if `length` more bytes are not buffered, wait; copy the payload out into one
+allocation, `deserialize` it, yield; repeat. Each byte is copied once, so reassembly is linear
+however small the chunks. Zero-length chunks are
 harmless. A truncated trailing frame stays in the buffer and the iteration ends without yielding
 it, so a caller detects truncation by comparing the count received with the count expected.
 
@@ -335,13 +343,14 @@ Array to serialize multiple values.` when `multiple` is set on a non-array.
 | other typed arrays | array of numbers | `number[]` |
 | `Array` | array | `unknown[]` |
 | `Date` | timestamp extension (type -1), 32/64/96-bit as needed | `Date`, floored to the millisecond |
-| any other object | map of its own enumerable string keys | plain object; every key, `__proto__` included, is an own property |
+| `MsgpackExtension` | ext / fixext of its `type` and `data` | `MsgpackExtension` |
+| any other object (a plain `{ type, data }` included) | map of its own enumerable string keys | plain object; every key, `__proto__` included, is an own property |
 | `bigint`, `function`, `symbol` | throws, unless `invalidTypeReplacement` supplies a stand-in | |
 
 Reading also accepts what other encoders write: float 32, int 64 / uint 64 (as the nearest
 `number`, losing precision beyond 2⁵³), maps with non-string keys (converted with `String()`), and
-extension types other than timestamps, returned as `{ type, data }` with `type` as the unsigned
-byte (type `-2` reads as `254`). A `Map` or `Set` has no own enumerable keys and is written as an
+extension types other than timestamps, returned as a `MsgpackExtension` with `type` signed, as the
+spec defines it (type `-2` reads as `-2`). A `Map` or `Set` has no own enumerable keys and is written as an
 empty map.
 
 ### The MessagePack implementation is a port of msgpack.js
@@ -378,7 +387,9 @@ implementation failed:
 4. A `__proto__` map key is decoded as an own property (upstream's assignment replaced the
    prototype), and only own enumerable keys are written (upstream's `for…in` also wrote inherited
    ones).
-5. TypeScript types, `unknown` in place of `any`, and the bounds `0xffffffffffffffff` /
+5. Extension types are read as signed int8 (upstream read `-2` as `254`), and a
+   `MsgpackExtension` is written as an ext (upstream wrote it as a map, so it did not round-trip).
+6. TypeScript types, `unknown` in place of `any`, and the bounds `0xffffffffffffffff` /
    `0x7fffffffffffffff` spelled `2 ** 64` / `2 ** 63` (the same doubles).
 
 Besides this package's own tests, the suite runs upstream's test page ported to vitest

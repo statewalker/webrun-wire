@@ -3,6 +3,7 @@ import { asyncDisposable } from "./async-dispose.js";
 import type { RequestEnvelope, ResponseEnvelope } from "./envelope.js";
 import { abortReason, type HttpDataOptions, httpFetch, httpServe } from "./http-data.js";
 import { type FetchHandler, NULL_BODY_STATUSES } from "./http-stubs.js";
+import { HttpParseError } from "./http1/errors.js";
 import type { ByteSource } from "./message.js";
 import { readerIterator } from "./reader-iterator.js";
 import { collectBytes, supportsRequestStreams } from "./request-streams.js";
@@ -170,9 +171,30 @@ export async function fetchOverDuplex(
   ) {
     if (finish) finish();
     else await release?.();
-    return new Response(null, responseInit);
+    return newResponse(null, responseInit);
   }
-  return new Response(responseBody(respBody, request, release), responseInit);
+  // A status or reason phrase `Response` refuses (a codec that does not check them, such as the
+  // JSON envelope) must not leave the call held by a body nobody will read.
+  const stream = responseBody(respBody, request, release);
+  try {
+    return newResponse(stream, responseInit);
+  } catch (err) {
+    await stream.cancel().catch(() => {});
+    await release?.();
+    throw err;
+  }
+}
+
+/** `new Response`, with its `RangeError` / `TypeError` for a peer's status line as an `HttpParseError`. */
+function newResponse(body: ReadableStream<Uint8Array> | null, init: ResponseInit): Response {
+  try {
+    return new Response(body, init);
+  } catch (err) {
+    throw new HttpParseError(
+      `invalid response status line: ${JSON.stringify(init.status)} ${JSON.stringify(init.statusText)}`,
+      { cause: err },
+    );
+  }
 }
 
 /**

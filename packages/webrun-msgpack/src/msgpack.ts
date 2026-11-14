@@ -20,26 +20,90 @@ export async function* encodeMsgpack<T>(
 }
 
 /**
+ * The default ceiling on one frame's payload length, in bytes (64 MiB, the same as
+ * `webrun-rpc`'s `DEFAULT_MAX_REASSEMBLED_BYTES`).
+ */
+export const DEFAULT_MAX_FRAME_BYTES = 64 * 1024 * 1024;
+
+/** Options for {@link decodeMsgpack} and {@link decodeFloat32Arrays}. */
+export interface DecodeMsgpackOptions {
+  /**
+   * The largest payload length a frame header may announce, in bytes. A header above it throws
+   * a `RangeError` as soon as it is read, before any of the payload is buffered.
+   * Defaults to {@link DEFAULT_MAX_FRAME_BYTES}.
+   */
+  maxFrameBytes?: number;
+}
+
+/**
  * Decode length-prefixed msgpack frames, reassembling across chunk boundaries.
  *
- * The input may be synchronous (an array of chunks) or asynchronous.
+ * The input may be synchronous (an array of chunks) or asynchronous. A frame whose header
+ * announces more than `maxFrameBytes` throws a `RangeError`.
  */
-export async function* decodeMsgpack<T>(
+export function decodeMsgpack<T>(
   input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+  options: DecodeMsgpackOptions = {},
 ): AsyncGenerator<T> {
-  let buffer: Uint8Array = new Uint8Array(0);
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
+  if (!(maxFrameBytes >= 0)) {
+    throw new RangeError(`maxFrameBytes must be a non-negative number, got ${maxFrameBytes}`);
+  }
+  return decodeFrames<T>(input, maxFrameBytes);
+}
+
+async function* decodeFrames<T>(
+  input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+  maxFrameBytes: number,
+): AsyncGenerator<T> {
+  // Chunks are kept as a list with a byte total and copied out once per complete frame, so
+  // reassembly is linear in the bytes received whatever the chunk size.
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let frameLen = -1; // -1 while the next header is not read yet
+
+  const take = (n: number): Uint8Array => {
+    const out = new Uint8Array(n);
+    let offset = 0;
+    let used = 0;
+    while (offset < n) {
+      const c = chunks[used] as Uint8Array;
+      const need = n - offset;
+      if (c.length <= need) {
+        out.set(c, offset);
+        offset += c.length;
+        used++;
+      } else {
+        out.set(c.subarray(0, need), offset);
+        chunks[used] = c.subarray(need);
+        offset = n;
+      }
+    }
+    chunks.splice(0, used);
+    total -= n;
+    return out;
+  };
 
   for await (const chunk of input) {
-    buffer = concat(buffer, chunk);
+    if (chunk.length === 0) continue;
+    chunks.push(chunk);
+    total += chunk.length;
 
-    while (buffer.length >= 4) {
-      const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-      const frameLen = view.getUint32(0, false);
-      if (buffer.length < 4 + frameLen) break;
-
-      const payload = buffer.subarray(4, 4 + frameLen);
-      buffer = buffer.subarray(4 + frameLen);
-      yield deserialize(Uint8Array.from(payload)) as T;
+    while (true) {
+      if (frameLen < 0) {
+        if (total < 4) break;
+        const head = take(4);
+        frameLen = new DataView(head.buffer).getUint32(0, false);
+        if (frameLen > maxFrameBytes) {
+          throw new RangeError(
+            `decodeMsgpack: frame of ${frameLen} bytes exceeds maxFrameBytes (${maxFrameBytes})`,
+          );
+        }
+      }
+      if (total < frameLen) break;
+      const payload = take(frameLen);
+      frameLen = -1;
+      yield deserialize(payload) as T;
     }
   }
 }
@@ -72,8 +136,9 @@ export async function* encodeFloat32Arrays(
  */
 export async function* decodeFloat32Arrays(
   input: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+  options: DecodeMsgpackOptions = {},
 ): AsyncGenerator<Float32Array> {
-  for await (const item of decodeMsgpack<Uint8Array>(input)) {
+  for await (const item of decodeMsgpack<Uint8Array>(input, options)) {
     const aligned = alignBuffer(item);
     yield new Float32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 4);
   }
@@ -84,12 +149,4 @@ function alignBuffer(bytes: Uint8Array): Uint8Array {
   const aligned = new Uint8Array(bytes.length);
   aligned.set(bytes);
   return aligned;
-}
-
-function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
-  if (a.length === 0) return b;
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a, 0);
-  result.set(b, a.length);
-  return result;
 }

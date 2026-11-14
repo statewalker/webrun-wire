@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ByteReader, ByteStreamError } from "../src/bytes.js";
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -54,5 +54,48 @@ describe("ByteReader", () => {
     const seen: string[] = [];
     for await (const chunk of r.rest()) seen.push(dec(chunk));
     expect(seen.join("")).toBe("ab");
+  });
+});
+
+describe("ByteReader.readLine is linear in the line length (#144)", () => {
+  it("joins a 64,000-byte line sent one byte per chunk, copying each byte a bounded number of times", async () => {
+    const n = 64_000;
+    const text = `${"a".repeat(n)}\r\nrest`;
+    const chunks = [...enc(text)].map((b) => new Uint8Array([b]));
+    const r = new ByteReader(chunks);
+
+    // A buffer concatenated on every pull copies ~n²/2 bytes (2 GB here); one join per line
+    // copies each byte once.
+    let copied = 0;
+    const original = Uint8Array.prototype.set;
+    const spy = vi.spyOn(Uint8Array.prototype, "set").mockImplementation(function (
+      this: Uint8Array,
+      source: ArrayLike<number>,
+      offset?: number,
+    ) {
+      copied += source.length;
+      return original.call(this, source, offset);
+    });
+    let line: Uint8Array;
+    try {
+      line = await r.readLine(n + 10);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(line.byteLength).toBe(n);
+    expect(line.every((b) => b === 0x61)).toBe(true);
+    expect(copied).toBeLessThanOrEqual(2 * (n + 2));
+    expect(dec((await r.readSome(64)) as Uint8Array)).toBe("r");
+  });
+
+  it("still enforces the bound and reports a stream that ends without CRLF", async () => {
+    const one = (s: string) => [...enc(s)].map((b) => new Uint8Array([b]));
+    await expect(new ByteReader(one("x".repeat(50))).readLine(16)).rejects.toThrow(
+      /exceeds 16 bytes/,
+    );
+    await expect(new ByteReader(one("abc")).readLine(16)).rejects.toThrow(
+      /ended after 3 bytes without CRLF/,
+    );
+    await expect(new ByteReader(one("ab\nc")).readLine(16)).rejects.toThrow(/bare LF/);
   });
 });

@@ -299,7 +299,9 @@ export class SwHttpAdapter {
       baseUrl,
       prefix: cleanPrefix,
       async remove() {
-        handlers.delete(baseUrl);
+        // A later registration of the same prefix replaced this one: it is
+        // not this registration's to remove.
+        if (handlers.get(baseUrl) === handler) handlers.delete(baseUrl);
       },
     };
   }
@@ -483,11 +485,22 @@ export class SwHttpAdapter {
     return this._attaching;
   }
 
+  /**
+   * The handler of the longest prefix `url` falls under. A prefix without a
+   * trailing slash matches only on a segment boundary: `demo/api` serves
+   * `/demo/api` and `/demo/api/x`, not `/demo/apiary`.
+   */
   private _findHandler(url: string): HttpHandler | undefined {
+    let found: HttpHandler | undefined;
+    let foundLength = -1;
     for (const [urlPrefix, handler] of this._handlers) {
-      if (url.indexOf(urlPrefix) === 0) return handler;
+      if (urlPrefix.length <= foundLength || !url.startsWith(urlPrefix)) continue;
+      const next = url.charAt(urlPrefix.length);
+      if (!urlPrefix.endsWith("/") && next !== "" && !"/?#".includes(next)) continue;
+      found = handler;
+      foundLength = urlPrefix.length;
     }
-    return undefined;
+    return found;
   }
 
   private async _handleHttpRequest(request: Request): Promise<Response> {

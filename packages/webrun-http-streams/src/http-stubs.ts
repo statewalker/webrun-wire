@@ -21,7 +21,14 @@ export interface SerializedHttpRequest {
 export interface SerializedHttpResponse {
   status: number;
   statusText: string;
+  /** One value per name: a repeated header (`set-cookie`) keeps only its last value. */
   headers: Record<string, string>;
+  /**
+   * Every header as a `[name, value]` pair, repeated ones (`set-cookie`) included.
+   * `newHttpServerStub` sets it next to `headers`; `newHttpClientStub` prefers it and falls back
+   * to `headers` when a peer leaves it out.
+   */
+  headerEntries?: Array<[string, string]>;
 }
 
 export interface SerializedHttpEnvelope<Options> {
@@ -120,7 +127,11 @@ export function newHttpClientStub(
       return new Response(null, { status: 404, statusText: "Error 404: Not Found" });
     }
 
-    const responseOptions = result.options;
+    const { headerEntries, ...recordOptions } = result.options;
+    const responseOptions: ResponseInit = {
+      ...recordOptions,
+      headers: headerEntries ?? recordOptions.headers,
+    };
     const method = options.method;
     // `new Response(body, ...)` throws for null-body statuses (204/205/304), and
     // HEAD/OPTIONS carry no body either — drain the (empty) content stream and
@@ -129,7 +140,7 @@ export function newHttpClientStub(
     if (
       method === "HEAD" ||
       method === "OPTIONS" ||
-      NULL_BODY_STATUSES.has(responseOptions.status)
+      NULL_BODY_STATUSES.has(result.options.status)
     ) {
       await discard(result.content);
       return new Response(null, responseOptions);
@@ -151,8 +162,14 @@ export function newHttpServerStub(
 ) => Promise<SerializedHttpEnvelope<SerializedHttpResponse>> {
   return async (envelopeOrPromise) => {
     const { options, content } = await envelopeOrPromise;
-    const { url, method, headers = [], ...rest } = options;
-    const { mode: _mode, ...forwardable } = rest as Record<string, unknown>;
+    const { url, method, headers = [] } = options;
+    // Only the known RequestInit fields: an arbitrary envelope key (`body` on a GET, say) would
+    // make `new Request` throw. `mode` is left out: `new Request` refuses "navigate".
+    const forwardable: Record<string, unknown> = {};
+    for (const field of REQUEST_FIELDS) {
+      if (field === "url" || field === "method" || field === "mode") continue;
+      if (options[field] !== undefined) forwardable[field] = options[field];
+    }
 
     const requestHeaders = new Headers();
     for (const [key, value] of headers) requestHeaders.append(key, value);
@@ -193,6 +210,7 @@ export function newHttpServerStub(
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries([...response.headers]),
+      headerEntries: [...response.headers],
     };
     // `readerIterator`, not a generator: the transport's `return()` cancels an idle body (an SSE
     // stream between events) at once instead of waiting behind the read in flight.

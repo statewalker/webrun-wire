@@ -174,4 +174,71 @@ describe("http-stubs with an idle body", () => {
     await expect(returned).resolves.toEqual({ done: true, value: undefined });
     expect(upload.cancels).toHaveLength(1);
   });
+
+  it("newHttpServerStub forwards only known RequestInit fields (#144)", async () => {
+    let seen: Request | undefined;
+    const stub = newHttpServerStub(async (request) => {
+      seen = request;
+      return new Response("ok");
+    });
+    const result = await stub({
+      options: {
+        url: "https://foo.bar/a",
+        method: "GET",
+        headers: [],
+        // A GET with a body makes `new Request` throw; a peer must not be able to inject it.
+        body: "injected",
+        duplex: "half",
+        window: "nope",
+        cache: "no-store",
+      },
+      content: (async function* () {})(),
+    });
+    expect(result.options.status).toBe(200);
+    expect(seen?.method).toBe("GET");
+    expect(seen?.cache).toBe("no-store");
+    expect(seen?.body).toBeNull();
+  });
+
+  it("carries every set-cookie across the stubs (#144)", async () => {
+    const server = newHttpServerStub(async () => {
+      const headers = new Headers();
+      headers.append("set-cookie", "a=1");
+      headers.append("set-cookie", "b=2");
+      headers.append("x-one", "1");
+      return new Response("ok", { headers });
+    });
+    const client = newHttpClientStub((envelope) => server(envelope));
+    const response = await client(new Request("https://foo.bar/c"));
+    expect(response.headers.getSetCookie()).toEqual(["a=1", "b=2"]);
+    expect(response.headers.get("x-one")).toBe("1");
+    expect(await response.text()).toBe("ok");
+  });
+
+  it("keeps the record-shaped headers for older peers (#144)", async () => {
+    const server = newHttpServerStub(async () => {
+      const headers = new Headers({ "x-one": "1" });
+      headers.append("set-cookie", "a=1");
+      headers.append("set-cookie", "b=2");
+      return new Response(null, { headers });
+    });
+    const result = await server({
+      options: { url: "https://foo.bar/a", method: "GET", headers: [] },
+      content: (async function* () {})(),
+    });
+    expect(result.options.headers["x-one"]).toBe("1");
+    expect(result.options.headerEntries).toEqual([
+      ["set-cookie", "a=1"],
+      ["set-cookie", "b=2"],
+      ["x-one", "1"],
+    ]);
+    // A client given only the record (an older server) still builds the Response from it.
+    const client = newHttpClientStub(async () => ({
+      options: { status: 201, statusText: "Created", headers: { "x-two": "2" } },
+      content: (async function* () {})(),
+    }));
+    const response = await client(new Request("https://foo.bar/d"));
+    expect(response.status).toBe(201);
+    expect(response.headers.get("x-two")).toBe("2");
+  });
 });

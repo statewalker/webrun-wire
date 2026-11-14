@@ -8,7 +8,7 @@ export * from "./map.js";
 export * from "./new-async-generator.js";
 export * from "./normalize.js";
 export * from "./readable-streams.js";
-export * from "./recieve-iterator.js";
+export * from "./receive-iterator.js";
 export * from "./send-iterator.js";
 export * from "./text.js";
 export * from "./to-chunks.js";

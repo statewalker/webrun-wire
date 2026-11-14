@@ -4,4 +4,4 @@
 // back-compat so existing imports from this package's main entry keep working.
 export * from "@statewalker/webrun-http-streams";
 export * from "@statewalker/webrun-streams";
-export * from "./http-send-recieve.js";
+export * from "./http-send-receive.js";

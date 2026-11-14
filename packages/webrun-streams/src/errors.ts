@@ -20,5 +20,13 @@ export function serializeError(error: unknown): SerializedError {
 
 export function deserializeError(error: SerializedError | string): Error {
   const payload = typeof error === "string" ? { message: error } : error;
-  return Object.assign(new Error(payload.message), payload);
+  const out = new Error(payload.message) as Error & Record<string, unknown>;
+  // Copied key by key: `Object.assign` would run the `__proto__` setter for a peer's own
+  // `__proto__` key (msgpack and structured clone both deliver one) and let the peer choose the
+  // error's prototype. `constructor` is skipped too, so `err.constructor` stays `Error`.
+  for (const key of Object.keys(payload)) {
+    if (key === "__proto__" || key === "constructor") continue;
+    out[key] = payload[key];
+  }
+  return out;
 }
