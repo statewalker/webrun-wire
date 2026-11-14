@@ -19,6 +19,7 @@ export interface StreamMessageTarget {
   target: {
     addEventListener(type: "message", listener: Listener): void;
     removeEventListener(type: "message", listener: Listener): void;
+    /** Sends one message. Throws `TypeError` for anything but bytes. */
     postMessage(message: unknown): void;
     close(): Promise<void>;
     /** The stream's write buffer, in bytes. */
@@ -153,7 +154,12 @@ export function messageTargetOverStream(
         listeners.delete(listener);
       },
       postMessage(message) {
-        const payload = normalizeChunk(message);
+        const payload = toBytes(message);
+        if (!payload) {
+          throw new TypeError(
+            `webrun-streams-libp2p: a byte pipe carries Uint8Array, ArrayBuffer or a view, got ${Object.prototype.toString.call(message)}`,
+          );
+        }
         const header = encodeVarint(payload.byteLength);
         const frame = new Uint8Array(header.byteLength + payload.byteLength);
         frame.set(header, 0);
@@ -185,4 +191,14 @@ export function messageTargetOverStream(
       },
     },
   };
+}
+
+/** `message` as bytes, or `undefined` when it is not bytes */
+function toBytes(message: unknown): Uint8Array | undefined {
+  if (message instanceof Uint8Array) return message;
+  if (message instanceof ArrayBuffer) return new Uint8Array(message);
+  if (ArrayBuffer.isView(message)) {
+    return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+  }
+  return undefined;
 }

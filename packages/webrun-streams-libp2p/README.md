@@ -372,7 +372,9 @@ so this also covers a peer that dies while no data is flowing.
 
 Frames are `[varint length][bytes]`. Reading starts at once, so attach the
 `message` listener in the same tick (`multiplexPort` does). `postMessage`
-does not wait for room, and libp2p resets a stream whose write buffer passes
+takes a `Uint8Array`, an `ArrayBuffer` or another view, and throws `TypeError`
+for anything else, as the other adapters' byte pipes do. It does not wait for
+room, and libp2p resets a stream whose write buffer passes
 `maxWriteBufferLength`. The target reports its state instead:
 `bufferedAmount` is the stream's write buffer, and `whenDrained()` resolves
 on libp2p's `drain` (or the stream's `close`, so no sender is left waiting),
