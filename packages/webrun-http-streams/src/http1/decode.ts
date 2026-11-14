@@ -9,6 +9,7 @@ import {
   type BodyFraming,
   decodeLatin1,
   getAll,
+  type HeaderList,
   isBodylessStatus,
   isToken,
   readHeaderSection,
@@ -166,6 +167,38 @@ export async function decodeRequest(
   }
 }
 
+/** Interim (1xx) responses skipped before the final one; past this the peer is refused. */
+const MAX_INTERIM_RESPONSES = 16;
+
+/** reason-phrase = *( HTAB / SP / VCHAR / obs-text ) (RFC 9112 §4), as decoded from Latin-1. */
+const REASON_PHRASE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
+function parseStatusLine(startLine: string): { version: string; status: number; statusText: string } {
+  const firstSp = startLine.indexOf(" ");
+  if (firstSp === -1) {
+    throw new HttpParseError(`malformed status line: ${quoteLine(startLine)}`);
+  }
+  const version = startLine.slice(0, firstSp);
+  if (!VERSIONS.has(version)) {
+    throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
+  }
+  const afterVersion = startLine.slice(firstSp + 1);
+  const secondSp = afterVersion.indexOf(" ");
+  const codeText = secondSp === -1 ? afterVersion : afterVersion.slice(0, secondSp);
+  if (!/^\d{3}$/.test(codeText)) {
+    throw new HttpParseError(`invalid status code: ${JSON.stringify(codeText)}`);
+  }
+  const status = Number(codeText);
+  if (status < 100 || status > 599) {
+    throw new HttpParseError(`status code out of range: ${status}`);
+  }
+  const statusText = secondSp === -1 ? "" : afterVersion.slice(secondSp + 1);
+  if (!REASON_PHRASE.test(statusText)) {
+    throw new HttpParseError(`invalid reason phrase: ${JSON.stringify(statusText)}`);
+  }
+  return { version, status, statusText };
+}
+
 export async function decodeResponse(
   input: ByteSource,
   opts: ResolvedHttpCodecOptions,
@@ -173,27 +206,26 @@ export async function decodeResponse(
 ): Promise<DecodedResponse> {
   const reader = new ByteReader(input);
   try {
-    const startBytes = await reader.readLine(opts.maxHeaderBytes);
-    const startLine = decodeLatin1(startBytes);
-
-    const firstSp = startLine.indexOf(" ");
-    if (firstSp === -1) {
-      throw new HttpParseError(`malformed status line: ${quoteLine(startLine)}`);
+    let status: number;
+    let statusText: string;
+    let version: string;
+    let headers: HeaderList;
+    let interim = 0;
+    while (true) {
+      const startBytes = await reader.readLine(opts.maxHeaderBytes);
+      ({ status, statusText, version } = parseStatusLine(decodeLatin1(startBytes)));
+      headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
+      if (status >= 200) break;
+      // A 1xx is an interim response (100 Continue, 103 Early Hints...): its head is read and
+      // dropped, and the final response follows. 101 switches the connection to another
+      // protocol, which one message per call cannot carry.
+      if (status === 101) {
+        throw new HttpParseError("101 Switching Protocols is not supported");
+      }
+      if (++interim > MAX_INTERIM_RESPONSES) {
+        throw new HttpParseError(`more than ${MAX_INTERIM_RESPONSES} interim (1xx) responses`);
+      }
     }
-    const version = startLine.slice(0, firstSp);
-    if (!VERSIONS.has(version)) {
-      throw new HttpParseError(`unsupported HTTP version: ${JSON.stringify(version)}`);
-    }
-    const afterVersion = startLine.slice(firstSp + 1);
-    const secondSp = afterVersion.indexOf(" ");
-    const codeText = secondSp === -1 ? afterVersion : afterVersion.slice(0, secondSp);
-    if (!/^\d{3}$/.test(codeText)) {
-      throw new HttpParseError(`invalid status code: ${JSON.stringify(codeText)}`);
-    }
-    const status = Number(codeText);
-    const statusText = secondSp === -1 ? "" : afterVersion.slice(secondSp + 1);
-
-    const headers = await readHeaderSection(reader, opts.maxHeaderBytes, startBytes.byteLength + 2);
 
     const bodyless = isBodylessStatus(status) || method.toUpperCase() === "HEAD";
     const framing: BodyFraming = bodyless ? { kind: "none" } : resolveFraming(headers, version);

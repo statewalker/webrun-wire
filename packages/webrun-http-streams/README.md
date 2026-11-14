@@ -354,11 +354,23 @@ Responses with a null-body status (204, 205, 304) and responses to `HEAD` or
 body stream; the handler's stream is cancelled. The reader gets
 `new Response(null, init)`, whose `.body` is `null`.
 
-The null-body set also contains 101 and 103, but `fetchOverDuplex` cannot
-return them: `ResponseInit.status` must be 200–599, so the `Response`
-constructor throws a `RangeError` (`init["status"] must be in the range of 200
-to 599, inclusive.` in Node) if a peer answers with one. Use `httpFetch` to see
-an informational status.
+The null-body set also contains 101 and 103, but `fetchOverDuplex` never
+returns a 1xx: `ResponseInit.status` must be 200–599. The HTTP/1.1 decoder
+treats a 1xx other than 101 (100 Continue, 103 Early Hints...) as an interim
+response, as RFC 9110 §15.2 says: its head is read and dropped, and the final
+response that follows is returned. At most 16 interim responses are skipped. A
+101 Switching Protocols is refused with an `HttpParseError`: one message per
+call cannot switch protocols. A peer that sends only a 1xx and then ends the
+call gets an `HttpParseError` too. With the JSON envelope, a 1xx status reaches
+`fetchOverDuplex` as such; `httpFetch` returns it, and `fetchOverDuplex` refuses
+it as below.
+
+`fetchOverDuplex` turns any status line the `Response` constructor refuses (a
+status outside 200–599, a reason phrase with a control character) into an
+`HttpParseError` and ends the call, so a peer's status line never surfaces as a
+`RangeError` or `TypeError`. The HTTP/1.1 decoder already refuses a status
+outside 100–599 and a reason phrase that is not `*( HTAB / SP / VCHAR /
+obs-text )` (RFC 9112 §4).
 
 ### How a handler that has not answered learns its caller left
 
