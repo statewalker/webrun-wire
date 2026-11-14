@@ -80,3 +80,11 @@ describe("sendStream / handleStreams", () => {
     }
   });
 });
+
+describe("misspelt names", () => {
+  it("newInvocationChannel is exported, and newInvokationChannel stays as its deprecated alias", async () => {
+    const lib = (await import("../src/index.js")) as Record<string, unknown>;
+    expect(typeof lib.newInvocationChannel).toBe("function");
+    expect(lib.newInvokationChannel).toBe(lib.newInvocationChannel);
+  });
+});

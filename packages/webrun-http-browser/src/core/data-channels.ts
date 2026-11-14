@@ -39,7 +39,7 @@ export interface NewInvocationChannelOptions {
   newCallId?: () => number;
 }
 
-export function newInvokationChannel({
+export function newInvocationChannel({
   port,
   handler = () => {
     throw new Error("Handler not implemented");
@@ -116,6 +116,9 @@ export function newInvokationChannel({
   return { start, close, invoke };
 }
 
+/** @deprecated Misspelt; use `newInvocationChannel`. */
+export const newInvokationChannel = newInvocationChannel;
+
 export async function* sendStream<T>(
   communicationPort: MessageTarget,
   input: AsyncIterable<T>,
@@ -129,7 +132,7 @@ export async function* sendStream<T>(
   try {
     await channel.start();
     void channel.sendAll(input);
-    yield* channel.recieveAll();
+    yield* channel.receiveAll();
     drained = true;
   } finally {
     // A caller that stops early — an aborted `fetch`, a cancelled response
@@ -160,7 +163,7 @@ export function handleStreams<T>(
     const channel = newStreamChannel<T>(port);
     try {
       await channel.start();
-      const input = channel.recieveAll();
+      const input = channel.receiveAll();
       let response: AsyncIterable<T>;
       try {
         response = await handler(input, params ?? {});
@@ -188,7 +191,7 @@ interface StreamChannel<T> {
   close(): Promise<void>;
   /** Tell the peer we have stopped reading, so it can release its producer. */
   cancel(): void;
-  recieveAll(): AsyncGenerator<T, void, unknown>;
+  receiveAll(): AsyncGenerator<T, void, unknown>;
   sendAll(it: AsyncIterable<T>): Promise<void>;
 }
 
@@ -217,7 +220,7 @@ function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
     }
   };
 
-  const channel = newInvokationChannel({
+  const channel = newInvocationChannel({
     port,
     handler: (data: unknown) => {
       const message = data as StreamMessage<T>;
@@ -246,7 +249,7 @@ function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
     await channel.close();
   };
 
-  async function* recieveAll(): AsyncGenerator<T, void, unknown> {
+  async function* receiveAll(): AsyncGenerator<T, void, unknown> {
     yield* recieveIterator<T>((deliver) => {
       listeners.push(deliver as DataListener);
       return () => {
@@ -269,5 +272,5 @@ function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
     );
   }
 
-  return { start, close, cancel, recieveAll, sendAll };
+  return { start, close, cancel, receiveAll, sendAll };
 }

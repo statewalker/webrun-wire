@@ -16,7 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleChannelCalls } from "../src/core/data-calls.js";
-import { handleHttpRequests } from "../src/http/http-send-recieve.js";
+import { handleHttpRequests } from "../src/http/http-send-receive.js";
 import { startRelayServiceWorker } from "../src/relay/index-sw.js";
 
 const { idbStore, idbGet, idbSet } = vi.hoisted(() => {

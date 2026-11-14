@@ -16,7 +16,7 @@ import {
   awaitActiveServiceWorker,
   DEFAULT_SERVICE_WORKER_TIMEOUT,
 } from "../core/service-worker-control.js";
-import { handleHttpRequests, sendHttpRequest } from "../http/http-send-recieve.js";
+import { handleHttpRequests, sendHttpRequest } from "../http/http-send-receive.js";
 import {
   connectHttpLink,
   HTTP_LINK_PROTOCOL,
