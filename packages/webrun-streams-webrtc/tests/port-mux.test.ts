@@ -12,6 +12,7 @@ if (isBrowser) {
   const { connectedPeers } = await import("./make-webrtc-pair.js");
   const { DEFAULT_PORT_MAX_FRAME_BYTES, webrtcPortMux } = await import("../src/port-mux.js");
   type MakePair = import("@statewalker/webrun-streams-conformance").MakePair;
+  type DataChannelPort = import("../src/port-mux.js").DataChannelPort;
   const codec = { encode: serialize, decode: deserialize };
 
   /**
@@ -299,6 +300,158 @@ if (isBrowser) {
       await new Promise((r) => setTimeout(r, 200));
       expect(other.readyState).toBe("open");
       expect(rawCalls).toBe(1); // only the foreign channel reached serve()
+      clientPc.close();
+      serverPc.close();
+    });
+
+    /**
+     * Inbound channels on `pc` report `readyState` "connecting", and their `open` event is held back,
+     * until `open(dc)` is called: as if the `datachannel` event had come before the channel opened
+     * (statewalker/statewalker-root#57). Set up before the serving mux, so these listeners run first.
+     */
+    function holdInboundChannelsConnecting(pc: RTCPeerConnection) {
+      const released = new WeakSet<RTCDataChannel>();
+      pc.addEventListener("datachannel", (e) => {
+        const dc = e.channel;
+        Object.defineProperty(dc, "readyState", { configurable: true, get: () => "connecting" });
+        // the browser's own open event: not seen by the mux until the test opens the channel
+        dc.addEventListener("open", (ev) => {
+          if (!released.has(dc)) ev.stopImmediatePropagation();
+        });
+      });
+      return (dc: RTCDataChannel) => {
+        released.add(dc);
+        delete (dc as { readyState?: unknown }).readyState; // the real getter again: "open"
+        dc.dispatchEvent(new Event("open"));
+      };
+    }
+
+    /** The first message `port` gets within `ms`, or "nothing". */
+    function firstMessage(port: DataChannelPort, ms = 1000) {
+      return Promise.race([
+        new Promise((r) => port.addEventListener("message", (e) => r(e.data))),
+        new Promise((r) => setTimeout(() => r("nothing"), ms)),
+      ]);
+    }
+
+    it("(#57) a message posted while the channel is still connecting is sent once it opens", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const open = holdInboundChannelsConnecting(serverPc);
+      let inbound: RTCDataChannel | undefined;
+      serverPc.addEventListener("datachannel", (e) => {
+        inbound = e.channel;
+      });
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (port) => {
+          port.postMessage({ greeting: "posted while connecting" });
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      const got = firstMessage(port, 3000);
+      await new Promise((r) => setTimeout(r, 100));
+      if (!inbound) throw new Error("no inbound channel");
+      open(inbound);
+      expect(await got).toEqual({ greeting: "posted while connecting" });
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(#57) messages posted before the channel opens arrive first and in order", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const open = holdInboundChannelsConnecting(serverPc);
+      let served: DataChannelPort | undefined;
+      let inbound: RTCDataChannel | undefined;
+      serverPc.addEventListener("datachannel", (e) => {
+        inbound = e.channel;
+      });
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (port) => {
+          port.postMessage(1);
+          port.postMessage(2);
+          served = port;
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      const received: unknown[] = [];
+      const allThree = new Promise<void>((resolve) =>
+        port.addEventListener("message", (e) => {
+          received.push(e.data);
+          if (received.length === 3) resolve();
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      if (!inbound || !served) throw new Error("no inbound port");
+      open(inbound);
+      served.postMessage(3);
+      await Promise.race([allThree, new Promise((r) => setTimeout(r, 3000))]);
+      expect(received).toEqual([1, 2, 3]);
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(#57) a message over maxFrameBytes posted while connecting still throws and fails the port", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      holdInboundChannelsConnecting(serverPc);
+      const outcome = new Promise<{ thrown: unknown; aborted: boolean }>((resolve) => {
+        void webrtcPortMux({
+          pc: serverPc,
+          codec,
+          maxFrameBytes: 1024,
+          onPort: (port) => {
+            let thrown: unknown;
+            try {
+              port.postMessage(new Uint8Array(4096));
+            } catch (err) {
+              thrown = err;
+            }
+            resolve({ thrown, aborted: port.closeSignal.aborted });
+            return true;
+          },
+        });
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      await mux.openPort();
+      const { thrown, aborted } = await outcome;
+      expect(thrown).toBeInstanceOf(RangeError);
+      expect(aborted).toBe(true);
+      clientPc.close();
+      serverPc.close();
+    });
+
+    it("(#57) a channel that closes before it opens drops what was queued and aborts the port", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const open = holdInboundChannelsConnecting(serverPc);
+      let inbound: RTCDataChannel | undefined;
+      serverPc.addEventListener("datachannel", (e) => {
+        inbound = e.channel;
+      });
+      let served: DataChannelPort | undefined;
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        onPort: (port) => {
+          port.postMessage({ queued: true });
+          served = port;
+          return true;
+        },
+      });
+      const mux = await webrtcPortMux({ pc: clientPc, codec });
+      const port = await mux.openPort();
+      const got = firstMessage(port, 500);
+      await new Promise((r) => setTimeout(r, 100));
+      if (!inbound || !served) throw new Error("no inbound port");
+      inbound.dispatchEvent(new Event("close"));
+      expect(served.closeSignal.aborted).toBe(true);
+      open(inbound); // too late: nothing queued is sent
+      expect(await got).toBe("nothing");
       clientPc.close();
       serverPc.close();
     });
