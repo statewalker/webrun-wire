@@ -197,6 +197,24 @@ export function startRelayServiceWorker(
   }
   const takeover = options.takeover ?? "last-wins";
 
+  // REGISTER/UNREGISTER READ THE REGISTRY, AWAIT, THEN WRITE IT. Channel calls
+  // run concurrently, so two REGISTERs of one key under `first-wins` would
+  // both pass the check before either wrote. Calls on the same key queue here.
+  const keyQueues = new Map<string, Promise<unknown>>();
+  function serializeByKey<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const previous = keyQueues.get(key) ?? Promise.resolve();
+    const run = previous.then(task, task);
+    const tail = run.then(
+      () => {},
+      () => {},
+    );
+    keyQueues.set(key, tail);
+    tail.then(() => {
+      if (keyQueues.get(key) === tail) keyQueues.delete(key);
+    });
+    return run;
+  }
+
   if (typeof self.skipWaiting === "function") {
     self.addEventListener("install", (e: ExtendableEvent) => {
       e.waitUntil(self.skipWaiting());
@@ -244,30 +262,31 @@ export function startRelayServiceWorker(
       const source = event.source as Client | null;
       if (!source) return false;
       const { key, path } = data as { key: string; path?: string };
-
-      if (options.canRegister != null && !(await options.canRegister(source, key, path))) {
-        throw new Error(
-          path == null
-            ? `this client may not register "${key}"`
-            : `this client may not register "${key}" at "${path}"`,
-        );
-      }
-
-      // `last-wins` -- the untouched default -- must cost exactly what it did
-      // before this option existed: no registry lookup beyond `addClient`'s
-      // own. Only `first-wins` needs to know who currently holds the key and
-      // whether they are still live, so only it pays for finding out.
-      if (takeover === "first-wins") {
-        const current = await clientsRegistry.getMount(key);
-        const isCurrentLive = current != null && (await clientsRegistry.getClient(key)) != null;
-        if (!mayRegister({ current, candidateId: source.id, isCurrentLive, takeover })) {
-          throw new Error(`"${key}" is already served by another client`);
+      return await serializeByKey(key, async () => {
+        if (options.canRegister != null && !(await options.canRegister(source, key, path))) {
+          throw new Error(
+            path == null
+              ? `this client may not register "${key}"`
+              : `this client may not register "${key}" at "${path}"`,
+          );
         }
-      }
 
-      const added = await clientsRegistry.addClient(key, source, path);
-      applyRegisteredMount(mounts, key, path, hostKeys);
-      return added;
+        // `last-wins` -- the untouched default -- must cost exactly what it did
+        // before this option existed: no registry lookup beyond `addClient`'s
+        // own. Only `first-wins` needs to know who currently holds the key and
+        // whether they are still live, so only it pays for finding out.
+        if (takeover === "first-wins") {
+          const current = await clientsRegistry.getMount(key);
+          const isCurrentLive = current != null && (await clientsRegistry.getClient(key)) != null;
+          if (!mayRegister({ current, candidateId: source.id, isCurrentLive, takeover })) {
+            throw new Error(`"${key}" is already served by another client`);
+          }
+        }
+
+        const added = await clientsRegistry.addClient(key, source, path);
+        applyRegisteredMount(mounts, key, path, hostKeys);
+        return added;
+      });
     }),
   );
   register(
@@ -278,17 +297,22 @@ export function startRelayServiceWorker(
       const source = event.source as Client | null;
       if (!source) return false;
       const { key } = data as { key: string };
-      const current = await clientsRegistry.getMount(key);
-      if (current == null) return false;
-      const isCurrentLive = (await clientsRegistry.getClient(key)) != null;
-      if (isCurrentLive && current.clientId !== source.id) {
-        throw new Error(`"${key}" is served by another client`);
-      }
-      if (options.canRegister != null && !(await options.canRegister(source, key, current.path))) {
-        throw new Error(`this client may not unregister "${key}"`);
-      }
-      removeRegisteredMount(mounts, key, hostKeys);
-      return await clientsRegistry.removeClient(key);
+      return await serializeByKey(key, async () => {
+        const current = await clientsRegistry.getMount(key);
+        if (current == null) return false;
+        const isCurrentLive = (await clientsRegistry.getClient(key)) != null;
+        if (isCurrentLive && current.clientId !== source.id) {
+          throw new Error(`"${key}" is served by another client`);
+        }
+        if (
+          options.canRegister != null &&
+          !(await options.canRegister(source, key, current.path))
+        ) {
+          throw new Error(`this client may not unregister "${key}"`);
+        }
+        removeRegisteredMount(mounts, key, hostKeys);
+        return await clientsRegistry.removeClient(key);
+      });
     }),
   );
   register(

@@ -74,12 +74,13 @@ function register(
   sourceId: string,
   key: string,
   path?: string,
+  type: "REGISTER" | "UNREGISTER" = "REGISTER",
 ): Promise<{ result?: unknown; error?: { message?: string } }> {
   return new Promise((resolve) => {
     const { port1, port2 } = new MessageChannel();
     port1.onmessage = (event) => resolve(event.data);
     const messageEvent = Object.assign(
-      new MessageEvent("message", { data: { type: "REGISTER", params: { key, path } } }),
+      new MessageEvent("message", { data: { type, params: { key, path } } }),
       {},
     );
     Object.defineProperty(messageEvent, "ports", { value: [port2] });
@@ -141,6 +142,47 @@ describe('REGISTER: takeover "first-wins"', () => {
       // and is left to the network -- the same outcome as if B had never
       // called REGISTER at all.
       await expectNotTheRelays(self, "https://relay.example/prefix-b/x");
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe('REGISTER: takeover "first-wins" under concurrency', () => {
+  // The check (who holds the key, are they live) and the write are separated
+  // by awaits. Two REGISTERs arriving together must not both pass the check:
+  // the loser would believe it holds the key while the winner's entry is gone.
+  it("lets exactly one of two concurrent registrations win, and keeps the winner", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    clients.add("B");
+    const stop = startRelayServiceWorker(self, { takeover: "first-wins" });
+    try {
+      const [a, b] = await Promise.all([
+        register(self, "A", "svc", "/"),
+        register(self, "B", "svc", "/"),
+      ]);
+      expect(a).toEqual({ result: true });
+      expect(b.result).toBeUndefined();
+      expect(b.error?.message).toMatch(/already served/);
+      expect(idbStore.get("clientsIds")).toEqual([["svc", { clientId: "A", path: "/" }]]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("serializes an UNREGISTER behind a pending REGISTER of the same key", async () => {
+    const { self, clients } = makeSelf();
+    clients.add("A");
+    const stop = startRelayServiceWorker(self, { takeover: "first-wins" });
+    try {
+      const [registered, unregistered] = await Promise.all([
+        register(self, "A", "svc", "/svc/"),
+        register(self, "A", "svc", undefined, "UNREGISTER"),
+      ]);
+      expect(registered).toEqual({ result: true });
+      expect(unregistered).toEqual({ result: true });
+      expect(idbStore.get("clientsIds")).toEqual([]);
     } finally {
       stop();
     }
