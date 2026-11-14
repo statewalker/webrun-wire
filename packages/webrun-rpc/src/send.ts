@@ -1,9 +1,16 @@
 import { sendIterator } from "@statewalker/webrun-streams";
-import { type CallPortOptions, callPort } from "./call-port.js";
+import { type CallPortOptions, callPort, NO_TIMEOUT } from "./call-port.js";
 import type { MessageTarget } from "./message-target.js";
 import { throughAbort } from "./through-abort.js";
 
 export interface SendOptions extends CallPortOptions {
+  /**
+   * Deadline in ms for each chunk call. Unlike a plain `callPort`, the default
+   * is {@link NO_TIMEOUT}: a chunk's reply is withheld until the consumer has
+   * pulled past it, so a per-chunk deadline would fail a consumer that is
+   * merely slow. Set it to bound how long one chunk may wait.
+   */
+  timeout?: number;
   /**
    * Optional cancellation signal. When fired, `send` aborts cleanly:
    *   - the current iteration is interrupted (by calling `return()` on the
@@ -28,7 +35,8 @@ export async function send<T>(
   output: AsyncIterable<T> | Iterable<T>,
   options: SendOptions = {},
 ): Promise<void> {
-  const { signal, ...callOptions } = options;
+  const { signal, timeout = NO_TIMEOUT, ...rest } = options;
+  const callOptions: CallPortOptions = { ...rest, timeout };
   if (!signal) {
     await sendIterator<T>(async ({ done, value, error }) => {
       await callPort(port, { done, value, error }, callOptions);

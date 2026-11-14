@@ -94,7 +94,7 @@ Typed-JSON RPC:
 | `send(port, output, options?)` / `receive(port, options?)` | One `callPort` per iterator chunk, and its receiving side.  `recieve` / `RecieveOptions` remain as deprecated aliases. |
 | `NO_TIMEOUT` | `Number.POSITIVE_INFINITY`; as `callPort`'s `timeout`, installs no deadline. |
 | `CallPortOptions` | `timeout` (default 1000 ms), `channelName`, `log`, `newCallId`, `signal`. |
-| `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call. |
+| `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call; `timeout` bounds each chunk call (default none). |
 | `ListenPortOptions`, `PortHandler`, `BidiHandler`, `IoSendOptions`, `ReceiveOptions`, `SendOptions` | Supporting types. |
 | `postCancelChannel(port, channelName)` / `listenCancelChannel(port, channelName, onCancel)` / `CANCEL_CHANNEL_TYPE` | The `"cancel-channel"` message `ioSend` posts when its consumer stops early. |
 | `getPortCloseSignal(port)` / `setPortCloseSignal(port, signal)` | An `AbortSignal` per port that marks its transport closed; `callPort` combines it with its own `signal`. A port may also carry it as `closeSignal` (an adapter needing no import, e.g. `webrun-streams-libp2p`'s `libp2pPortMux`); a registered signal wins. |
@@ -843,7 +843,9 @@ rejects the call at once.
 its transport closed can register a signal and pending calls reject instead of waiting for their
 timeout. The ports of `multiplexPort` register one, which fires when the port closes.
 
-`send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`; `receive`
+`send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`. Its chunk
+calls default to `NO_TIMEOUT`, since a chunk's reply waits for the consumer: a slow consumer is
+throttled, not failed; an explicit `timeout` still bounds each chunk call. `receive`
 yields one async generator per inbound stream and never ends on its own. A chunk that arrives
 before the consumer starts reading is held, unacknowledged, until it is taken, so a handler may
 await anything before it pulls its input. `ioSend` / `ioHandle`

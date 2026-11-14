@@ -3,6 +3,11 @@ import { ioSend } from "./io-send.js";
 import type { MessageTarget } from "./message-target.js";
 
 export interface CallBidiOptions extends CallPortOptions {
+  /**
+   * Deadline in ms for each chunk call of the stream (default: none, see
+   * `SendOptions.timeout`). The outer call uses `bidiTimeout` instead.
+   */
+  timeout?: number;
   /** Timeout for the outer stream (default: `Number.MAX_SAFE_INTEGER` / max int). */
   bidiTimeout?: number;
 }
