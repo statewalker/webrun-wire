@@ -21,6 +21,8 @@ jobs:
       package-checks: true
       # gitleaks on the files and on every commit of the pull request, before the install.
       secret-scan: true
+      # A publish step anywhere but the `publish` job below fails.
+      release-path: true
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
