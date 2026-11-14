@@ -13,6 +13,10 @@ permissions:
 jobs:
   ci:
     uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
+    with:
+      # Required root scripts run without --if-present, every package with a tsconfig.json has a
+      # `typecheck`, and every test file is compiled by `typecheck` or `typecheck:tests`.
+      baseline: library
 
   # The shared CI runs the Node suites on one Node version (24). The packages declare no
   # `engines`, and stream timing differs between Node versions (a webrun-http-browser test once
@@ -38,11 +42,6 @@ jobs:
 
       - name: Test
         run: pnpm -r run test
-
-      # The tests' own typecheck (src and tests together, with Node's types): the shared CI's
-      # typecheck covers src only. It needs the build: sibling packages resolve to their dist types.
-      - name: Typecheck the tests
-        run: pnpm -r --if-present run typecheck:tests
 
   # The shared CI runs the Node suites only. webrun-http-browser's browser
   # suites (ServiceWorkers, workers, relays, WebSockets) and webrun-streams-webrtc's
