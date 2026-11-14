@@ -10,9 +10,9 @@ Packages are published to npm from CI with changesets. Nobody runs `changeset ve
    crosses a breaking line get the same minor. A package with a changeset you wrote keeps yours.
 3. The job opens (or updates) a "chore: version packages" pull request with the version bumps and
    `CHANGELOG.md` entries.
-4. Merging that pull request packs every package whose version is not on npm yet. Nothing is
-   published until a maintainer approves the `publish` job on the `npm` GitHub environment; it then
-   publishes the tarballs with provenance and creates a GitHub release per package.
+4. Merging that pull request packs every package whose version is not on npm yet. The `publish`
+   job then publishes the tarballs at once, with provenance, and creates a GitHub release per
+   package. Nobody approves it: merging the version pull request is the release.
 
 The job opens that pull request with the `statewalker-release` GitHub App's token, not
 `GITHUB_TOKEN`, so the checks run on it like on any pull request: GitHub does not run CI on what
@@ -26,14 +26,14 @@ the Node 22 test job, and the browser suites of `webrun-http-browser` (Chromium 
 ## No npm token: trusted publishing
 
 GitHub holds no npm token. The `publish` job authenticates with npm trusted publishing (OIDC). Each
-package's trusted publisher names `statewalker/webrun-wire`, `ci.yml` and the `npm` environment, so
-a run that skips the approval cannot publish. Only `publish` may request an identity token, and it
-never checks out, installs the workspace's dependencies or builds; the only thing it installs is a
-pinned npm (trusted publishing needs 11.5.1 or later).
+package's trusted publisher names `statewalker/webrun-wire`, `ci.yml` and the `npm` environment,
+which admits only `main`, so a run from another branch cannot publish. Only `publish` may request an
+identity token, and it never checks out, installs the workspace's dependencies or builds; the only
+thing it installs is a pinned npm (trusted publishing needs 11.5.1 or later).
 
 A trusted publisher can only be added to a package that already exists, so a **new package's first
-version is published by hand** with the maintainer's 2FA, logged in with `npm login` (npm 11 or
-later):
+version is published by hand**, before the version pull request that releases it merges, with the
+maintainer's 2FA, logged in with `npm login` (npm 11 or later):
 
 1. Build it: `pnpm --filter @statewalker/<name>... run build`. Most packages build only in
    `prepublishOnly`, which `pnpm pack` does not run; packing an unbuilt package ships no `dist/`.
@@ -48,8 +48,8 @@ npm trust github @statewalker/<name> --repo statewalker/webrun-wire --file ci.ym
 If the package does not exist on npm yet, or has no trusted publisher, `publish` fails with
 `npm error 404 Not Found - PUT https://registry.npmjs.org/@statewalker%2f<name> - Not found`: npm
 reports a missing package or trusted publisher as "not found", not as a permission error. Publish the
-first version and add the publisher, then re-run the failed `publish` job (it needs the approval
-again); it reuses the packed tarballs and skips versions already on npm.
+first version and add the publisher, then re-run the failed `publish` job; it reuses the packed
+tarballs and skips versions already on npm.
 
 ## Choosing the bump or the changelog text yourself
 

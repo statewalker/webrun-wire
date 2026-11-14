@@ -171,11 +171,10 @@ dependency-reference checks (`workspace:^` inside the repository, `catalog:` for
 and packed manifests.
 
 Packages are published to npm from CI with changesets. After CI passes on `main`, a job adds a
-changeset for each package whose packed contents differ from npm and opens a
-"chore: version packages" pull request. Merging it packs the new versions; they are published to npm
-with provenance once a maintainer approves the `publish` job (the `npm` environment). To choose the
-bump or the changelog text yourself, run `pnpm changeset` in your pull request. Renovate opens the
-dependency updates. See [PUBLISHING.md](./PUBLISHING.md).
+changeset for each package whose packed contents differ from npm and opens a "chore: version
+packages" pull request. Merging it packs the new versions and publishes them to npm with provenance,
+with no approval step. To choose the bump or the changelog text yourself, run `pnpm changeset` in
+your pull request. Renovate opens the dependency updates. See [PUBLISHING.md](./PUBLISHING.md).
 
 ### License
 
