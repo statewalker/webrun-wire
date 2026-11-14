@@ -4,7 +4,10 @@
   // project rather than widening that one — and it IS checked: `pnpm typecheck` runs both.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // The base config maps workspace packages to their sources; the browser test uses the
+    // built `@statewalker/webrun-http-browser` (its `sw-worker.js`), so resolve the package.
+    "paths": {}
   },
   "include": ["./test-browser", "./*.config.ts"],
   "exclude": ["node_modules", "dist"]

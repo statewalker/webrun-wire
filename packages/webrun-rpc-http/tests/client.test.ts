@@ -91,4 +91,21 @@ describe("newRpcClient", () => {
     const client = newRpcClient({ baseUrl: "http://host", fetch });
     await expect(client.loadService("math")).rejects.toThrow(/Failed to load services descriptor/);
   });
+
+  it("retries the descriptor after a failed load instead of caching the failure", async () => {
+    let up = false;
+    const fetch = vi.fn(async (request: Request) => {
+      if (!up) throw new TypeError("connection refused");
+      if (new URL(request.url).pathname === "/") return mockResponse({ math: ["add"] });
+      return mockResponse({ type: "json", result: 3 });
+    });
+    const client = newRpcClient({ baseUrl: "http://host", fetch });
+    await expect(client.loadService("math")).rejects.toThrow("connection refused");
+    up = true;
+    const math = await client.loadService<{ add: (p: unknown) => Promise<unknown> }>("math");
+    expect(await math.add({ a: 1, b: 2 })).toBe(3);
+    // A successful load is still cached.
+    await client.loadService("math");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
 });

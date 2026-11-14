@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BrokerEvent } from "./broker.js";
-import { newBroker } from "./broker.js";
+import type { BrokerEvent } from "../src/broker.js";
+import { newBroker } from "../src/broker.js";
 
 describe("newBroker", () => {
   it("delivers a published event to a subscriber on the same topic", () => {

@@ -89,12 +89,102 @@ describe("newRpcServer", () => {
     expect(json.message).toBe("boom");
   });
 
-  it("returns 500 JSON error when the method is unknown", async () => {
+  it("does not pollute Object.prototype from a dotted query key", async () => {
+    class S {
+      echo(p: unknown) {
+        return p;
+      }
+    }
+    const handler = newRpcServer({ s: new S() });
+    try {
+      for (const url of [
+        "http://x/s/echo?__proto__.polluted=yes",
+        "http://x/s/echo?a.__proto__.polluted=yes",
+        "http://x/s/echo?constructor.prototype.polluted=yes",
+        "http://x/s/echo?%5F%5Fproto%5F%5F.polluted=yes",
+        "http://x/s/echo?a.b.__proto__.polluted=yes",
+        "http://x/s/echo?__proto__[polluted]=yes",
+        "http://x/s/echo?__proto__=yes&__proto__.polluted=yes",
+      ]) {
+        const res = await handler(new Request(url));
+        expect(res.status).toBe(200);
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      }
+    } finally {
+      delete (Object.prototype as Record<string, unknown>).polluted;
+    }
+  });
+
+  it("hands a GET method ordinary objects, as POST does", async () => {
+    const handler = newRpcServer({
+      s: {
+        async inspect(params: Record<string, unknown>) {
+          const nested = params.a as Record<string, unknown>;
+          return {
+            // Called on the objects on purpose: that is what threw on a prototype-less object.
+            // biome-ignore lint/suspicious/noPrototypeBuiltins: the call under test
+            hasA: params.hasOwnProperty("a"),
+            // biome-ignore lint/suspicious/noPrototypeBuiltins: the call under test
+            nestedHasB: nested.hasOwnProperty("b"),
+            text: `${params}`,
+            plain:
+              Object.getPrototypeOf(params) === Object.prototype &&
+              Object.getPrototypeOf(nested) === Object.prototype,
+          };
+        },
+      },
+    });
+    const res = await handler(new Request("http://x/s/inspect?a.b=1"));
+    expect(await res.json()).toEqual({
+      type: "json",
+      result: { hasA: true, nestedHasB: true, text: "[object Object]", plain: true },
+    });
+  });
+
+  it("drops __proto__ / constructor / prototype query segments", async () => {
+    const handler = newRpcServer({
+      s: {
+        async inspect(params: unknown) {
+          return params as never;
+        },
+      },
+    });
+    const res = await handler(
+      new Request("http://x/s/inspect?__proto__.x=1&a.constructor.y=2&a.prototype=3&a.ok=4"),
+    );
+    const json = (await res.json()) as { result: Record<string, unknown> };
+    expect(json.result).toEqual({ a: { ok: "4" }, $path: "" });
+  });
+
+  it("never exposes Object.prototype members as services or methods", async () => {
+    class S {
+      echo(p: unknown) {
+        return p;
+      }
+    }
+    const handler = newRpcServer({ s: new S() });
+    for (const path of [
+      "/s/constructor",
+      "/s/toString",
+      "/s/hasOwnProperty",
+      "/s/__proto__",
+      "/__proto__/toString",
+      "/constructor/name",
+      "/toString/call",
+    ]) {
+      const res = await handler(new Request(`http://x${path}`));
+      expect(res.status, path).toBe(404);
+    }
+    expect(await (await handler(new Request("http://x/__proto__"))).json()).toEqual([]);
+    expect(await (await handler(new Request("http://x/constructor"))).json()).toEqual([]);
+  });
+
+  it("returns 404 JSON error when the method is unknown", async () => {
     const handler = newRpcServer(services);
     const form = new FormData();
     form.append("params", JSON.stringify({}));
     const res = await handler(new Request("http://x/math/nope", { method: "POST", body: form }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
     const json = (await res.json()) as { type: string; message: string };
     expect(json.type).toBe("error");
     expect(json.message).toMatch(/Method nope not found/);

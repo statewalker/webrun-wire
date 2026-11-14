@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { newPubSubClient } from "./client.js";
+import { newPubSubClient } from "../src/client.js";
 
 /** Minimal EventSource stand-in; vitest runs under Node, which has no DOM one. */
 class FakeEventSource {
@@ -51,6 +51,33 @@ describe("newPubSubClient", () => {
     client.subscribe("build", () => {});
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe("http://h/_events/build");
+  });
+
+  it("percent-encodes the topic into one path segment", () => {
+    FakeEventSource.instances.length = 0;
+    const client = newPubSubClient("http://h/_events/", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+    });
+    client.subscribe("my topic", () => {});
+    client.subscribe("a/b", () => {});
+    client.subscribe("what?#x", () => {});
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual([
+      "http://h/_events/my%20topic",
+      "http://h/_events/a%2Fb",
+      "http://h/_events/what%3F%23x",
+    ]);
+  });
+
+  it("keeps the old wire form for topics the URL parser leaves alone", () => {
+    FakeEventSource.instances.length = 0;
+    const client = newPubSubClient("http://h/_events", {
+      EventSourceImpl: FakeEventSource as unknown as typeof EventSource,
+    });
+    const topics = ["user:42", "a@b", "x$y&z+w,v;u=t", "it's(ok)!*", "a-b_c.d~e"];
+    for (const topic of topics) client.subscribe(topic, () => {});
+    expect(FakeEventSource.instances.map((s) => new URL(s.url).pathname)).toEqual(
+      topics.map((t) => `/_events/${t}`),
+    );
   });
 
   it("parses the JSON payload and reports the event id", () => {

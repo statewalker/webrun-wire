@@ -1,15 +1,11 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
     "module": "Preserve",
-    "moduleResolution": "Bundler",
+    // No DOM: the server half must run in a Worker, a ServiceWorker or Node.
     "lib": ["ESNext", "WebWorker"],
-    "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -17,11 +13,9 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "resolvePackageJsonExports": true,
-    "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["./src"],
+  "include": ["./src", "./tests"],
   "exclude": ["node_modules", "dist"]
 }
