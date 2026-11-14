@@ -15,7 +15,7 @@ export type ReceiverInstaller<T> = (
  * once for each incoming chunk and may return a cleanup callback that
  * runs when the consumer stops iterating.
  */
-export function recieveIterator<T>(installer: ReceiverInstaller<T>): AsyncGenerator<T> {
+export function receiveIterator<T>(installer: ReceiverInstaller<T>): AsyncGenerator<T> {
   return newAsyncGenerator<T>((next, done) => {
     const cleanup = installer(async (chunk = { done: true }) => {
       const { done: isDone = true, value, error } = chunk;
@@ -31,3 +31,6 @@ export function recieveIterator<T>(installer: ReceiverInstaller<T>): AsyncGenera
     return undefined;
   });
 }
+
+/** @deprecated Misspelt name kept for existing importers; use {@link receiveIterator}. */
+export const recieveIterator: typeof receiveIterator = receiveIterator;

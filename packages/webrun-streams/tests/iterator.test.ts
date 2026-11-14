@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recieveIterator } from "../src/recieve-iterator.js";
+import { receiveIterator } from "../src/receive-iterator.js";
 import type { IteratorChunk } from "../src/send-iterator.js";
 import { sendIterator } from "../src/send-iterator.js";
 
@@ -60,9 +60,9 @@ describe("sendIterator", () => {
   });
 });
 
-describe("recieveIterator", () => {
+describe("receiveIterator", () => {
   it("rebuilds an async iterator from chunk callbacks", async () => {
-    const iter = recieveIterator<number>((deliver) => {
+    const iter = receiveIterator<number>((deliver) => {
       (async () => {
         for (const v of [10, 20, 30]) await deliver({ done: false, value: v });
         await deliver({ done: true });
@@ -75,7 +75,7 @@ describe("recieveIterator", () => {
 
   it("rethrows the error forwarded in the done chunk", async () => {
     const err = new Error("propagated");
-    const iter = recieveIterator<number>((deliver) => {
+    const iter = receiveIterator<number>((deliver) => {
       (async () => {
         await deliver({ done: false, value: 1 });
         await deliver({ done: true, error: err });
@@ -92,7 +92,7 @@ describe("recieveIterator", () => {
 
   it("calls the installer's cleanup when the consumer breaks", async () => {
     let cleaned = false;
-    const iter = recieveIterator<number>((deliver) => {
+    const iter = receiveIterator<number>((deliver) => {
       (async () => {
         for (let i = 0; i < 5; i++) {
           const ok = await deliver({ done: false, value: i });
@@ -115,7 +115,7 @@ describe("recieveIterator", () => {
   });
 });
 
-describe("sendIterator + recieveIterator roundtrip", () => {
+describe("sendIterator + receiveIterator roundtrip", () => {
   it("drains then reconstructs an identical sequence", async () => {
     const chunks: IteratorChunk<string>[] = [];
     await sendIterator<string>(
@@ -125,7 +125,7 @@ describe("sendIterator + recieveIterator roundtrip", () => {
       ["alpha", "beta", "gamma"],
     );
 
-    const iter = recieveIterator<string>((deliver) => {
+    const iter = receiveIterator<string>((deliver) => {
       (async () => {
         for (const c of chunks) await deliver(c);
       })();
@@ -133,5 +133,29 @@ describe("sendIterator + recieveIterator roundtrip", () => {
     const out: string[] = [];
     for await (const v of iter) out.push(v);
     expect(out).toEqual(["alpha", "beta", "gamma"]);
+  });
+});
+
+describe("receiveIterator and its deprecated alias recieveIterator (#150)", () => {
+  it("are exported under both names from the package entry, as the same function", async () => {
+    const entry = await import("../src/index.js");
+    expect(typeof entry.receiveIterator).toBe("function");
+    expect(entry.recieveIterator).toBe(entry.receiveIterator);
+  });
+
+  it("both names receive delivered chunks", async () => {
+    const entry = await import("../src/index.js");
+    for (const fn of [entry.receiveIterator, entry.recieveIterator]) {
+      const iter = fn<number>((deliver) => {
+        void (async () => {
+          await deliver({ done: false, value: 1 });
+          await deliver({ done: false, value: 2 });
+          await deliver({ done: true });
+        })();
+      });
+      const out: number[] = [];
+      for await (const v of iter) out.push(v);
+      expect(out).toEqual([1, 2]);
+    }
   });
 });

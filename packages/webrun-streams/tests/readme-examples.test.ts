@@ -14,7 +14,7 @@ import {
   map,
   newAsyncGenerator,
   normalizeToUint8Array,
-  recieveIterator,
+  receiveIterator,
   sendIterator,
   serializeError,
   splitLines,
@@ -43,6 +43,7 @@ describe("README export table", () => {
       "map",
       "newAsyncGenerator",
       "sendIterator",
+      "receiveIterator",
       "recieveIterator",
       "toReadableStream",
       "fromReadableStream",
@@ -144,7 +145,7 @@ describe("README examples (prose sections)", () => {
       await myChannel.send(chunk);
     }
 
-    const iter = recieveIterator<number>((deliver) => {
+    const iter = receiveIterator<number>((deliver) => {
       deliverFn = deliver as (c: Chunk) => Promise<boolean>;
     });
 
