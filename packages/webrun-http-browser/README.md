@@ -302,7 +302,11 @@ const adapter = new SwHttpAdapter({ key: KEY, registration });
 | `webSocket` | defaults | Options of `adapter.WebSocket` (`heartbeatMs`, `timers`, `closeTimeoutMs`). |
 
 `register(prefix, handler)` resolves `{ baseUrl, prefix, remove() }`. The
-prefix must start with the adapter's `key`.
+prefix must start with the adapter's `key`. A request goes to the handler of the
+longest prefix it falls under, matched on whole path segments (`demo/api`
+serves `/demo/api/x`, not `/demo/apiary`). Registering the same prefix again
+replaces the handler; `remove()` of the replaced registration then does
+nothing.
 
 ### Same-origin mode: handlers in Dedicated Workers
 
