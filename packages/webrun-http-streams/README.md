@@ -360,13 +360,6 @@ constructor throws a `RangeError` (`init["status"] must be in the range of 200
 to 599, inclusive.` in Node) if a peer answers with one. Use `httpFetch` to see
 an informational status.
 
-Known gap: for these bodyless responses `fetchOverDuplex` does not release the
-underlying `Duplex` call. `httpFetch` returns only `{ envelope, body }`, and
-`.return()` on a body generator nobody has pulled from is a no-op, so the
-producer's `finally` does not run. On a transport that multiplexes calls with a
-bounded stream table this holds one slot per such call. Closing it needs
-`httpFetch` to expose the call for cancellation.
-
 ### How a handler that has not answered learns its caller left
 
 A transport tells the serving side a caller is gone by calling `return()` on the handler's
