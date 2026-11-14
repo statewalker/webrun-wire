@@ -1,5 +1,13 @@
 # @statewalker/webrun-rpc
 
+## 0.11.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md, dist/close-signal.d.ts, dist/close-signal.d.ts.map, dist/index.js, src/close-signal.ts
+
 ## 0.11.0
 
 ### Minor Changes
