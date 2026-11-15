@@ -1,5 +1,13 @@
 # @statewalker/webrun-http-streams
 
+## 0.8.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams ^0.6.0 -> ^0.6.1
+
 ## 0.8.0
 
 ### Minor Changes
