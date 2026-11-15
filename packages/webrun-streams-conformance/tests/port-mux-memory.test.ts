@@ -74,3 +74,52 @@ async function memoryHarness(codec: ValueCodec) {
 }
 
 describePortMux("newNativePortMux (in memory)", memoryHarness);
+
+import { describe, expect, it } from "vitest";
+
+describe("newNativePortMux specifics (review of #182)", () => {
+  it("close() while an openPort is still pending rejects it", async () => {
+    const control = newNativePortMux({
+      name: "memory",
+      codec: { encode: () => new Uint8Array(0), decode: () => null },
+      maxMessageSize: 1,
+      // A channel that never opens on its own: only the signal ends the wait.
+      open: (signal) =>
+        new Promise<NativeChannel>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    });
+    const pending = control.mux.openPort();
+    await control.mux.close();
+    await expect(pending).rejects.toThrow(/closed/);
+  });
+
+  it("a refused port is failed hard: the channel is not closed gracefully before (or instead of) failing", async () => {
+    const calls: string[] = [];
+    const [near] = channelPair();
+    const pipe = near.pipe;
+    const close = pipe.close.bind(pipe);
+    const channel: NativeChannel = {
+      pipe: Object.assign(Object.create(pipe), {
+        close: async () => {
+          calls.push("close");
+          await close();
+        },
+      }),
+      fail: () => {
+        calls.push("fail");
+      },
+    };
+    const control = newNativePortMux({
+      name: "memory",
+      codec: { encode: () => new Uint8Array(0), decode: () => null },
+      maxMessageSize: 1,
+      onPort: () => false,
+      open: async () => channel,
+    });
+    control.accept(channel, {});
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls[0]).toBe("fail");
+    expect(calls).not.toContain("close");
+  });
+});

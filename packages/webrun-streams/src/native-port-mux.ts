@@ -84,7 +84,9 @@ export interface NativePortMuxOptions<Info> {
   connectionSignal?: AbortSignal;
   /**
    * Opens a channel to the peer, resolving once it carries messages (or once
-   * it queues them). Rejects with `signal`'s reason when it aborts first.
+   * it queues them). Rejects with `signal`'s reason when it aborts first; the
+   * signal aborts for the caller's signal, the connection going, or the mux
+   * closing.
    */
   open(signal?: AbortSignal): Promise<NativeChannel>;
   /** Stops the transport offering inbound channels; runs once, on `close()`. */
@@ -112,6 +114,8 @@ export function newNativePortMux<I = unknown>(
   const { name, codec, maxMessageSize, onPort, connectionSignal } = options;
   const live = new Set<NativePort>();
   let closed = false;
+  /** Aborts on `close()`: a channel still opening is given up, and its `openPort` rejects. */
+  const closing = new AbortController();
 
   const wrap = (channel: NativeChannel): { port: NativePort; fail(reason: Error): void } => {
     const { pipe } = channel;
@@ -132,12 +136,20 @@ export function newNativePortMux<I = unknown>(
         } catch {}
       }
     };
+    /** Set once the channel was broken off: it must not also be closed gracefully. */
+    let failedHard = false;
     const fail = (reason: Error): void => {
+      // The channel's own failure first (a libp2p reset): aborting `local`
+      // runs `cleanUp`, whose graceful close would otherwise go out before it,
+      // and the peer could see a normal end instead of a refusal.
+      if (channel.fail) {
+        failedHard = true;
+        try {
+          channel.fail(reason);
+        } catch {}
+      }
       if (!local.signal.aborted) local.abort(reason);
-      try {
-        if (channel.fail) channel.fail(reason);
-        else void pipe.close().catch(() => undefined);
-      } catch {}
+      if (!channel.fail) void pipe.close().catch(() => undefined);
     };
     const onBytes = (event: MessageEvent): void => {
       if (closeSignal.aborted) return;
@@ -159,7 +171,7 @@ export function newNativePortMux<I = unknown>(
       pipe.removeEventListener("message", onBytes);
       listeners.clear();
       held = undefined;
-      void pipe.close().catch(() => undefined);
+      if (!failedHard) void pipe.close().catch(() => undefined);
     };
     const port: NativePort = {
       closeSignal,
@@ -212,7 +224,20 @@ export function newNativePortMux<I = unknown>(
       const signal = opts?.signal;
       signal?.throwIfAborted();
       if (connectionSignal?.aborted) throw connectionSignal.reason;
-      const channel = await options.open(signal);
+      const opening = [closing.signal];
+      if (signal) opening.push(signal);
+      if (connectionSignal) opening.push(connectionSignal);
+      const openSignal = AbortSignal.any(opening);
+      let channel: NativeChannel;
+      try {
+        channel = await options.open(openSignal);
+      } catch (err) {
+        // Given up because the mux closed meanwhile: say so, as `openPort` on a closed mux does.
+        if (closing.signal.aborted && !signal?.aborted) {
+          throw new Error(`${name}: port mux closed`, { cause: err });
+        }
+        throw err;
+      }
       if (closed) {
         await channel.pipe.close().catch(() => undefined);
         throw new Error(`${name}: port mux closed`);
@@ -234,6 +259,7 @@ export function newNativePortMux<I = unknown>(
     async close() {
       if (closed) return;
       closed = true;
+      closing.abort(new Error(`${name}: port mux closed`));
       try {
         await options.stopAccepting?.();
       } catch {}
