@@ -78,4 +78,26 @@ describe("native port window: the floor (statewalker/webrun-wire#153)", () => {
     expect(port.closeSignal.aborted).toBe(true);
     expect(String((port.closeSignal.reason as Error).message)).toMatch(/control frame/);
   });
+
+  it("a hello on a port the peer opened does not make this end presume for the ports it offers (review of #184)", async () => {
+    const inbound = rawChannel();
+    const outbound = rawChannel();
+    const control = newNativePortMux({
+      name: "t",
+      codec: json,
+      maxMessageSize: 1,
+      window: 1024 * 1024,
+      onPort: () => true,
+      open: async () => ({ ...outbound.channel, window: "offered" }),
+    });
+    // The peer's opening mux has a window: its hello arrives on the port it opened.
+    control.accept({ ...inbound.channel, window: "agreed" }, {});
+    inbound.deliver(hello(1024 * 1024));
+    // The mux serving this end's ports may be another one, without a window:
+    // an offered port says nothing until that mux answers.
+    const port = await control.mux.openPort();
+    port.postMessage("hi");
+    expect(outbound.sent.length).toBe(1);
+    expect(outbound.sent[0]?.[0]).not.toBe(CONTROL_BYTE);
+  });
 });

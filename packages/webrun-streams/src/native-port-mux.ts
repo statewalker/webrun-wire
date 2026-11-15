@@ -155,7 +155,7 @@ export function newNativePortMux<I = unknown>(
   let closed = false;
   /** Aborts on `close()`: a channel still opening is given up, and its `openPort` rejects. */
   const closing = new AbortController();
-  /** A peer's `hello` arrived on some port: the peer's muxes speak the window (`presume`). */
+  /** A peer's `hello` answered a port this end offered: the peer's serving mux speaks the window (`presume`). */
   let heardHello = false;
 
   const wrap = (channel: NativeChannel): { port: NativePort; fail(reason: Error): void } => {
@@ -285,9 +285,16 @@ export function newNativePortMux<I = unknown>(
         window: options.window,
         mode: channel.window,
         presume: heardHello,
-        onHello: () => {
-          heardHello = true;
-        },
+        // Only the answer to a port this end offered shows that the peer's
+        // serving mux speaks the window; a hello on a port the peer opened
+        // shows only its opening mux does (review of #184).
+        ...(channel.window === "offered"
+          ? {
+              onHello: () => {
+                heardHello = true;
+              },
+            }
+          : {}),
         send: (frame) => pipe.postMessage(frame),
         fail: (reason) => {
           if (!local.signal.aborted) local.abort(reason);
