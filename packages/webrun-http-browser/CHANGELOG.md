@@ -1,5 +1,15 @@
 # @statewalker/webrun-http-browser
 
+## 0.17.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: dist/index.js
+- Updated dependencies [b50df8e]
+  - @statewalker/webrun-streams@0.6.1
+
 ## 0.17.0
 
 ### Minor Changes
