@@ -441,9 +441,12 @@ and 20 ms) it decides:
   window back, with two quiet rounds after;
 - otherwise hold.
 
-Bounds: never more than `max` per port; never more than `budget` summed over the mux's adaptive
-ports (each charged the window it announced, or the one it wants or a probe will take back); never
-less than `min`, nor than the window agreed for the port. A reader that stops holds at most the
+Bounds: never more than `max` per port; a port grows only while the mux's adaptive ports, summed,
+stay within `budget` (each charged the window it announced, or the one it wants or a probe will take
+back). `budget` bounds growth, not the ports' starting windows: every port opens at its agreed
+window without a budget check, so the total can exceed `budget` when many ports are open at once
+(`maxPorts` × the agreed window is that bound). Never less than `min`, nor than the window agreed
+for the port. A reader that stops holds at most the
 window it had; a reader slower than the link never grows it.
 
 A smaller window never refuses what the peer sent under the larger one: the receiver never moves

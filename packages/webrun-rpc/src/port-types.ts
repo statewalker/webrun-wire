@@ -170,9 +170,10 @@ export interface PortMuxOptions {
    * inflates, and drains to its floor once it fills the window and every
    * 10 s after, to re-measure the base round trip.
    *
-   * Bounds: never more than `max` per port; never more than `budget` summed
-   * over the mux's adaptive ports; never less than `min`, nor than the window
-   * agreed for the port. A smaller window is reached by granting less as the
+   * Bounds: never more than `max` per port; a port grows only while the
+   * mux's adaptive ports, summed, stay within `budget` (it bounds growth, not
+   * the windows ports open at: `maxPorts` × the agreed window bounds those);
+   * never less than `min`, nor than the window agreed for the port. A smaller window is reached by granting less as the
    * consumer frees bytes (the right edge never moves back), so what the peer
    * sent under the larger one is never refused; the peer's sends follow the
    * latest window it heard. A peer of an earlier version ignores the
