@@ -114,6 +114,9 @@ catalogs:
     webrun-rpc-0-8:
       specifier: npm:@statewalker/webrun-rpc@0.8.0
       version: 0.8.0
+    webrun-streams-libp2p-0-6:
+      specifier: npm:@statewalker/webrun-streams-libp2p@0.6.0
+      version: 0.6.0
     ws:
       specifier: ^8.22.0
       version: 8.22.0
@@ -407,6 +410,12 @@ importers:
 
   packages/webrun-streams-libp2p:
     dependencies:
+      '@statewalker/webrun-msgpack':
+        specifier: workspace:^
+        version: link:../webrun-msgpack
+      '@statewalker/webrun-rpc':
+        specifier: workspace:^
+        version: link:../webrun-rpc
       '@statewalker/webrun-streams':
         specifier: workspace:^
         version: link:../webrun-streams
@@ -432,12 +441,6 @@ importers:
       '@multiformats/multiaddr':
         specifier: 'catalog:'
         version: 13.0.3
-      '@statewalker/webrun-msgpack':
-        specifier: workspace:^
-        version: link:../webrun-msgpack
-      '@statewalker/webrun-rpc':
-        specifier: workspace:^
-        version: link:../webrun-rpc
       '@statewalker/webrun-streams-conformance':
         specifier: workspace:^
         version: link:../webrun-streams-conformance
@@ -462,6 +465,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.1.0(@types/node@26.6.4)(@vitest/browser-playwright@5.1.0)(@vitest/coverage-v8@5.1.0)(@vitest/ui@5.1.0)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+      webrun-streams-libp2p-0-6:
+        specifier: 'catalog:'
+        version: '@statewalker/webrun-streams-libp2p@0.6.0(@libp2p/interface@3.3.0)(@multiformats/multiaddr@13.0.3)(libp2p@3.3.11)'
 
   packages/webrun-streams-livekit:
     dependencies:
@@ -1322,8 +1328,21 @@ packages:
   '@statewalker/webrun-rpc@0.8.0':
     resolution: {integrity: sha512-0IS6Zc6LQrZMgin2uzKJuKpphwCJr1XnBALqeiz2j/gAvU6/wOO9TmJD1wp13CsvK8vq9aYkPR1NIkHGc2m8Hw==}
 
+  '@statewalker/webrun-streams-libp2p@0.6.0':
+    resolution: {integrity: sha512-RMHO1h2oqpCu5Vz6zp2BfwoRFP+S4GfL8uYel0FouhmpyunDwO7Vy5JfTmd4VndpajsHos0mrEn7fLAumo7WWg==}
+    peerDependencies:
+      '@libp2p/interface': ^3.0.0
+      '@multiformats/multiaddr': ^13.0.0
+      libp2p: ^3.0.0
+    peerDependenciesMeta:
+      libp2p:
+        optional: true
+
   '@statewalker/webrun-streams@0.2.3':
     resolution: {integrity: sha512-v4+32VDLjt8HzAhjgd7K3bgiasQosU7FooXhLaTU2dQzYyNZ6NbNMOI/24SL0bdmTHkSU3bxktASn0hO3sCwng==}
+
+  '@statewalker/webrun-streams@0.6.0':
+    resolution: {integrity: sha512-o+B7i9UD/VnyWpR5zsAPmMunSgMSMPDOnLMjvloSouoKtFzaHYhbPWoHoWvBLtBPuBW/IoletogYjV0ea2bPWQ==}
 
   '@turbo/darwin-64@2.11.7':
     resolution: {integrity: sha512-Z2LFOxwbiJueD1miByXJS/BrW21vv6YaQXZustty5jEX4vQYw6zyh101Sz1QO7WG0mqBzKagZ/DoAeeujI0/Sw==}
@@ -4010,7 +4029,17 @@ snapshots:
     dependencies:
       '@statewalker/webrun-streams': 0.2.3
 
+  '@statewalker/webrun-streams-libp2p@0.6.0(@libp2p/interface@3.3.0)(@multiformats/multiaddr@13.0.3)(libp2p@3.3.11)':
+    dependencies:
+      '@libp2p/interface': 3.3.0
+      '@multiformats/multiaddr': 13.0.3
+      '@statewalker/webrun-streams': 0.6.0
+    optionalDependencies:
+      libp2p: 3.3.11
+
   '@statewalker/webrun-streams@0.2.3': {}
+
+  '@statewalker/webrun-streams@0.6.0': {}
 
   '@turbo/darwin-64@2.11.7':
     optional: true

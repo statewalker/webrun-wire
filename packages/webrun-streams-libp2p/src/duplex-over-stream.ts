@@ -19,6 +19,9 @@ const TYPE_ERROR = 0x02;
  * the transfer would complete anyway; a peer slower than that is
  * indistinguishable from one that has stopped reading altogether. Override via
  * `drainTimeoutMs` when a deployment knows better.
+ *
+ * @deprecated The deprecated protocol's (statewalker/webrun-wire#153): kept for
+ * one release, as the shim `connect`/`serve` run for older peers, then removed.
  */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
 
@@ -49,6 +52,9 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
  * of sixty.
  *
  * Exported so a deployment that knows its links can lower it deliberately.
+ *
+ * @deprecated The deprecated protocol's (statewalker/webrun-wire#153): kept for
+ * one release, as the shim `connect`/`serve` run for older peers, then removed.
  */
 export const DEFAULT_CLOSE_TIMEOUT_MS = DEFAULT_DRAIN_TIMEOUT_MS;
 
@@ -101,6 +107,9 @@ const textDecoder = new TextDecoder();
  * exhausts — without it, the server-side `serve` would deadlock waiting for the
  * outbound pump to finish, which itself waits for the handler, which waits for
  * inputQueue.done.
+ *
+ * @deprecated The deprecated protocol's (statewalker/webrun-wire#153): kept for
+ * one release, as the shim `connect`/`serve` run for older peers, then removed.
  */
 export interface DuplexOverStreamOptions {
   /**
@@ -151,6 +160,9 @@ export interface DuplexOverStreamOptions {
  * JSON-serialised `Error`). Normal end-of-input is signalled by libp2p's
  * `close()`. The frame layer exists so we can preserve `Error` fidelity
  * across the wire (yamux's native stream reset only carries "stream reset").
+ *
+ * @deprecated The deprecated protocol's (statewalker/webrun-wire#153): kept for
+ * one release, as the shim `connect`/`serve` run for older peers, then removed.
  */
 export async function* duplexOverStream(
   stream: Stream,

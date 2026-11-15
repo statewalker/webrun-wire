@@ -38,6 +38,8 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
+    "@statewalker/webrun-msgpack": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams": "workspace:^"
   },
   "peerDependencies": {
@@ -58,8 +60,6 @@
     "@libp2p/tcp": "catalog:",
     "@libp2p/utils": "catalog:",
     "@multiformats/multiaddr": "catalog:",
-    "@statewalker/webrun-msgpack": "workspace:^",
-    "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "libp2p": "catalog:",
@@ -67,7 +67,8 @@
     "rolldown": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "webrun-streams-libp2p-0-6": "catalog:"
   },
   "sideEffects": false,
   "publishConfig": {
