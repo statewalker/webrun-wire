@@ -161,7 +161,10 @@ as to requests, since both go to the service that holds the key.
 
 ```ts
 /// <reference lib="webworker" />
-import { startRelayServiceWorker } from "@statewalker/webrun-http-browser/relay-worker";
+import {
+  onlyRegistrantOrigin,
+  startRelayServiceWorker,
+} from "@statewalker/webrun-http-browser/relay-worker";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -171,8 +174,12 @@ const stop = startRelayServiceWorker(self, {
     url.pathname === "/relay.html" ||
     url.pathname === "/relay-sw.js",
   takeover: "first-wins",
-  canRegister: (client, _key, path) =>
-    new URL(client.url).pathname === "/relay.html" && path !== "/index.html",
+  canRegister: (client, _key, path, origin) =>
+    new URL(client.url).pathname === "/relay.html" &&
+    path !== "/index.html" &&
+    origin === "https://app.example",
+  // Each embedder reaches only the services it registered itself.
+  canConnect: onlyRegistrantOrigin,
   decorateResponse: (response) => response,
 });
 ```
@@ -181,7 +188,8 @@ const stop = startRelayServiceWorker(self, {
 | --- | --- | --- |
 | `mounts` | none | Fixed table `Array<{ key, path?, match? }>`, for a host that knows its services at build time. A key declared here belongs to the host: a page's `REGISTER` or `UNREGISTER` for it never replaces or removes the mount, so the page can register with no `path`. |
 | `exclude` | none | `(url) => boolean`. Paths the relay never claims, through the table or through `/~<key>/`. Checked first. |
-| `canRegister` | everyone | `(client, key, path?) => boolean \| Promise<boolean>`. `path` is where the registrant asks to be mounted (`undefined` for `/~<key>/`), so a host can vet where a key lands, not only who takes it. Refuses with `this client may not register "<key>"` (`... at "<path>"`). Also consulted for `UNREGISTER`, with the key's current path. |
+| `canRegister` | everyone | `(client, key, path?, origin?) => boolean \| Promise<boolean>`. `path` is where the registrant asks to be mounted (`undefined` for `/~<key>/`), so a host can vet where a key lands, not only who takes it. `origin` is the registrant's embedder, stamped by its relay iframe (see "Every embedder can reach every service"). Refuses with `this client may not register "<key>"` (`... at "<path>"`). Also consulted for `UNREGISTER`, with the key's current path. |
+| `canConnect` | everyone | `({ key, origin?, registeredOrigin?, client }) => boolean \| Promise<boolean>`. Vets a `CONNECT` before it reaches the service: `origin` is the caller's embedder, `registeredOrigin` the registrant's, both stamped by the relay iframes. `onlyRegistrantOrigin` (exported here) allows a caller only when both origins are known and equal. Refuses with `this caller may not connect to "<key>"`. Also consulted for a socket an embedder opens through its relay iframe. Requests that pages of the relay origin `fetch`, and sockets they open directly, are not consulted. |
 | `takeover` | `"last-wins"` | `"first-wins"` keeps a live holder's key; a second page gets `"<key>" is already served by another client`. A holder that reloaded is no longer live, so it can always re-register. |
 | `decorateResponse` | none | `(response, request) => Response`. Stamps headers on responses the relay makes, including its error responses. Not applied to requests the worker leaves to the network. |
 | `streamTimeout` | none | Per-stream inactivity timeout, in ms, of the links to services. |
@@ -246,6 +254,17 @@ is answered with that error, so the parent's `initHttpService` /
 and tries again. Only a `CONNECT` from the embedding window (`window.parent`)
 is accepted; another window holding a reference to the frame cannot take the
 connection first.
+
+The handler stamps the embedder's origin (`ev.origin` of its `CONNECT`, which
+the embedder cannot forge) into every `REGISTER`, `UNREGISTER` and `CONNECT`
+it passes to the worker, and into its socket calls, as `params.origin`, replacing any `origin` the
+embedder sent. Two options refuse an embedder outright, before the worker
+starts; the refusal is reported on the acknowledgement and on every call:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `allowedOrigins` | every origin | `readonly string[]`: the origins that may embed and use this relay. |
+| `canConnect` | every origin | `(origin) => boolean \| Promise<boolean>`, consulted after `allowedOrigins`. |
 
 ### Same-origin mode
 
@@ -673,6 +692,32 @@ origin root, and the registration persists in IndexedDB across page loads and
 worker restarts. On any origin where more than the host's own page can reach
 the relay, set `takeover: "first-wins"` and `canRegister` together for a mount
 at `/`.
+
+### Every embedder can reach every service
+
+By default the relay serves any page that embeds it, and **every service
+registered on it is readable by every embedder**: a page that knows (or
+guesses) a key calls `callHttpService(request, { key, port })` and gets the
+response, and under `last-wins` it can also register the key and take the
+traffic over. The iframe's port gets around the same-origin policy that keeps
+a cross-origin `fetch` opaque. Browsers partition third-party ServiceWorkers
+by top-level site, so the exposure is limited to embedders under one top-level
+site, such as a notebook host embedding one relay for untrusted authors.
+
+The relay worker cannot tell embedders apart by client (each arrives through
+its own relay iframe, a client at `relay.html`), so the iframe stamps the
+embedder's origin into each call. Use it:
+
+- `canConnect: onlyRegistrantOrigin` in the worker keeps each embedder's
+  services to that embedder;
+- `canRegister`'s `origin` argument decides who may take a key at all;
+- `allowedOrigins` on the relay page refuses unknown embedders outright;
+- unguessable keys (`crypto.randomUUID()`) keep a service private to whoever
+  is handed its URL, as `demo/demo-2.html` does.
+
+Pages of the relay origin itself sit inside the relay's trust boundary: they
+can `fetch` every service directly and post to the worker without a relay
+iframe, so their calls carry no trustworthy stamp.
 
 A `CONNECT` is delivered only to the service named by its key. Services on one
 port that are not the addressee stay silent; a reply of `false` would reach the
