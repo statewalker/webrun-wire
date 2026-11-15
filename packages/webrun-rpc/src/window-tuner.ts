@@ -72,12 +72,16 @@ export class WindowTuner {
   }
 
   /**
-   * This end sent a credit at `now`. `edge`: the right edge of the window
-   * before it (bytes granted so far plus the window announced); `consumed`:
-   * bytes consumed so far; `window`: the window announced before it. Starts a
-   * round unless one is running.
+   * This end sent a credit at `now`, which moved the window's right edge
+   * (bytes granted plus the window announced) from `edge` to `after`;
+   * `consumed`: bytes consumed so far; `window`: the window announced before
+   * it. Starts a round unless one is running, and only when the edge moved:
+   * a shrinking credit that keeps it in place releases no byte, and a round
+   * timed from it would count the consumer's and the batching's delay as
+   * round trip, read as inflation.
    */
-  onGrant(now: number, edge: number, consumed: number, window: number): void {
+  onGrant(now: number, edge: number, after: number, consumed: number, window: number): void {
+    if (after <= edge) return;
     this.probe ??= { edge, at: now, consumed, window };
   }
 

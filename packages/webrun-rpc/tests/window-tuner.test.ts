@@ -23,7 +23,7 @@ function rounds(
   const seen: number[] = [];
   for (let i = 0; i < n; i++) {
     const edge = state.granted + state.window;
-    tuner.onGrant(clock.now, edge, state.consumed, state.window);
+    tuner.onGrant(clock.now, edge, edge + 1, state.consumed, state.window);
     clock.now += rtt;
     state.consumed += Math.floor(state.window * share);
     state.granted = state.consumed;
@@ -49,7 +49,7 @@ describe("WindowTuner: grow under window-limited flow at a low RTT", () => {
 
   it("a round ends only with a byte past the edge the credit left behind", () => {
     const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    tuner.onGrant(0, 16 * KiB, 0, 16 * KiB);
+    tuner.onGrant(0, 16 * KiB, 20 * KiB, 0, 16 * KiB);
     expect(tuner.onArrived(5, 16 * KiB, 16 * KiB)).toBe(false);
     expect(tuner.target).toBe(16 * KiB);
     expect(tuner.onArrived(6, 16 * KiB + 1, 16 * KiB)).toBe(true);
@@ -58,13 +58,26 @@ describe("WindowTuner: grow under window-limited flow at a low RTT", () => {
 
   it("one round at a time: a credit sent while a round runs does not restart it", () => {
     const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    tuner.onGrant(0, 16 * KiB, 0, 16 * KiB);
-    tuner.onGrant(50, 20 * KiB, 4 * KiB, 16 * KiB);
+    tuner.onGrant(0, 16 * KiB, 20 * KiB, 0, 16 * KiB);
+    tuner.onGrant(50, 20 * KiB, 24 * KiB, 4 * KiB, 16 * KiB);
     tuner.onArrived(100, 16 * KiB + 1, 16 * KiB);
     // The round ran from 0, so its RTT is 100: the first sample is the minimum.
-    tuner.onGrant(100, 40 * KiB, 16 * KiB, 32 * KiB);
+    tuner.onGrant(100, 40 * KiB, 56 * KiB, 16 * KiB, 32 * KiB);
     expect(tuner.onArrived(160, 40 * KiB + 1, 48 * KiB)).toBe(true);
     expect(tuner.target).toBe(64 * KiB);
+  });
+});
+
+describe("WindowTuner: only a credit that moves the right edge starts a round", () => {
+  it("a shrink credit that keeps the edge where it was starts none", () => {
+    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
+    // A shrinking credit: 8 KiB granted, the window 8 KiB smaller, the edge unmoved.
+    tuner.onGrant(0, 64 * KiB, 64 * KiB, 0, 64 * KiB);
+    // Bytes past it were released by an earlier credit: no round to end.
+    expect(tuner.onArrived(500, 64 * KiB + 1, 64 * KiB)).toBe(false);
+    // The next credit that moves the edge starts one, timed from itself.
+    tuner.onGrant(600, 64 * KiB, 72 * KiB, 64 * KiB, 56 * KiB);
+    expect(tuner.onArrived(610, 64 * KiB + 1, 128 * KiB)).toBe(true);
   });
 });
 

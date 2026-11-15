@@ -479,7 +479,9 @@ export function multiplexPort(
       c.recvWindow = next;
       post({ type: "credit", id, bytes, window: next });
     }
-    if (c.enforced) c.tuner?.onGrant(performance.now(), edge, c.consumed, before);
+    if (c.enforced) {
+      c.tuner?.onGrant(performance.now(), edge, c.granted + c.recvWindow, c.consumed, before);
+    }
   };
   /**
    * `bytes` of the peer's arrived on a windowed port: they may end the
