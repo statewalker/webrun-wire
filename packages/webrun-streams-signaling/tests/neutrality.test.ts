@@ -5,8 +5,12 @@ import { describe, expect, it } from "vitest";
 
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
-/** Allowed bare (non-relative) import specifiers for the package src. */
-const ALLOWED_BARE = new Set(["livekit-client", "peerjs"]);
+/**
+ * Allowed bare (non-relative) import specifiers for the package src: the
+ * optional vendor peers, and the pipe module every transport adapter shares
+ * (`newMessagePipe`, statewalker/webrun-wire#151), a dependency-free package.
+ */
+const ALLOWED_BARE = new Set(["livekit-client", "peerjs", "@statewalker/webrun-streams"]);
 
 const IMPORT_RE = /(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/g;
 

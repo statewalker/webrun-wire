@@ -189,9 +189,9 @@ contract.
 ### Dependencies
 
 - `livekit-client` (peer): you supply and own the `Room`. `src/` imports only its `Room` type.
-- Nothing from this repository at runtime: the target is a `MessageTarget` by shape.
-  `@statewalker/webrun-rpc`, `@statewalker/webrun-msgpack` and `@statewalker/webrun-streams` are
-  dev dependencies of the tests; consumers supply their own `webrun-rpc` and codec.
+- `@statewalker/webrun-streams` at runtime, for `newMessagePipe`: the pipe module every transport adapter shares (listeners, delivery, life, the byte check, the frame ceiling, drain, close), so a pipe rule is fixed once for all of them (#151). The target is a `MessageTarget` by shape and carries its own `closeSignal` and `maxMessageSize`, so `overPipe(target, { codec, side })` needs nothing else.
+  `@statewalker/webrun-rpc` and `@statewalker/webrun-msgpack` are dev dependencies of the tests;
+  consumers supply their own `webrun-rpc` and codec.
 - Dev only: `livekit-server-sdk` for test tokens, `@vitest/browser-playwright` and `playwright`
   for the browser run, `@statewalker/webrun-streams-conformance` for the suite.
 

@@ -281,8 +281,9 @@ that joins, and ends at `leave()`. Departures are not reported. Only the most re
 
 ### Dependencies
 
-Zero runtime dependencies: the bundle imports nothing, and `ByteChannel` is declared here.
-`@statewalker/webrun-rpc`, `-msgpack`, `-streams` and `-streams-conformance` are dev dependencies of the tests:
+One runtime dependency, `@statewalker/webrun-streams` at runtime, for `newMessagePipe`: the pipe module every transport adapter shares (listeners, delivery, life, the byte check, the frame ceiling, drain, close), so a pipe rule is fixed once for all of them (#151). The target is a `MessageTarget` by shape and carries its own `closeSignal` and `maxMessageSize`, so `overPipe(target, { codec, side })` needs nothing else. `ByteChannel` is declared here, and `messageTargetOverByteChannel`
+takes an optional `maxFrameBytes`.
+`@statewalker/webrun-rpc`, `-msgpack` and `-streams-conformance` are dev dependencies of the tests:
 `tests/conformance.test.ts` runs the conformance suite over `messageTargetOverByteChannel` and the
 port stack, on `byteChannelFromDataChannel` and on `byteChannelFromRoom` (in-process stand-ins for
 the data channel and the room). `livekit-client` is an optional peer, used only through the

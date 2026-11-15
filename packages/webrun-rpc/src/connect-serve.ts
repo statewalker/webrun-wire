@@ -225,9 +225,17 @@ export interface OverPipeOptions {
  *
  * There is no second port to be had, so `multiplexPort`'s id table invents
  * them. Use this when the transport gives you exactly one channel.
+ *
+ * `signal` and `maxMessageSize` default to the pipe's own `closeSignal` and
+ * `maxMessageSize`, so an adapter's target is enough:
+ * `overPipe(messageTargetOverWebSocket(ws).target, { codec, side })`.
  */
 export function overPipe(pipe: MessageTarget, options: OverPipeOptions): PortMuxFactory {
-  return (onPort) => multiplexPort(pipe, { ...options, onPort });
+  // A pipe that carries its own life and ceiling (every `webrun-streams-*`
+  // adapter's target) needs neither option; given ones win.
+  const signal = options.signal ?? pipe.closeSignal;
+  const maxMessageSize = options.maxMessageSize ?? pipe.maxMessageSize;
+  return (onPort) => multiplexPort(pipe, { ...options, signal, maxMessageSize, onPort });
 }
 
 /**

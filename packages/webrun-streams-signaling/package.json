@@ -45,11 +45,13 @@
       "optional": true
     }
   },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:^"
+  },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@statewalker/webrun-msgpack": "workspace:^",
     "@statewalker/webrun-rpc": "workspace:^",
-    "@statewalker/webrun-streams": "workspace:^",
     "@statewalker/webrun-streams-conformance": "workspace:^",
     "@types/node": "catalog:",
     "livekit-client": "catalog:",

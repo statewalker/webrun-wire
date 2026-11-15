@@ -1,6 +1,9 @@
+import {
+  type MessagePipe,
+  type MessagePipeTarget,
+  newMessagePipe,
+} from "@statewalker/webrun-streams";
 import type { ByteChannel } from "./types.js";
-
-type Listener = (event: MessageEvent) => void | Promise<void>;
 
 /**
  * The payload ceiling for a channel over an `RTCDataChannel` (`PeerManager`,
@@ -13,28 +16,22 @@ type Listener = (event: MessageEvent) => void | Promise<void>;
 export const DEFAULT_MAX_MESSAGE_SIZE = 16 * 1024 - 256;
 
 /** What `messageTargetOverByteChannel` gives: a pipe of bytes, its life, and its payload ceiling. */
-export interface ByteChannelMessageTarget {
-  /** A `MessageTarget` (as `@statewalker/webrun-rpc` defines it) of bytes, one channel message each. */
-  target: {
-    addEventListener(type: "message", listener: Listener): void;
-    removeEventListener(type: "message", listener: Listener): void;
-    /** Sends one message; `TypeError` for anything but bytes. */
-    postMessage(message: unknown): void;
-    /** Closes the channel. */
-    close(): Promise<void>;
-    /** The channel's `bufferedAmount`; 0 where it cannot tell. */
-    readonly bufferedAmount: number;
-    /**
-     * The channel's `whenDrained`: resolves once it can take more, or the pipe
-     * ended. Resolves at once over a channel without one.
-     */
-    whenDrained(): Promise<void>;
-  };
+export interface ByteChannelMessageTarget extends MessagePipe {
+  /**
+   * A `MessageTarget` (as `@statewalker/webrun-rpc` defines it) of bytes, one
+   * channel message each. `bufferedAmount` is the channel's (0 where it cannot
+   * tell); `whenDrained` is the channel's, or resolves at once over a channel
+   * without one.
+   */
+  target: MessagePipeTarget;
   /** Aborts when the channel closes. Pass it as `overPipe`'s `signal`. */
   signal: AbortSignal;
   /** Pass as `overPipe`'s `maxMessageSize`. */
   maxMessageSize: number;
 }
+
+/** How long a closed channel's `recv` may take to hand over what it still holds before the pipe ends. */
+const CLOSE_DRAIN_MS = 50;
 
 /**
  * A `ByteChannel` this package hands back (`PeerManager`, `QrSignaling`,
@@ -54,84 +51,56 @@ export interface ByteChannelMessageTarget {
  */
 export function messageTargetOverByteChannel(
   channel: ByteChannel,
-  options: { maxMessageSize?: number } = {},
+  options: { maxMessageSize?: number; maxFrameBytes?: number } = {},
 ): ByteChannelMessageTarget {
-  const listeners = new Set<Listener>();
-  const life = new AbortController();
-  let closedHere = false;
-  const end = (reason: Error): void => {
-    if (!life.signal.aborted) life.abort(reason);
-  };
-  void channel.closed.then(() => end(new Error("webrun-streams-signaling: the channel closed")));
-  void (async () => {
-    for await (const bytes of channel.recv) {
-      // The channel closing ends `recv` after what it already holds; only a
-      // close on this side stops delivery at once.
-      if (closedHere) break;
-      const event = new MessageEvent("message", { data: bytes.slice() });
-      for (const listener of [...listeners]) {
-        try {
-          Promise.resolve(listener(event)).catch(() => undefined);
-        } catch {}
-      }
-    }
-    end(new Error("webrun-streams-signaling: the channel closed"));
-  })().catch((err: unknown) =>
-    end(err instanceof Error ? err : new Error(String(err), { cause: err })),
-  );
-  return {
-    signal: life.signal,
-    maxMessageSize: options.maxMessageSize ?? DEFAULT_MAX_MESSAGE_SIZE,
-    target: {
-      addEventListener: (_type, listener) => {
-        listeners.add(listener);
-      },
-      removeEventListener: (_type, listener) => {
-        listeners.delete(listener);
-      },
-      postMessage(message) {
-        const bytes =
-          message instanceof Uint8Array
-            ? message
-            : message instanceof ArrayBuffer
-              ? new Uint8Array(message)
-              : ArrayBuffer.isView(message)
-                ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength)
-                : undefined;
-        if (!bytes) {
-          throw new TypeError(
-            `webrun-streams-signaling: a byte pipe carries Uint8Array, ArrayBuffer or a view, got ${Object.prototype.toString.call(message)}`,
-          );
-        }
-        if (life.signal.aborted) return; // `signal` says so
-        channel.send(bytes.slice());
-      },
-      async close() {
-        listeners.clear();
-        closedHere = true;
-        end(new Error("webrun-streams-signaling: closed locally"));
+  const control = newMessagePipe(
+    {
+      send: (bytes) => channel.send(bytes),
+      bufferedAmount: () => channel.bufferedAmount ?? 0,
+      ...(channel.whenDrained
+        ? {
+            isDrained: () => false,
+            whenDrained: () => channel.whenDrained?.() ?? Promise.resolve(),
+          }
+        : { isDrained: () => true }),
+      close: (local) => {
+        if (!local) return;
         try {
           channel.close();
         } catch {}
       },
-      get bufferedAmount() {
-        return channel.bufferedAmount ?? 0;
-      },
-      whenDrained() {
-        if (life.signal.aborted || !channel.whenDrained) return Promise.resolve();
-        const signal = life.signal;
-        return new Promise<void>((resolve, reject) => {
-          const done = (): void => {
-            signal.removeEventListener("abort", done);
-            resolve();
-          };
-          signal.addEventListener("abort", done);
-          channel.whenDrained?.().then(done, (err: unknown) => {
-            signal.removeEventListener("abort", done);
-            reject(err);
-          });
-        });
-      },
     },
-  };
+    {
+      name: "webrun-streams-signaling",
+      maxMessageSize: options.maxMessageSize ?? DEFAULT_MAX_MESSAGE_SIZE,
+      maxFrameBytes: options.maxFrameBytes,
+      // The channel may queue what is sent, and reuse what it hands out.
+      copyOnSend: true,
+      copyOnDeliver: true,
+    },
+  );
+  const closedMessage = "webrun-streams-signaling: the channel closed";
+  const reading = (async () => {
+    for await (const bytes of channel.recv) {
+      // The channel closing ends `recv` after what it already holds; only a
+      // close on this side stops delivery at once.
+      if (control.ended) break;
+      control.deliver(bytes);
+    }
+  })();
+  reading.then(
+    () => control.end(new Error(closedMessage)),
+    (err: unknown) =>
+      control.end(err instanceof Error ? err : new Error(String(err), { cause: err })),
+  );
+  // What `recv` still holds when the channel closes is delivered first; a
+  // channel whose `recv` never ends still ends the pipe, shortly after.
+  void channel.closed.then(() => {
+    if (control.ended) return;
+    const timer = setTimeout(() => control.end(new Error(closedMessage)), CLOSE_DRAIN_MS) as {
+      unref?: () => void;
+    };
+    timer.unref?.();
+  });
+  return control.pipe as ByteChannelMessageTarget;
 }
