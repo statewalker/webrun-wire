@@ -19,8 +19,9 @@ export interface IoSendOptions extends ListenPortOptions {
  * Client half of a full-duplex exchange over any `MessageTarget`.
  *
  * Concurrently reads one inbound stream from the peer and writes `output`
- * to it. Yields each value received from the peer. Completes once both
- * directions finish. Pairs with {@link ioHandle}.
+ * to it. Yields each value received from the peer. Completes once the
+ * peer's stream ends: the exchange is over then, and output the peer's
+ * handler did not read is not sent. Pairs with {@link ioHandle}.
  *
  * If the consumer breaks out of the `for await` (via `iter.return()` or
  * loop `break`), `ioSend` posts a `cancel-channel` message on the same
@@ -66,6 +67,14 @@ export async function* ioSend<T, U = T>(
       } finally {
         if (!inputEndedNormally) {
           postCancelChannel(port, channelName);
+          sendAbort.abort();
+        } else {
+          // The peer's stream ended, so its `ioHandle` takes nothing more:
+          // its handler has read our output to the end, or it stopped early,
+          // and then a current peer posts `cancel-channel` but an older one
+          // (0.10) does not and our next chunk call would wait for ever.
+          // Stop sending either way. Nothing is lost: what the handler read
+          // was already delivered, and `send`'s result is not surfaced.
           sendAbort.abort();
         }
         try {
