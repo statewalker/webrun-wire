@@ -120,12 +120,15 @@ export function messageTargetOverPeerJs(
   const onData = (data: unknown): void => control.deliver(data);
   const onClose = (): void =>
     control.end(new Error("webrun-streams-peerjs: the connection closed"));
+  // Ended as local: an error is not always followed by `close`, and the
+  // connection must still be released, or the peer never learns the pipe is gone.
   const onError = (err: unknown): void =>
     control.end(
       new Error(
         `webrun-streams-peerjs: the connection failed: ${(err as Error)?.message ?? String(err)}`,
         { cause: err },
       ),
+      true,
     );
   const control = newMessagePipe(
     {

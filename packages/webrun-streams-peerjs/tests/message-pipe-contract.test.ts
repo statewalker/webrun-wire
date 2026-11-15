@@ -51,3 +51,14 @@ function harness(options?: { maxFrameBytes?: number }): MessagePipeHarness {
 describeMessagePipe("messageTargetOverPeerJs", () => harness(), {
   withMaxFrameBytes: (maxFrameBytes) => harness({ maxFrameBytes }),
 });
+
+import { expect, it } from "vitest";
+
+it("(review of #181) an error not followed by close still releases the connection", () => {
+  const conn = new FakeConn();
+  // biome-ignore lint/suspicious/noExplicitAny: a structural fake
+  const { signal } = messageTargetOverPeerJs(conn as any);
+  conn.emit("error", new Error("negotiation failed"));
+  expect(signal.aborted).toBe(true);
+  expect(conn.open).toBe(false);
+});

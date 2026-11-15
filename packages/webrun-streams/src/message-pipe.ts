@@ -226,7 +226,7 @@ export function newMessagePipe(
       if (life.signal.aborted || transport.canSend?.() === false) return; // the signal says why
       if (maxFrameBytes != null && bytes.byteLength > maxFrameBytes) {
         const err = new RangeError(
-          `${name}: a ${bytes.byteLength}-byte message exceeds maxFrameBytes (${maxFrameBytes}); the transport would drop it silently`,
+          `${name}: a ${bytes.byteLength}-byte message exceeds maxFrameBytes (${maxFrameBytes})`,
         );
         finish(err, true);
         throw err;

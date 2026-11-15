@@ -81,3 +81,25 @@ function harness(options?: { maxFrameBytes?: number }): MessagePipeHarness {
 describeMessagePipe("messageTargetOverByteChannel", () => harness(), {
   withMaxFrameBytes: (maxFrameBytes) => harness({ maxFrameBytes }),
 });
+
+import { expect, it } from "vitest";
+
+it("(review of #181) a recv that throws still releases the channel", async () => {
+  let closed = 0;
+  const channel: ByteChannel = {
+    send: () => {},
+    recv: (async function* () {
+      yield* [];
+      throw new Error("recv broke");
+    })(),
+    closed: new Promise(() => {}),
+    close: () => {
+      closed++;
+    },
+  };
+  const { signal } = messageTargetOverByteChannel(channel);
+  await new Promise((r) => setTimeout(r, 10));
+  expect(signal.aborted).toBe(true);
+  expect((signal.reason as Error).message).toMatch(/recv broke/);
+  expect(closed).toBe(1);
+});

@@ -90,8 +90,9 @@ export function messageTargetOverByteChannel(
   })();
   reading.then(
     () => control.end(new Error(closedMessage)),
+    // A `recv` that fails leaves the channel open: end as local, which closes it.
     (err: unknown) =>
-      control.end(err instanceof Error ? err : new Error(String(err), { cause: err })),
+      control.end(err instanceof Error ? err : new Error(String(err), { cause: err }), true),
   );
   // What `recv` still holds when the channel closes is delivered first; a
   // channel whose `recv` never ends still ends the pipe, shortly after.
