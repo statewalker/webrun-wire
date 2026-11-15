@@ -876,7 +876,7 @@ Messaging primitives:
 | Export | Purpose |
 | --- | --- |
 | `callChannel(target, type, params, ...transfers)` / `handleChannelCalls(target, type, handler)` / `ChannelCallHandler` | One typed request/response over a `MessageTarget`; errors travel serialised. |
-| `newInvocationChannel(opts)` / `InvocationChannel`, `NewInvocationChannelOptions` | Numbered invocations over one target. `newInvokationChannel` is its deprecated, misspelt alias. |
+| `newInvocationChannel(opts)` / `InvocationChannel`, `NewInvocationChannelOptions` | Numbered invocations over one target. |
 | `sendStream(port, input, params?)` / `handleStreams(port, handler)` / `StreamHandler` | Stream-shaped calls, one `MessageChannel` each. No backpressure. |
 | `sendHttpRequest(port, request)` / `handleHttpRequests(port, handler)` | Deprecated. HTTP over the stream calls. |
 | `newRegistry(onError?)` / `Registry`, `NewRegistryResult`, `CleanupAction` | Cleanup registry. |

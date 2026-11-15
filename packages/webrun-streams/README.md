@@ -61,7 +61,7 @@ runs in browsers, workers and Node.
 | `map(it, fn)` | Map an `AsyncIterable<I>` through `fn: (item) => O \| Promise<O>`. |
 | `newAsyncGenerator(init, skipValues?)` | Bridge `next(value)` / `done(error?)` callbacks into an `AsyncGenerator<T>`. Both callbacks return `Promise<boolean>`. |
 | `sendIterator(send, iterable)` | Drain an iterable into `send({ done, value, error })` calls, ending with exactly one `{ done: true }` chunk. |
-| `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. `recieveIterator` is a deprecated alias. |
+| `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. |
 | `toReadableStream(iterator)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
 | `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as an `AsyncGenerator<Uint8Array>`. |
 | `normalizeToUint8Array(value)` | Coerce a `ByteLike` (`Uint8Array`, `ArrayBuffer`, `ArrayBufferView`, `Blob`, `string`) to `Uint8Array`. Synchronous, except a `Blob`, which returns a `Promise<Uint8Array>`. |
@@ -305,9 +305,8 @@ by `send` itself propagates out of `sendIterator`. `receiveIterator` treats a
 falsy `error` as no error, so a source that throws `0`, `""` or `null` ends the
 stream normally on the receiving side.
 
-The function was first exported as `recieveIterator`. That misspelt name stays
-exported as a `@deprecated` alias of `receiveIterator`, so existing importers
-keep working.
+The function was first exported as `recieveIterator`. That misspelt alias was
+dropped in 0.5 (#150); import `receiveIterator`.
 
 ### Why the `ReadableStream` adapters carry cancellation
 

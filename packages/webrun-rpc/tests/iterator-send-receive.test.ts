@@ -1,4 +1,4 @@
-import { recieveIterator, sendIterator } from "@statewalker/webrun-streams";
+import { receiveIterator, sendIterator } from "@statewalker/webrun-streams";
 import { describe, expect, it } from "vitest";
 import { callPort } from "../src/call-port.js";
 import { listenPort } from "../src/listen-port.js";
@@ -47,9 +47,9 @@ describe("sendIterator (transport-agnostic)", () => {
   });
 });
 
-describe("recieveIterator (transport-agnostic)", () => {
+describe("receiveIterator (transport-agnostic)", () => {
   it("reassembles an iterator from chunk callbacks", async () => {
-    const it = recieveIterator<number>((deliver) => {
+    const it = receiveIterator<number>((deliver) => {
       (async () => {
         for (const v of [1, 2, 3]) await deliver({ done: false, value: v });
         await deliver({ done: true });
@@ -62,7 +62,7 @@ describe("recieveIterator (transport-agnostic)", () => {
 
   it("rethrows the error forwarded in the done chunk", async () => {
     const err = new Error("propagated");
-    const it = recieveIterator<number>((deliver) => {
+    const it = receiveIterator<number>((deliver) => {
       (async () => {
         await deliver({ done: false, value: 1 });
         await deliver({ done: true, error: err });
