@@ -16,9 +16,18 @@ export type PortEnvelope =
   /**
    * Per-port flow control (`window`): the receiver has consumed `bytes` more.
    * The responder's zero-byte ack carries `caps`, the shared subset, when the
-   * opener listed some.
+   * opener listed some, and, when they share `"window"`, the `window` the
+   * responder holds the port to: the opener's, or the responder's own if that
+   * is smaller.
    */
-  | { type: "credit"; id: number; bytes: number; exact?: boolean; caps?: string[] }
+  | {
+      type: "credit";
+      id: number;
+      bytes: number;
+      exact?: boolean;
+      caps?: string[];
+      window?: number;
+    }
   /** Half-close (capability `"end"`): the sender's direction of the port has ended. */
   | { type: "end"; id: number }
   /** Fair framing (`frameSize`): one piece of an encoded `message` envelope. */
@@ -135,6 +144,11 @@ export interface PortMuxOptions {
    * a responder holds back from the `open` on when the `open` lists `caps`
    * and this mux has read a `credit` before, and an opener may presume the
    * ack (`presumeAck`).
+   *
+   * On a port the peer opens, it is also the most this end grants: where the
+   * opener lists the `"window"` capability, a larger window it asks for is
+   * clamped to this one, and the ack says so; the opener takes it. An opener
+   * that does not list it (an earlier version) keeps the window it asked for.
    */
   window?: number;
   /**
@@ -162,8 +176,11 @@ export interface PortMuxOptions {
    * `pipeline` (not `end`, which the ack settles before it is needed); it
    * posts its answer to the ack right behind its `open`, so a responder that
    * waits for that answer (0.10) pipelines from the start too. The
-   * window is the opener's own, so the ack can contradict only the sizing or
-   * the capabilities: then no later port on this mux presumes, and the port
+   * window is the opener's own, or the one an earlier ack clamped it to; a
+   * port that sent more than a clamped window before its ack carries on, and
+   * fails only if the responder refused what passed (its close), while later
+   * ports ask for the clamped window. Otherwise the ack can
+   * contradict only the sizing or the capabilities: then no later port on this mux presumes, and the port
    * fails (closes with reason `"protocol"`) if it already posted anything,
    * or takes the ack as it is if not. A refused port (`maxPorts`, `onPort`)
    * closes as before; until the refusal arrives it may have sent up to one

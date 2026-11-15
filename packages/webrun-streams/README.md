@@ -62,7 +62,7 @@ runs in browsers, workers and Node.
 | `newMessagePipe(transport, options)` | One pipe of byte messages over a transport, for `overPipe`: owns the listener set, delivery past faulty listeners, the pipe's life (`closeSignal`), the byte check on `postMessage`, the frame ceiling (`maxFrameBytes`), `bufferedAmount` / `whenDrained` and `close()`. The transport supplies `send` and, optionally, `canSend`, `bufferedAmount`, `isDrained` / `whenDrained`, `flush` and `close`, and calls `deliver(data)` / `end(reason)`. Every `webrun-streams-*` adapter is built on it; `describeMessagePipe` in `@statewalker/webrun-streams-conformance` is its contract suite. `viewBytes(data)` and `DEFAULT_DRAIN_LOW_WATER` come with it. |
 | `newAsyncGenerator(init, skipValues?)` | Bridge `next(value)` / `done(error?)` callbacks into an `AsyncGenerator<T>`. Both callbacks return `Promise<boolean>`. |
 | `sendIterator(send, iterable)` | Drain an iterable into `send({ done, value, error })` calls, ending with exactly one `{ done: true }` chunk. |
-| `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. `recieveIterator` is a deprecated alias. |
+| `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. |
 | `toReadableStream(iterator)` | Wrap an `AsyncIterator<Uint8Array>` in a `ReadableStream<Uint8Array>`. |
 | `fromReadableStream(stream)` | Iterate a `ReadableStream<Uint8Array>` as an `AsyncGenerator<Uint8Array>`. |
 | `normalizeToUint8Array(value)` | Coerce a `ByteLike` (`Uint8Array`, `ArrayBuffer`, `ArrayBufferView`, `Blob`, `string`) to `Uint8Array`. Synchronous, except a `Blob`, which returns a `Promise<Uint8Array>`. |
@@ -306,9 +306,8 @@ by `send` itself propagates out of `sendIterator`. `receiveIterator` treats a
 falsy `error` as no error, so a source that throws `0`, `""` or `null` ends the
 stream normally on the receiving side.
 
-The function was first exported as `recieveIterator`. That misspelt name stays
-exported as a `@deprecated` alias of `receiveIterator`, so existing importers
-keep working.
+The function was first exported as `recieveIterator`. That misspelt alias was
+dropped in 0.5 (#150); import `receiveIterator`.
 
 ### Why the `ReadableStream` adapters carry cancellation
 

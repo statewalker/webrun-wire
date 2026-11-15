@@ -165,7 +165,7 @@ describe("duplexOverPort — data path", () => {
 
 describe("duplexOverPort — abort ordering (fix round 1 regression)", () => {
   // `receiveChunks` used to deliver an abort to the consumer only via a
-  // `deliver` callback that `recieveIterator`'s installer assigns lazily, on
+  // `deliver` callback that `receiveIterator`'s installer assigns lazily, on
   // the consumer's first `.next()`. If the abort fired before that first
   // pull, `deliver` was still `undefined`, the delivery was a silent no-op,
   // and the consumer hung forever once it did start iterating — with no
@@ -192,7 +192,7 @@ describe("duplexOverPort — abort ordering (fix round 1 regression)", () => {
     let settledError: unknown;
 
     // Never touches `input` until the test releases the gate below, so the
-    // consumer's first `.next()` — and therefore `recieveIterator`'s
+    // consumer's first `.next()` — and therefore `receiveIterator`'s
     // installer — cannot have run yet when the abort notice is posted.
     const gatedDrain: Duplex = async function* gatedDrain(input) {
       await gate;
@@ -261,7 +261,7 @@ describe("duplexOverPort — abort ordering (fix round 1 regression)", () => {
     // chain (serveDuplexOverPort -> sendChunks -> sendIterator -> the
     // handler's generator -> `input`'s `for await`) runs synchronously
     // down to `input`'s first `.next()` before `serveDuplexOverPort`
-    // returns, so `recieveIterator`'s installer — and therefore `deliver`
+    // returns, so `receiveIterator`'s installer — and therefore `deliver`
     // — is already wired up by the time this function returns, well
     // before the abort notice below is even posted.
     const drain: Duplex = async function* drain(input) {

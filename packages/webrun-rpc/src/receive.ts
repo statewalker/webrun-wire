@@ -1,11 +1,11 @@
-import { type IteratorChunk, recieveIterator } from "@statewalker/webrun-streams";
+import { type IteratorChunk, receiveIterator } from "@statewalker/webrun-streams";
 import { type ListenPortOptions, listenPort } from "./listen-port.js";
 import type { MessageTarget } from "./message-target.js";
 
 export interface ReceiveOptions extends ListenPortOptions {
   /**
    * Optional cancel signal. When fired, the currently-active
-   * `recieveIterator` is force-closed (its producer is signalled `done`
+   * `receiveIterator` is force-closed (its producer is signalled `done`
    * with an `AbortError`) so any pending `.next()` resolves immediately
    * and the consumer's iteration loop can unwind. Required to make
    * consumer-side `iter.return()` propagate through `callBidi`/`yield*`
@@ -24,13 +24,13 @@ export interface ReceiveOptions extends ListenPortOptions {
  *
  * When the outer for-await is interrupted (`break`, `return`, throw), the
  * `finally` here both removes the underlying `listenPort` and closes the
- * most recently yielded `recieveIterator`. The latter is required because
+ * most recently yielded `receiveIterator`. The latter is required because
  * a `listenPort` handler invocation that's already in flight (awaiting
  * `deliver(chunk)`) would otherwise hang forever — `iterator.return()`
  * triggers `drainQueue` which resolves all pending producer Promises.
  *
  * If `options.signal` is provided and fires while the consumer is awaiting
- * a chunk, the active `recieveIterator` is force-delivered an end-of-stream
+ * a chunk, the active `receiveIterator` is force-delivered an end-of-stream
  * marker so the consumer wakes up immediately rather than waiting for the
  * next inbound chunk (or `callPort` timeout).
  */
@@ -44,7 +44,7 @@ export async function* receive<T>(
   let currentIter: AsyncGenerator<T> | undefined;
   let forceClose: (() => void) | undefined;
   let finished = false;
-  // `recieveIterator`'s installer runs lazily, on the consumer's first
+  // `receiveIterator`'s installer runs lazily, on the consumer's first
   // `.next()`. A chunk that arrives before that must wait for it: replying
   // first would acknowledge a chunk nobody took (the same race
   // `duplexOverPort` closes with its own `ready()`).
@@ -83,7 +83,7 @@ export async function* receive<T>(
 
   try {
     while (true) {
-      currentIter = recieveIterator<T>((deliver) => {
+      currentIter = receiveIterator<T>((deliver) => {
         forceClose = () => {
           void deliver({ done: true });
         };
@@ -114,9 +114,3 @@ export async function* receive<T>(
     }
   }
 }
-
-/** @deprecated Misspelt name kept for compatibility; use {@link ReceiveOptions}. */
-export type RecieveOptions = ReceiveOptions;
-
-/** @deprecated Misspelt name kept for compatibility; use {@link receive}. */
-export const recieve = receive;

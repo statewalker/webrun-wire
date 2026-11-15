@@ -2,7 +2,7 @@ import {
   type ChunkReceiver,
   type Duplex,
   deserializeError,
-  recieveIterator,
+  receiveIterator,
   type SerializedError,
   sendIterator,
   serializeError,
@@ -462,7 +462,7 @@ function installStreamTimeout(
  * The receiving half of one direction.
  *
  * The `listenPort` listener is installed **eagerly**, not lazily inside
- * `recieveIterator`'s installer, because a handler that never drains its input
+ * `receiveIterator`'s installer, because a handler that never drains its input
  * would otherwise leave the peer's chunk calls with nobody to answer them. If
  * the local consumer has not started iterating, an inbound chunk waits for it —
  * which is the correct backpressure, and different from having no listener.
@@ -500,7 +500,7 @@ function receiveChunks(
     resolveOver = resolve;
   });
   // Set by `onAbort` the instant the signal fires, independent of whether a
-  // consumer has started iterating yet. `recieveIterator`'s installer below
+  // consumer has started iterating yet. `receiveIterator`'s installer below
   // runs lazily, on the consumer's first `.next()` — if abort fires first,
   // `deliver` is still undefined when `onAbort` runs, so its delivery below
   // is a no-op. Recording the reason here lets the installer catch up and
@@ -521,7 +521,7 @@ function receiveChunks(
     poison = new Error(message);
     // Route through the existing abort machinery instead of duplicating
     // it by hand. `onAbort` below (a) sets `aborted`/`abortReason`, so
-    // `recieveIterator`'s installer replays the error even if poison
+    // `receiveIterator`'s installer replays the error even if poison
     // fires before the consumer's first `.next()` — otherwise `deliver`
     // is still undefined here and the local stream hangs forever; and
     // (b) since `controller.signal` is the very signal `sendChunks`
@@ -725,7 +725,7 @@ function receiveChunks(
   if (controller.signal.aborted) onAbort();
   else controller.signal.addEventListener("abort", onAbort, { once: true });
 
-  const stream = recieveIterator<Uint8Array>((d) => {
+  const stream = receiveIterator<Uint8Array>((d) => {
     if (aborted) {
       // The signal already fired before this installer ran. `onAbort`'s
       // delivery above was a no-op because `deliver` didn't exist yet — settle
