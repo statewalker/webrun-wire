@@ -38,7 +38,12 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  * speaks. `end` only over a codec that reads it (`PortCodec.halfClose`).
  */
 function ownCaps(codec: PortCodec): readonly PortCap[] {
-  return codec.halfClose ? ["pipeline", "end"] : ["pipeline"];
+  return codec.halfClose ? ["pipeline", "end", "window"] : ["pipeline", "window"];
+}
+
+/** A window as the wire may carry it: a positive safe integer, else `undefined`. */
+function validWindow(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 /**
@@ -276,6 +281,12 @@ export function multiplexPort(
    */
   let presumable: { exact: boolean } | undefined =
     presumeAck === "always" ? { exact: exactCodec } : undefined;
+  /**
+   * The window this peer's responder held an earlier port to, when it was
+   * less than this end's own (`"window"`): a port this mux opens later asks
+   * for no more, so a presuming one never sends past what the peer allows.
+   */
+  let learnedWindow: number | undefined;
   let presumeOff = presumeAck === "never";
 
   const post = (envelope: PortEnvelope, transfer?: Transferable[]): void => {
@@ -621,6 +632,19 @@ export function multiplexPort(
     c: Credit,
   ): boolean => {
     const listed = sharedCaps(caps, ack.caps);
+    // THE RESPONDER BOUNDS THE WINDOW (`"window"`): its ack names the window
+    // it holds the port to, and this end takes it. An ack can only shrink the
+    // window this end asked for, never widen it.
+    const clamped = listed?.has("window") ? validWindow(ack.window) : undefined;
+    if (clamped != null && clamped < c.window) {
+      // A presuming port may have sent past the smaller window before the ack
+      // came. Only the responder knows whether it refused any of it (it
+      // accepts up to its window plus one message, and one message begun
+      // with nothing held): if it did, it closes the port, and that close is
+      // what fails it here. Later ports ask for the window learned here.
+      learnedWindow = Math.min(learnedWindow ?? clamped, clamped);
+      c.window = clamped;
+    }
     const presumed = c.presumed;
     if (presumed) {
       c.presumed = undefined;
@@ -694,11 +718,20 @@ export function multiplexPort(
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      // The opener asked for a window and is known to speak it.
+      // The opener asked for a window and is known to speak it. AN OPENER
+      // THAT LISTS `"window"` IS HELD TO THIS END'S OWN, WHEN THAT IS SMALLER:
+      // its ack says so, and the opener takes it. One that does not list it
+      // (any earlier version) would keep counting against its own and fail
+      // this end's checks, so it keeps the window it asked for, as before.
+      const listed = sharedCaps(caps, envelope.caps);
+      const asked = validWindow(envelope.window);
+      const own = validWindow(window);
+      const portWindow =
+        asked != null && own != null && listed?.has("window") ? Math.min(asked, own) : asked;
       const handle = attach(
         envelope.id,
         envelope.meta,
-        envelope.window,
+        portWindow,
         false,
         envelope.exact === true && exactCodec,
       );
@@ -722,7 +755,6 @@ export function multiplexPort(
       // opener's first grant arrives; here, from the second port on, on the
       // first chunk.
       const credit = open.get(envelope.id)?.credit;
-      const listed = sharedCaps(caps, envelope.caps);
       if (credit) {
         const ack: PortEnvelope = credit.exact
           ? { type: "credit", id: envelope.id, bytes: 0, exact: true }
@@ -731,7 +763,15 @@ export function multiplexPort(
           credit.caps = listed;
           if (creditRead) credit.enforced = true;
         }
-        post(listed ? { ...ack, caps: [...listed] } : ack);
+        post(
+          listed
+            ? {
+                ...ack,
+                caps: [...listed],
+                ...(listed.has("window") ? { window: credit.window } : {}),
+              }
+            : ack,
+        );
       }
       let accepted = false;
       if (onPort) {
@@ -980,12 +1020,15 @@ export function multiplexPort(
       const id = nextId;
       nextId += 2;
       const presume = presumeOff ? undefined : presumable;
-      const handle = attach(id, meta, window, true, exactCodec, presume);
+      // A peer that held an earlier port to a smaller window holds this one to
+      // it too: ask for no more, so nothing sent before the ack passes it.
+      const asked = window && learnedWindow != null ? Math.min(window, learnedWindow) : window;
+      const handle = attach(id, meta, asked, true, exactCodec, presume);
       post(
-        window
+        asked
           ? exactCodec
-            ? { type: "open", id, meta, window, exact: true, caps: [...caps] }
-            : { type: "open", id, meta, window, caps: [...caps] }
+            ? { type: "open", id, meta, window: asked, exact: true, caps: [...caps] }
+            : { type: "open", id, meta, window: asked, caps: [...caps] }
           : { type: "open", id, meta },
       );
       // Presumed: the answer to the ack goes now, right behind the `open`,
