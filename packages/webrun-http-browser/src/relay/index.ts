@@ -23,6 +23,7 @@ import {
   type HttpLinkOptions,
   serveHttpLink,
 } from "../link/http-link.js";
+import { WS_CONNECT_CALL } from "../sw/protocol.js";
 import {
   createWebSocketClass,
   type PortWebSocketClass,
@@ -315,8 +316,13 @@ export interface RelayWindowHandlerOptions {
   canConnect?: (origin: string) => boolean | Promise<boolean>;
 }
 
-/** The calls the relay iframe stamps with its embedder's origin. */
-const STAMPED_CALLS = new Set(["REGISTER", "UNREGISTER", "CONNECT"]);
+/**
+ * The calls the relay iframe stamps with its embedder's origin. The socket
+ * call too: the worker accepts it from any page of the relay origin, and the
+ * iframe is one, so without the stamp an embedder could open a socket to a
+ * service `canConnect` refuses it.
+ */
+const STAMPED_CALLS = new Set(["REGISTER", "UNREGISTER", "CONNECT", WS_CONNECT_CALL]);
 
 /**
  * `data` with `params.origin` set to `origin` when it is a call the relay
@@ -346,8 +352,8 @@ function answerWithError(port: MessagePort, error: unknown): void {
  * EVERY EMBEDDER REACHES THE WORKER THROUGH ITS OWN RELAY IFRAME, so to the
  * worker they all look alike: a client at `relay.html`. The iframe is the one
  * place that knows who embeds it (`ev.origin`, which the parent cannot forge),
- * so it stamps that origin into each `REGISTER`, `UNREGISTER` and `CONNECT` it
- * bridges, as `params.origin`. The worker hands it to `canRegister` and
+ * so it stamps that origin into each `REGISTER`, `UNREGISTER`, `CONNECT` and
+ * socket call it bridges, as `params.origin`. The worker hands it to `canRegister` and
  * `canConnect` (`RelayServiceWorkerOptions`). `allowedOrigins` and
  * `canConnect` here refuse an embedder outright, before the worker starts.
  *

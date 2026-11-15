@@ -316,6 +316,20 @@ export function startRelayServiceWorker(
   // need this; it is here so any page of this origin can ask for control.
   register(handleClaimRequests(self));
 
+  /** `canConnect`'s verdict on a call for `key` from `event.source`; everyone without it. */
+  async function mayConnect(event: MessageEvent, key: string, origin?: string): Promise<boolean> {
+    if (options.canConnect == null) return true;
+    const source = event.source as Client | null;
+    if (source == null) return false;
+    const registered = await clientsRegistry.getMount(key);
+    return await options.canConnect({
+      key,
+      origin,
+      registeredOrigin: registered?.origin,
+      client: source,
+    });
+  }
+
   register(
     handleChannelCalls(self, "REGISTER", async (event, data) => {
       const source = event.source as Client | null;
@@ -380,22 +394,10 @@ export function startRelayServiceWorker(
   register(
     handleChannelCalls(self, "CONNECT", async (event, data, port: MessagePort) => {
       const { key, origin } = data as { key: string; origin?: string };
-      if (options.canConnect != null) {
-        const source = event.source as Client | null;
-        const registered = await clientsRegistry.getMount(key);
-        const allowed =
-          source != null &&
-          (await options.canConnect({
-            key,
-            origin,
-            registeredOrigin: registered?.origin,
-            client: source,
-          }));
-        if (!allowed) {
-          // The transferred port would otherwise stay open on this side.
-          port?.close();
-          throw new Error(`this caller may not connect to "${key}"`);
-        }
+      if (!(await mayConnect(event, key, origin))) {
+        // The transferred port would otherwise stay open on this side.
+        port?.close();
+        throw new Error(`this caller may not connect to "${key}"`);
       }
       const client = await clientsRegistry.getClient(key);
       if (!client) throw new Error(`Target client was not found. Target key: "${key}".`);
@@ -413,13 +415,23 @@ export function startRelayServiceWorker(
       if (!source?.url || new URL(source.url).origin !== self.location.origin) {
         throw new Error("Only this origin's pages may open sockets");
       }
-      const { url, protocols = [] } = data as { url: string; protocols?: string[] };
+      const {
+        url,
+        protocols = [],
+        origin,
+      } = data as { url: string; protocols?: string[]; origin?: string };
       const httpUrl = new URL(url);
       if (httpUrl.protocol === "ws:") httpUrl.protocol = "http:";
       else if (httpUrl.protocol === "wss:") httpUrl.protocol = "https:";
       await restored.catch(() => {});
       const key = resolveServiceKey(httpUrl, mounts, self.location.origin);
       if (key == null) throw new Error(`No service serves ${url}`);
+      // A STAMPED CALL CAME FROM AN EMBEDDER, through its relay iframe (a page
+      // of this origin, so the check above passes it): vet it as a CONNECT.
+      // An unstamped one is a page of the relay origin itself, as before.
+      if (origin != null && !(await mayConnect(event, key, origin))) {
+        throw new Error(`this caller may not connect to "${key}"`);
+      }
       const client = await clientsRegistry.getClient(key);
       if (!client) throw new Error(`No service serves ${url}`);
       const channel = new MessageChannel();

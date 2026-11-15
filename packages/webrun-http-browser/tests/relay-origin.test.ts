@@ -14,9 +14,10 @@
  * `canConnect`, which can refuse a CONNECT before it reaches the service.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { handleChannelCalls } from "../src/core/data-calls.js";
+import { handleChannelCalls, withTransfer } from "../src/core/data-calls.js";
 import { getRelayWindowMessageHandler } from "../src/relay/index.js";
 import { onlyRegistrantOrigin, startRelayServiceWorker } from "../src/relay/index-sw.js";
+import { WS_CONNECT_CALL } from "../src/sw/protocol.js";
 
 const { idbStore } = vi.hoisted(() => ({ idbStore: new Map<string, unknown>() }));
 vi.mock("idb-keyval", () => ({
@@ -374,6 +375,79 @@ describe("the relay worker vets embedders by the stamped origin", () => {
       stop();
       stopService();
     }
+  });
+});
+
+describe("a socket asked for through the relay iframe (review of #177)", () => {
+  /** A live service that answers a socket CONNECT with a fresh port. */
+  function socketService(farPort: MessagePort) {
+    const served = vi.fn();
+    const stop = handleChannelCalls(farPort, "CONNECT", async () => {
+      served();
+      const { port1 } = new MessageChannel();
+      return withTransfer({ port: port1, protocol: "" }, [port1]);
+    });
+    return { served, stop };
+  }
+
+  it("is vetted by canConnect like a CONNECT, when it carries an embedder's stamp", async () => {
+    const { self, clients } = makeSelf();
+    const { served, stop: stopService } = socketService(clients.addLive("A"));
+    const stop = startRelayServiceWorker(self, { canConnect: onlyRegistrantOrigin });
+    try {
+      await call(self, "A", "REGISTER", { key: "K", origin: "https://owner.example" });
+      const refused = await call(self, "A", WS_CONNECT_CALL, {
+        url: "https://relay.example/~K/socket",
+        origin: "https://evil.example",
+      });
+      expect(refused.error?.message).toMatch(/may not connect to "K"/);
+      expect(served).not.toHaveBeenCalled();
+
+      const accepted = await call(self, "A", WS_CONNECT_CALL, {
+        url: "https://relay.example/~K/socket",
+        origin: "https://owner.example",
+      });
+      expect(accepted.error).toBeUndefined();
+      expect(served).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+      stopService();
+    }
+  });
+
+  it("from a page of the relay origin itself (no stamp) still opens, as before", async () => {
+    const { self, clients } = makeSelf();
+    const { served, stop: stopService } = socketService(clients.addLive("A"));
+    const stop = startRelayServiceWorker(self, { canConnect: onlyRegistrantOrigin });
+    try {
+      await call(self, "A", "REGISTER", { key: "K", origin: "https://owner.example" });
+      const accepted = await call(self, "A", WS_CONNECT_CALL, {
+        url: "https://relay.example/~K/socket",
+      });
+      expect(accepted.error).toBeUndefined();
+      expect(served).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+      stopService();
+    }
+  });
+
+  it("the relay iframe stamps it too", async () => {
+    const { container, worker } = fakeServiceWorkerContainer();
+    vi.stubGlobal("window", { parent: parentWindow });
+    vi.stubGlobal("navigator", { serviceWorker: container });
+    const handler = getRelayWindowMessageHandler({ swUrl: "https://relay.example/sw.js" });
+    const main = new MessageChannel();
+    await handler(connectEvent("https://embedder.example", [main.port1]));
+    await calledTimes(container.register as ReturnType<typeof vi.fn>, 1);
+    await new Promise((r) => setTimeout(r, 5));
+    main.port2.postMessage({ type: WS_CONNECT_CALL, params: { url: "x" } });
+    await calledTimes(worker.postMessage, 1);
+    expect(worker.postMessage.mock.calls[0]?.[0]).toEqual({
+      type: WS_CONNECT_CALL,
+      params: { url: "x", origin: "https://embedder.example" },
+    });
+    main.port2.close();
   });
 });
 
