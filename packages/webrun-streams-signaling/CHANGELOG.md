@@ -1,5 +1,18 @@
 # @statewalker/webrun-streams-signaling
 
+## 0.5.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies [d9dc580]
+  - @statewalker/webrun-streams@0.6.0
+
 ## 0.4.0
 
 ### Minor Changes
