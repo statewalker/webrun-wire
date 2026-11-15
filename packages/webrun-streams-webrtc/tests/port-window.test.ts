@@ -99,4 +99,8 @@ if (isBrowser) {
   };
 
   describeDuplexAdapter("webrun-streams-webrtc, native ports with a window", makeWindowedPair);
+} else {
+  describe.skip("webrtcPortMux windows (browser-only)", () => {
+    it("skipped — run via pnpm test:browser", () => {});
+  });
 }
