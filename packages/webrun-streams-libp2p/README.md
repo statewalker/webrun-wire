@@ -31,6 +31,13 @@ What the adapter adds on top of a raw stream:
   producer never runs more than about a window ahead of a consumer that stopped
   reading, whatever libp2p buffers (statewalker/webrun-wire#153). It is the
   same stack every other `webrun-rpc` transport runs.
+- **A bounded send-ahead, and a stall bound** (statewalker/webrun-wire#195). A
+  sender runs at most min(the peer's window, its own window) ahead, whatever
+  window the peer announces (up to 4 GiB), and writes nothing while the stream
+  needs to drain, so a peer that stops reading at the transport holds about one
+  frame of this end's memory. A write that has waited for drain longer than
+  `drainTimeoutMs` (default 5 minutes) resets the stream; a quiet call (an event
+  stream between events) is never timed out.
 - **Error fidelity.** A handler's `Error` reaches the caller with `message`,
   `stack` and custom fields.
 - **Cancellation** in both directions: a caller's `.return()` ends the call at
@@ -70,9 +77,9 @@ runs (Node or browser).
 | `duplexOverStream(stream, input, options?)` | **Deprecated.** The deprecated protocol's primitive: runs one call over one libp2p `Stream`. Removed in the next release. |
 | `PeerGoneError` | What a call fails with when its stream ended before the call finished: the peer died, the connection dropped, or the stream was reset. `cause` is libp2p's close error, if any. |
 | `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
-| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`; what `connect`/`serve` run on. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits, `window`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. See "MessagePorts over libp2p" below. |
+| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`; what `connect`/`serve` run on. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits, `window`, `drainTimeoutMs` (default `DEFAULT_DRAIN_TIMEOUT_MS`). The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. See "MessagePorts over libp2p" below. |
 | `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
-| `DEFAULT_DRAIN_TIMEOUT_MS` | **Deprecated** (the deprecated protocol only). `300_000` (5 minutes). |
+| `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes): how long a write waits for a stream to drain before the stream is reset (`drainTimeoutMs`). |
 | `DEFAULT_CLOSE_TIMEOUT_MS` | **Deprecated** (the deprecated protocol only). `300_000` (5 minutes), the bound on a graceful close. |
 | `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
 | `DEFAULT_MAX_FRAME_BYTES` | `67_108_864` (64 MiB), the default cap on one inbound frame (`maxFrameBytes`). |
@@ -85,19 +92,21 @@ runs (Node or browser).
 | `node` | `Libp2p` | required | The local node. Only `dialProtocol` is required; `getConnections` is used when present. |
 | `peer` | `PeerId \| Multiaddr` | required | Who to dial. |
 | `protocol` | `string` | `DEFAULT_PROTOCOL` | The protocol id both ends are configured with. Calls negotiate `portProtocolOf(protocol)`; `protocol` itself is the deprecated fallback. |
-| `window` | `number` | `DEFAULT_WINDOW` (4 MiB) | The port window in bytes, at least 64 KiB: the most this end holds of a response delivered and not yet read. See "Sizing the window". |
+| `window` | `number` | `DEFAULT_WINDOW` (4 MiB) | The port window in bytes, at least 64 KiB: the most this end holds of a response delivered and not yet read, and the most it sends ahead of the server (min of both ends' windows). See "Sizing the window". |
 | `timeout` | `number` | none | Per-call inactivity timeout in ms, reset by any chunk in either direction. Unset, a slow consumer is throttled, never failed. |
 | `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
 | `maxOutboundStreams` | `number` | libp2p's (64) | Passed to `dialProtocol`. |
 | `runOnLimitedConnection` | `boolean` | unset | Passed to `dialProtocol`. Allows relayed or otherwise limited connections. |
-| `drainTimeoutMs`, `readHighWaterBytes` | `number` | 5 min, 64 KiB | **Deprecated**: the deprecated protocol only (an older server). |
+| `drainTimeoutMs` | `number` | `DEFAULT_DRAIN_TIMEOUT_MS` (5 min) | How long a write may wait for the stream to drain before the stream is reset and the call fails. Only a write blocked on drain counts. Both protocols. |
+| `readHighWaterBytes` | `number` | 64 KiB | **Deprecated**: the deprecated protocol only (an older server). |
 
 `ServeLibp2pParams`: `node`, `protocol`, `window`, `timeout`, `maxFrameBytes`,
 `maxOutboundStreams` and `runOnLimitedConnection` as above (passed to
 `node.handle` for each served protocol), plus `maxInboundStreams` (libp2p
-default 32), and the deprecated `drainTimeoutMs` and `readHighWaterBytes`
-(older callers only). The server's `window` bounds what a call sends ahead of
-the handler.
+default 32), `drainTimeoutMs` as above (a stalled caller is dropped after it),
+and the deprecated `readHighWaterBytes` (older callers only). The server's
+`window` bounds what a call sends ahead of the handler, and what a response
+runs ahead of its caller, whatever window the caller announces.
 
 `ConnectionContext`: `{ remotePeer: PeerId }`.
 `ServeConnectionsHandler`: `(context: ConnectionContext) => Duplex`.
@@ -242,9 +251,11 @@ Behaviour that differs from the deprecated protocol:
   call ends: input the caller has not sent yet is abandoned, and a handler
   still reading its input is told the caller abandoned the stream. The
   deprecated protocol kept sending until the input ended too.
-- **No drain timeout.** A peer that stops reading holds at most a window per
-  call; set `timeout` to fail idle calls. `drainTimeoutMs` and
-  `readHighWaterBytes` apply to the deprecated protocol only.
+- **The drain timeout counts only a blocked write.** A peer that stops
+  consuming holds at most a window per call (its credit stops); one that stops
+  reading at the transport holds about one frame, and is dropped after
+  `drainTimeoutMs`. Set `timeout` to fail idle calls. `readHighWaterBytes`
+  applies to the deprecated protocol only.
 - **Chunks.** A response arrives in chunks of up to 256 KiB (64 KiB before).
 - **Failures on the serving side are not logged**: they reach the handler
   (its input throws) and the caller.

@@ -39,6 +39,13 @@ export interface BytePipeTarget {
   close(): Promise<void>;
   readonly bufferedAmount: number;
   whenDrained(): Promise<void>;
+  /**
+   * Whether the transport holds as much as it should and needs to drain
+   * before it takes more; `whenDrained()` resolves once it does not. A
+   * windowed port sends no data frame while it is `true` (statewalker/webrun-wire#195).
+   * Left out (an older pipe): the port does not wait on the transport.
+   */
+  readonly needsDrain?: boolean;
   /** Aborts when the channel is over. */
   readonly closeSignal: AbortSignal;
 }
@@ -127,8 +134,19 @@ export interface NativePortMuxOptions<Info> {
    * codecs must not produce frames that start with byte 0xC1 for an older
    * peer (msgpack and UTF-8 text never do); between two windowed ends such a
    * frame goes escaped.
+   *
+   * A windowed port runs at most min(the peer's window, this window) ahead of
+   * the peer, and sends nothing while its channel's pipe says it `needsDrain`
+   * (statewalker/webrun-wire#195).
    */
   window?: number;
+  /**
+   * How long, in ms, a write on a windowed port may wait for its channel to
+   * drain before the port fails and its channel is broken off (`fail`): a peer
+   * that stops reading at the transport. Only a write blocked on drain counts:
+   * a quiet port is never timed out. Unset: no bound.
+   */
+  drainTimeoutMs?: number;
 }
 
 /** What `newNativePortMux` hands back: the mux, and where the transport reports inbound channels. */
@@ -151,6 +169,12 @@ export function newNativePortMux<I = unknown>(
 ): NativePortMuxControl<I> {
   const { name, codec, maxMessageSize, onPort, connectionSignal } = options;
   checkPortWindow(name, options.window);
+  const { drainTimeoutMs } = options;
+  if (drainTimeoutMs !== undefined && !(drainTimeoutMs > 0)) {
+    throw new RangeError(
+      `${name}: \`drainTimeoutMs\` must be a positive number, got ${drainTimeoutMs}`,
+    );
+  }
   const live = new Set<NativePort>();
   let closed = false;
   /** Aborts on `close()`: a channel still opening is given up, and its `openPort` rejects. */
@@ -299,6 +323,19 @@ export function newNativePortMux<I = unknown>(
         fail: (reason) => {
           if (!local.signal.aborted) local.abort(reason);
         },
+        // The transport's backpressure, where the pipe tells it (#195).
+        ...(pipe.needsDrain !== undefined
+          ? {
+              transport: {
+                needsDrain: () => pipe.needsDrain === true,
+                whenDrained: () => pipe.whenDrained(),
+              },
+            }
+          : {}),
+        ...(drainTimeoutMs !== undefined ? { drainTimeoutMs } : {}),
+        // A peer that stopped reading: the channel is broken off, so what it
+        // holds is released and the peer hears it (a libp2p reset).
+        stall: (reason) => fail(new Error(`${name}: ${reason.message}`)),
       });
       Object.defineProperty(port, PORT_FLOW, { value: win.flow });
     }

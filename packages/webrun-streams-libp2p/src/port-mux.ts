@@ -13,6 +13,7 @@ import {
   newNativePortMux,
   type ValueCodec,
 } from "@statewalker/webrun-streams";
+import { DEFAULT_DRAIN_TIMEOUT_MS } from "./duplex-over-stream.js";
 import { messageTargetOverStream } from "./message-target-over-stream.js";
 import { openGatedStream } from "./stream-gate.js";
 
@@ -89,8 +90,20 @@ export interface Libp2pPortMuxOptions {
    * negotiates `protocol` and runs as before. 1-4 MiB is a reasonable range:
    * the most one call moves per round trip, and the most a producer runs
    * ahead of a consumer that stopped reading.
+   *
+   * A windowed port never runs further ahead than min(the peer's window,
+   * this window), and sends nothing while its stream needs to drain
+   * (statewalker/webrun-wire#195).
    */
   window?: number;
+  /**
+   * How long, in ms, a write on a windowed port may wait for its stream to
+   * drain (a peer that stopped reading at the transport) before the stream
+   * is reset and the port fails. Only a write blocked on drain counts: a
+   * quiet call (an event stream between events) is never timed out. Default
+   * {@link DEFAULT_DRAIN_TIMEOUT_MS} (5 minutes).
+   */
+  drainTimeoutMs?: number;
 }
 
 /** A `webrun-rpc` `PortMux` by shape; the port mux imports nothing from it. */
@@ -138,6 +151,7 @@ export async function openLibp2pPortMux(
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
   // Checked by the shared lifecycle, before the protocols are handled.
   const { window } = options;
+  const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
   const windowProtocol = windowProtocolOf(protocol);
 
   /**
@@ -164,6 +178,7 @@ export async function openLibp2pPortMux(
     maxMessageSize,
     onPort,
     window,
+    drainTimeoutMs,
     async open(signal) {
       if (!peer) throw new Error("webrun-streams-libp2p: openPort needs `peer`");
       const protocols = window !== undefined ? [windowProtocol, protocol] : protocol;

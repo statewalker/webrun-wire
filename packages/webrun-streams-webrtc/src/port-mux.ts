@@ -62,9 +62,23 @@ export interface WebRtcPortMuxOptions {
    * port runs as before. Keep it well under the browser's data channel send
    * buffer (16 MiB in Chromium, which closes a channel that overflows it):
    * 1-4 MiB is a reasonable range.
+   *
+   * A windowed port never runs further ahead than min(the peer's window,
+   * this window), and sends nothing while its channel holds more than
+   * {@link PORT_DRAIN_LOW_WATER} (statewalker/webrun-wire#195).
    */
   window?: number;
+  /**
+   * How long, in ms, a write on a windowed port may wait for its data channel
+   * to drain (a peer that stopped reading) before the channel is closed and
+   * the port fails. Only a write blocked on drain counts: a quiet port is
+   * never timed out. Default {@link DEFAULT_PORT_DRAIN_TIMEOUT_MS} (5 minutes).
+   */
+  drainTimeoutMs?: number;
 }
+
+/** 5 minutes: how long a write on a windowed port waits for its channel to drain by default. */
+export const DEFAULT_PORT_DRAIN_TIMEOUT_MS = 300_000;
 
 /** A `webrun-rpc` `PortMux` by shape; this package imports nothing from it. */
 export interface WebRtcPortMux {
@@ -179,6 +193,7 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
     onPort: onPort ? (port) => onPort(port) : undefined,
     connectionSignal: connectionGone.signal,
     window,
+    drainTimeoutMs: options.drainTimeoutMs ?? DEFAULT_PORT_DRAIN_TIMEOUT_MS,
     async open(signal) {
       const dc = pc.createDataChannel(`${PORT_LABEL_PREFIX}${(counter++).toString(36)}`, {
         ordered: true,

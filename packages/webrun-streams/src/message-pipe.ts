@@ -105,6 +105,13 @@ export interface MessagePipeTarget {
   readonly bufferedAmount: number;
   /** Resolves once the transport can take more, or the pipe ended. */
   whenDrained(): Promise<void>;
+  /**
+   * Whether the transport needs to drain before it takes more: the opposite
+   * of what `whenDrained` waits for (`false` once the pipe ended). Optional on
+   * the type, so a pipe built elsewhere still fits; `newMessagePipe` always
+   * sets it.
+   */
+  readonly needsDrain?: boolean;
   /** Aborts when the pipe ends, with an `Error` saying how. */
   readonly closeSignal: AbortSignal;
   /** The payload ceiling, when the transport has one. */
@@ -243,6 +250,9 @@ export function newMessagePipe(
     },
     get bufferedAmount() {
       return buffered();
+    },
+    get needsDrain() {
+      return !life.signal.aborted && !isDrained();
     },
     whenDrained() {
       if (life.signal.aborted || isDrained()) return Promise.resolve();

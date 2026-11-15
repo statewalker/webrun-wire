@@ -29,6 +29,13 @@ export interface StreamMessageTarget {
      * closed; at once when it can now.
      */
     whenDrained(): Promise<void>;
+    /**
+     * Whether the stream needs to drain before it takes more (libp2p's
+     * `writableNeedsDrain`: the muxer's send window is spent and bytes are
+     * piling up in the write buffer). A windowed native port sends nothing
+     * while it is `true` (statewalker/webrun-wire#195).
+     */
+    readonly needsDrain: boolean;
     /** `signal` again, on the target: `webrun-rpc`'s `getPortCloseSignal` reads it from a port. */
     readonly closeSignal: AbortSignal;
   };
@@ -70,8 +77,9 @@ export const DEFAULT_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
  * as on a `MessagePort`. Every message the peer sent before closing is
  * delivered before `signal` aborts. `postMessage` hands the frame to
  * `stream.send()` and does not wait for room; libp2p buffers up to the
- * stream's `maxWriteBufferLength`, past which it resets the stream. A sender
- * that must wait awaits `whenDrained()`.
+ * stream's `maxWriteBufferLength` (unbounded with yamux), past which it
+ * resets the stream. A sender that must wait checks `needsDrain` and awaits
+ * `whenDrained()`, as a windowed native port does.
  */
 export function messageTargetOverStream(
   stream: Stream,
@@ -176,6 +184,9 @@ export function messageTargetOverStream(
       },
       get bufferedAmount() {
         return stream.writeBufferLength;
+      },
+      get needsDrain() {
+        return stream.writableNeedsDrain === true && !life.signal.aborted;
       },
       whenDrained() {
         if (!stream.writableNeedsDrain || life.signal.aborted) return Promise.resolve();
