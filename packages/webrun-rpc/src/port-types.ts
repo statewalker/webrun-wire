@@ -1,4 +1,5 @@
 import type { MessageTarget } from "./message-target.js";
+import type { PortWindow } from "./window-tuner.js";
 
 /**
  * What a multiplexer exchanges over the underlying port.
@@ -18,7 +19,10 @@ export type PortEnvelope =
    * The responder's zero-byte ack carries `caps`, the shared subset, when the
    * opener listed some, and, when they share `"window"`, the `window` the
    * responder holds the port to: the opener's, or the responder's own if that
-   * is smaller.
+   * is smaller. After the ack, a `window` on a credit is the window the
+   * receiver grants from now on (an adaptive window, #188): larger or
+   * smaller, it never moves the right edge (bytes granted plus the window)
+   * back. An earlier version ignores it there.
    */
   | {
       type: "credit";
@@ -149,8 +153,37 @@ export interface PortMuxOptions {
    * opener lists the `"window"` capability, a larger window it asks for is
    * clamped to this one, and the ack says so; the opener takes it. An opener
    * that does not list it (an earlier version) keeps the window it asked for.
+   *
+   * ADAPTIVE: `{ initial, min?, max, budget? }` or `"auto"`
+   * (`DEFAULT_AUTO_WINDOW`: initial 256 KiB, min 64 KiB, max 16 MiB, budget
+   * 64 MiB). A port this mux opens asks for `initial`; on a port the peer
+   * opens, `initial` is also the clamp above (an opener that asks for more,
+   * even the ceiling, starts at `initial`). From there the receiving end of
+   * each direction sizes what it grants to about one bandwidth-delay product,
+   * like TCP's receive-buffer autotuning, and announces it in its credits
+   * (`{ type: "credit", id, bytes, window }`): it measures the round trip
+   * from a credit that moves the window's right edge to the first byte past
+   * the old edge, grows (×2, then ×1.25 after a growth that did not pay;
+   * every growth judged by the rate it brings and taken back under 5% more)
+   * while the port fills its window, the round trip stays near its minimum
+   * and the reader keeps up, shrinks toward 1.5 BDPs when the round trip
+   * inflates, and drains to its floor once it fills the window and every
+   * 10 s after, to re-measure the base round trip.
+   *
+   * Bounds: never more than `max` per port; a port grows only while the
+   * mux's adaptive ports, summed, stay within `budget` (it bounds growth, not
+   * the windows ports open at: `maxPorts` × the agreed window bounds those);
+   * never less than `min`, nor than the window agreed for the port. A smaller window is reached by granting less as the
+   * consumer frees bytes (the right edge never moves back), so what the peer
+   * sent under the larger one is never refused; the peer's sends follow the
+   * latest window it heard. A peer of an earlier version ignores the
+   * announced window and keeps the agreed one, which an adaptive end never
+   * goes below, so no capability gates it.
+   *
+   * A plain number keeps the fixed window exactly as before: this end never
+   * announces another (it still follows one its peer announces).
    */
-  window?: number;
+  window?: PortWindow;
   /**
    * When a windowed port this mux opens takes its window as agreed: at once,
    * or only once the responder's ack arrives, a round trip later. Until then
@@ -252,8 +285,18 @@ export interface PortInfo {
    * when it listed `caps` and this mux had already read a `credit`. Absent on
    * a port that asked for one from a peer that never answers credit (an
    * older version).
+   *
+   * It is the window this end grants the peer (what may be delivered here
+   * and not yet consumed); with an adaptive window (`PortMuxOptions.window`)
+   * it moves.
    */
   window?: number;
+  /**
+   * With a window, reported alongside `window`: the window the peer grants
+   * this end, which holds its sends. The agreed one, or the latest an
+   * adaptive peer announced.
+   */
+  sendWindow?: number;
   /** With a window: bytes waiting in this port's send queue. */
   queued?: number;
   /** With a window: bytes sent and not yet granted back by the peer. */

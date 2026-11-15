@@ -206,8 +206,11 @@ export interface OverPipeOptions {
   maxMessageSize?: number;
   /** The pipe's life: aborting it closes the mux. See `PortMuxOptions.signal`. */
   signal?: AbortSignal;
-  /** Experimental per-port flow control in bytes — see `PortMuxOptions.window`. */
-  window?: number;
+  /**
+   * Per-port flow control: a fixed window in bytes, or an adaptive one
+   * (`{ initial, min?, max, budget? }` or `"auto"`) — see `PortMuxOptions.window`.
+   */
+  window?: PortMuxOptions["window"];
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */
   frameSize?: number;
   /** Ceiling on a message reassembled from frames — see `PortMuxOptions.maxReassembledBytes`. */

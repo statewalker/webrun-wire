@@ -105,6 +105,9 @@ catalogs:
     webrun-rpc-0-10:
       specifier: npm:@statewalker/webrun-rpc@0.10.2
       version: 0.10.2
+    webrun-rpc-0-14:
+      specifier: npm:@statewalker/webrun-rpc@0.14.0
+      version: 0.14.0
     webrun-rpc-0-5:
       specifier: npm:@statewalker/webrun-rpc@0.5.1
       version: 0.5.1
@@ -327,6 +330,9 @@ importers:
       webrun-rpc-0-10:
         specifier: 'catalog:'
         version: '@statewalker/webrun-rpc@0.10.2'
+      webrun-rpc-0-14:
+        specifier: 'catalog:'
+        version: '@statewalker/webrun-rpc@0.14.0'
       webrun-rpc-0-5:
         specifier: 'catalog:'
         version: '@statewalker/webrun-rpc@0.5.1'
@@ -1318,6 +1324,9 @@ packages:
 
   '@statewalker/webrun-rpc@0.10.2':
     resolution: {integrity: sha512-li7QgZ7mA8XDuGnqI5wRKBy1Z5MUXB0PhjPZo9PE8azQzlZBMfX6N9BcTY3laV82O2EDcbpAVyynrHMh3m21BQ==}
+
+  '@statewalker/webrun-rpc@0.14.0':
+    resolution: {integrity: sha512-HnoNCR0lIfQRQGIF9sF7XPhgZDDwuqIobAU5nVPbLB7AYGvGhe/ZlmPT8+zSK9EaYIt7ORdlgAjYKFuSHkSlGA==}
 
   '@statewalker/webrun-rpc@0.5.1':
     resolution: {integrity: sha512-DpnT0dJ0KpdL5QKqKTmN75CnGc1w24iHdZqYfJQLVpSKEIR/GjPb3Vzbzb4NIu9tCHsroW+Dq1CO84Jp6YCXzw==}
@@ -4016,6 +4025,10 @@ snapshots:
   '@statewalker/webrun-rpc@0.10.2':
     dependencies:
       '@statewalker/webrun-streams': 0.2.3
+
+  '@statewalker/webrun-rpc@0.14.0':
+    dependencies:
+      '@statewalker/webrun-streams': 0.6.0
 
   '@statewalker/webrun-rpc@0.5.1':
     dependencies:

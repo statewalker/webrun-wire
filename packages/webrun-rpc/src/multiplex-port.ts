@@ -16,6 +16,7 @@ import type {
   PortMuxOptions,
 } from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
+import { RttFilter, resolveWindow, WindowTuner } from "./window-tuner.js";
 
 /**
  * The message of the error that fails the calls still in flight on a
@@ -100,13 +101,19 @@ export function multiplexPort(
     maxPorts = DEFAULT_MAX_PORTS,
     maxMessageSize,
     signal,
-    window,
     frameSize,
     keepalive,
     onLeak,
     presumeAck = "learned",
   } = options;
   const maxReassembledBytes = options.maxReassembledBytes ?? DEFAULT_MAX_REASSEMBLED_BYTES;
+  // What a port this mux opens asks for, the most a port the peer opens is
+  // granted, and, for an adaptive window, its ceiling. A plain number is both.
+  const windows = resolveWindow(options.window);
+  const window = windows.ask;
+  // The base round trip of the path every port shares, for the adaptive window.
+  const rttFilter = windows.adaptive ? new RttFilter() : undefined;
+  const clock = (): number => performance.now();
   const misses = keepalive?.misses ?? 3;
   if (
     keepalive &&
@@ -143,7 +150,24 @@ export function multiplexPort(
    * consumed bytes not yet granted back.
    */
   interface Credit {
-    window: number;
+    /**
+     * The window that holds this end's sends: the agreed one, then the latest
+     * the peer announced in a credit (an adaptive receiver's `window`).
+     */
+    sendWindow: number;
+    /**
+     * The window this end grants the peer, as last announced: what its
+     * frames are checked against. Fixed, unless this end adapts it (`tuner`).
+     * It never moves the window's right edge (bytes granted plus this) back:
+     * a smaller one is reached by granting less as bytes are consumed.
+     */
+    recvWindow: number;
+    /** This end adapts `recvWindow` (an adaptive `PortMuxOptions.window`). */
+    tuner?: WindowTuner;
+    /** Bytes granted back to the peer, in all. */
+    granted: number;
+    /** Bytes of the peer's messages (and frames) that arrived, in all. */
+    arrived: number;
     /**
      * The window holds this end's sends. Until the peer has shown it reads
      * credit, bytes are counted but nothing waits: an older peer never sends
@@ -396,7 +420,12 @@ export function multiplexPort(
       const next = c.queue[0]!;
       // A message larger than the window goes out once nothing else is
       // outstanding. An `end` (size 0) costs no window and never waits for credit.
-      if (next.size > 0 && c.enforced && c.outstanding > 0 && c.outstanding + next.size > c.window)
+      if (
+        next.size > 0 &&
+        c.enforced &&
+        c.outstanding > 0 &&
+        c.outstanding + next.size > c.sendWindow
+      )
         break;
       c.queue.shift();
       c.queued -= next.size;
@@ -419,17 +448,77 @@ export function multiplexPort(
     c.toGrant += bytes;
     const send = () => {
       c.grantScheduled = false;
-      if (!c.toGrant || !open.has(id)) return;
-      post({ type: "credit", id, bytes: c.toGrant });
-      c.toGrant = 0;
+      postGrant(id, c);
     };
-    if (c.toGrant >= c.window / 4) {
+    if (c.toGrant >= c.recvWindow / 4) {
       send();
       return;
     }
     if (c.grantScheduled) return;
     c.grantScheduled = true;
     setTimeout(send, 0);
+  };
+  /**
+   * Grants what is consumed and not yet granted, with the window this end
+   * wants now when it differs from the one last announced. The right edge
+   * (bytes granted plus the window) never moves back: what the peer may have
+   * sent under an earlier, larger window stays within what this end accepts,
+   * and a smaller window is reached as the consumer frees bytes.
+   */
+  const postGrant = (id: number, c: Credit): void => {
+    if (!open.has(id)) return;
+    const bytes = c.toGrant;
+    const next = c.tuner ? Math.max(c.tuner.window, c.recvWindow - bytes) : c.recvWindow;
+    if (!bytes && next === c.recvWindow) return;
+    const edge = c.granted + c.recvWindow;
+    c.toGrant = 0;
+    c.granted += bytes;
+    if (next === c.recvWindow) post({ type: "credit", id, bytes });
+    else {
+      c.recvWindow = next;
+      post({ type: "credit", id, bytes, window: next });
+    }
+    if (c.enforced) c.tuner?.granted(edge, c.granted + c.recvWindow, clock());
+  };
+  /**
+   * THE ADAPTIVE WINDOW's budget: what this mux's adaptive ports may grant in
+   * all. Each is charged what it may come to hold: the window it announced
+   * (all it can hold, the right edge never moving back), or more, the window
+   * it wants or a probe will take back.
+   */
+  const charge = (c: Credit): number => Math.max(c.recvWindow, c.tuner?.reserved() ?? 0);
+  /** What the budget leaves `c` to grow by past its window. */
+  const budgetRoom = (c: Credit): number => {
+    if (!windows.adaptive) return 0;
+    let others = 0;
+    for (const entry of open.values()) {
+      if (entry.credit?.tuner && entry.credit !== c) others += charge(entry.credit);
+    }
+    return windows.adaptive.budget - others - charge(c);
+  };
+  /**
+   * `bytes` of the peer's arrived on a windowed port: they may end a round of
+   * its tuner, and a larger window goes to the peer at once; a smaller one
+   * waits for the grants that reach it.
+   */
+  const arrive = (id: number, c: Credit, bytes: number): void => {
+    c.arrived += bytes;
+    const tuner = c.tuner;
+    if (!tuner || !c.enforced) return;
+    const now = clock();
+    tuner.received(c.arrived, now);
+    const next = tuner.adjust(now, c.unconsumed, () => budgetRoom(c));
+    if (next != null && next > c.recvWindow) postGrant(id, c);
+  };
+  /**
+   * An adaptive window starts adapting from the window agreed for the port,
+   * which its floor never goes below: a peer that does not read a credit's
+   * `window` (any earlier version) keeps counting against that one.
+   */
+  const startTuning = (c: Credit): void => {
+    const sizes = windows.adaptive;
+    if (!sizes || !rttFilter || c.tuner || c.recvWindow >= sizes.max) return;
+    c.tuner = new WindowTuner(sizes, rttFilter, c.recvWindow, c.arrived);
   };
 
   const attach = (
@@ -444,7 +533,10 @@ export function multiplexPort(
     const c: Credit | undefined =
       typeof portWindow === "number" && Number.isSafeInteger(portWindow) && portWindow > 0
         ? {
-            window: portWindow,
+            sendWindow: portWindow,
+            recvWindow: portWindow,
+            granted: 0,
+            arrived: 0,
             // Nobody holds back until the other end has shown it reads credit:
             // the responder's ack proves that to the opener, and the opener's
             // answer to the ack proves it to the responder. An opener that
@@ -491,7 +583,7 @@ export function multiplexPort(
         const waits =
           frameSize != null ||
           c.queue.length > 0 ||
-          (c.enforced && c.outstanding > 0 && c.outstanding + size > c.window);
+          (c.enforced && c.outstanding > 0 && c.outstanding + size > c.sendWindow);
         const held =
           !bytes && waits
             ? { ...envelope, payload: structuredClone(payload, { transfer }) }
@@ -600,7 +692,8 @@ export function multiplexPort(
         },
       });
       setPortAgreement(self.port, () => ({
-        window: c.window,
+        // What the peer may hold unconsumed here: the window this end grants.
+        window: c.recvWindow,
         caps: c.caps,
         enforced: c.enforced,
       }));
@@ -636,15 +729,17 @@ export function multiplexPort(
     // it holds the port to, and this end takes it. An ack can only shrink the
     // window this end asked for, never widen it.
     const clamped = listed?.has("window") ? validWindow(ack.window) : undefined;
-    if (clamped != null && clamped < c.window) {
+    if (clamped != null && clamped < c.recvWindow) {
       // A presuming port may have sent past the smaller window before the ack
       // came. Only the responder knows whether it refused any of it (it
       // accepts up to its window plus one message, and one message begun
       // with nothing held): if it did, it closes the port, and that close is
       // what fails it here. Later ports ask for the window learned here.
       learnedWindow = Math.min(learnedWindow ?? clamped, clamped);
-      c.window = clamped;
+      c.sendWindow = clamped;
+      c.recvWindow = clamped;
     }
+    startTuning(c);
     const presumed = c.presumed;
     if (presumed) {
       c.presumed = undefined;
@@ -725,7 +820,7 @@ export function multiplexPort(
       // this end's checks, so it keeps the window it asked for, as before.
       const listed = sharedCaps(caps, envelope.caps);
       const asked = validWindow(envelope.window);
-      const own = validWindow(window);
+      const own = validWindow(windows.grant);
       const portWindow =
         asked != null && own != null && listed?.has("window") ? Math.min(asked, own) : asked;
       const handle = attach(
@@ -763,12 +858,13 @@ export function multiplexPort(
           credit.caps = listed;
           if (creditRead) credit.enforced = true;
         }
+        startTuning(credit);
         post(
           listed
             ? {
                 ...ack,
                 caps: [...listed],
-                ...(listed.has("window") ? { window: credit.window } : {}),
+                ...(listed.has("window") ? { window: credit.recvWindow } : {}),
               }
             : ack,
         );
@@ -800,6 +896,14 @@ export function multiplexPort(
       if (c.awaitingAck) {
         c.awaitingAck = false;
         if (!onAck(envelope, entry as Entry, c)) return;
+      } else {
+        // AN ADAPTIVE RECEIVER'S WINDOW (#188): every credit after the ack
+        // may carry the window the peer grants now, larger or smaller; the
+        // latest holds this end's sends. The peer keeps its right edge
+        // (granted plus window) from moving back, so what is already
+        // outstanding stays within it. An earlier version ignores the field.
+        const announced = validWindow(envelope.window);
+        if (announced != null) c.sendWindow = announced;
       }
       c.enforced = true;
       c.outstanding = Math.max(0, c.outstanding - envelope.bytes);
@@ -828,7 +932,14 @@ export function multiplexPort(
         (c.exact ? byteLengthOf(event.data) : undefined) ?? estimateMessageSize(envelope.payload);
       if (!entry) return;
       touch(envelope.id);
-      entry.handle.deliver(envelope.payload, entry.credit ? sizeOf(entry.credit) : undefined);
+      const c = entry.credit;
+      if (!c) {
+        entry.handle.deliver(envelope.payload);
+        return;
+      }
+      const size = sizeOf(c);
+      arrive(envelope.id, c, size);
+      entry.handle.deliver(envelope.payload, size);
       return;
     }
 
@@ -850,16 +961,16 @@ export function multiplexPort(
         bytes: 0,
         owed,
         charged: 0,
-        ...(owed > 0 ? { room: c.window - owed } : {}),
+        ...(owed > 0 ? { room: c.recvWindow - owed } : {}),
       };
       entry.partial = partial;
       const size = envelope.data.byteLength;
       // Only a message begun with nothing owed may pass the window; what it
       // holds past it is what the cap, shared by all ports, bounds.
-      const charged = partial.room == null ? Math.max(0, partial.bytes + size - c.window) : 0;
+      const charged = partial.room == null ? Math.max(0, partial.bytes + size - c.recvWindow) : 0;
       const overrun =
         partial.room != null && partial.bytes + size > partial.room
-          ? `what the window left (${partial.room} of ${c.window} bytes, ${partial.owed} still owed)`
+          ? `what the window left (${partial.room} of ${c.recvWindow} bytes, ${partial.owed} still owed)`
           : reassembling - partial.charged + charged > maxReassembledBytes
             ? `maxReassembledBytes (${maxReassembledBytes} bytes past the window, across all ports)`
             : undefined;
@@ -877,6 +988,7 @@ export function multiplexPort(
       reassembling += charged - partial.charged;
       partial.charged = charged;
       partial.chunks.push(envelope.data);
+      arrive(envelope.id, c, size);
       if (!envelope.last) return;
       freePartial(entry);
       const whole = new Uint8Array(partial.bytes);
@@ -1060,7 +1172,9 @@ export function multiplexPort(
           ? {
               ...info,
               // Acknowledged: a presuming opener holds back before its ack.
-              ...(credit.enforced && !credit.awaitingAck ? { window: credit.window } : {}),
+              ...(credit.enforced && !credit.awaitingAck
+                ? { window: credit.recvWindow, sendWindow: credit.sendWindow }
+                : {}),
               queued: credit.queued,
               outstanding: credit.outstanding,
               unconsumed: credit.unconsumed,
