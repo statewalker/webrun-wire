@@ -208,7 +208,7 @@ export interface OverPipeOptions {
   signal?: AbortSignal;
   /**
    * Per-port flow control: a fixed window in bytes, or an adaptive one
-   * (`{ initial, max }` or `"auto"`) — see `PortMuxOptions.window`.
+   * (`{ initial, min?, max, budget? }` or `"auto"`) — see `PortMuxOptions.window`.
    */
   window?: PortMuxOptions["window"];
   /** Fair framing in bytes — see `PortMuxOptions.frameSize`. */

@@ -1,169 +1,255 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AUTO_WINDOW } from "../src/index.js";
-import { resolveWindow, WindowTuner } from "../src/window-tuner.js";
+import {
+  type AdaptiveWindow,
+  adaptiveWindowOf,
+  RttFilter,
+  resolveWindow,
+  WindowTuner,
+} from "../src/window-tuner.js";
 
-// #188: the receive side's adaptation, on explicit time — no clock, no flakes.
-// A round is one credit (`onGrant`) and the first byte past its old edge
-// (`onArrived`); see `WindowTuner`.
+// #188: the receive side's adaptation, on a simulated link and explicit time
+// (no clock, no flakes). Ported from the statewalker/httpeers#128 prototype,
+// onto this mux's grants: a smaller window is reached by granting less, so the
+// right edge (bytes granted plus the window) never moves back.
 
 const KiB = 1024;
+const MiB = 1024 * KiB;
 
 /**
- * Runs `n` rounds of `rtt` ms in which the consumer took `share` of the
- * window granted at the round's start. Returns the target after each round.
+ * A sender that always has data, behind a link of `rate` bytes/ms and base
+ * round trip `rttMs`, with a FIFO queue (sender buffers plus bottleneck) that
+ * holds whatever is in flight past one BDP. The receiver consumes at once and
+ * grants each message's bytes back as it arrives, as the mux does: the window
+ * it announces is max(target, last − bytes), and a larger target goes out at
+ * once. Time advances in steps of about one message, so the run is
+ * deterministic.
  */
-function rounds(
-  tuner: WindowTuner,
-  clock: { now: number },
-  n: number,
-  rtt: number,
-  share = 1,
-  state = { granted: 0, consumed: 0, window: tuner.target },
-): number[] {
-  const seen: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const edge = state.granted + state.window;
-    tuner.onGrant(clock.now, edge, edge + 1, state.consumed, state.window);
-    clock.now += rtt;
-    state.consumed += Math.floor(state.window * share);
-    state.granted = state.consumed;
-    tuner.onArrived(clock.now, edge + 1, state.consumed);
-    state.window = tuner.target;
-    seen.push(tuner.target);
+function simulate(opts: {
+  tuner: WindowTuner;
+  rate: number;
+  rttMs: number;
+  durationMs: number;
+  message?: number;
+  /** Bytes the sender has to send in all (default: unbounded). */
+  appBytes?: number;
+  /** Receiver-side backlog the consumer never drains (a slow reader). */
+  unconsumed?: number;
+  budgetRoom?: number;
+}) {
+  const { tuner, rate, rttMs, durationMs } = opts;
+  const message = opts.message ?? 16 * KiB;
+  let now = 0;
+  let sent = 0;
+  let received = 0;
+  // The receiver: what it granted, and the window it last announced.
+  let granted = 0;
+  let announced = tuner.window;
+  // The sender: what credit reached it, and the latest window it heard.
+  let creditReceived = 0;
+  let sendWindow = tuner.window;
+  const toSender: { at: number; bytes: number; window?: number }[] = [];
+  const pending: { at: number; bytes: number }[] = [];
+  const windows: number[] = [];
+  const edges: number[] = [];
+  let overshoot = Number.NEGATIVE_INFINITY;
+  const grantNow = (bytes: number) => {
+    const next = Math.max(tuner.window, announced - bytes);
+    const edge = granted + announced;
+    granted += bytes;
+    const changed = next !== announced;
+    announced = next;
+    tuner.granted(edge, granted + announced, now);
+    edges.push(granted + announced);
+    if (changed) windows.push(next);
+    toSender.push({ at: now + rttMs / 2, bytes, ...(changed ? { window: next } : {}) });
+  };
+  while (now < durationMs) {
+    while (toSender.length && (toSender[0]?.at ?? Number.POSITIVE_INFINITY) <= now) {
+      const g = toSender.shift();
+      if (!g) break;
+      creditReceived += g.bytes;
+      if (g.window != null) sendWindow = g.window;
+    }
+    const credit = creditReceived + sendWindow - sent;
+    const app = opts.appBytes == null ? Number.POSITIVE_INFINITY : opts.appBytes - sent;
+    if (credit >= message && app >= message) {
+      const inFlight = sent - received;
+      const queueMs = Math.max(0, inFlight - rate * rttMs) / rate;
+      pending.push({ at: now + rttMs / 2 + queueMs + message / rate, bytes: message });
+      sent += message;
+      // Never past what the receiver accepts: its edge.
+      overshoot = Math.max(overshoot, sent - (granted + announced));
+    }
+    pending.sort((a, b) => a.at - b.at);
+    while (pending.length && (pending[0]?.at ?? Number.POSITIVE_INFINITY) <= now) {
+      const m = pending.shift();
+      if (!m) break;
+      received += m.bytes;
+      tuner.received(received, now);
+      tuner.adjust(now, opts.unconsumed ?? 0, () => opts.budgetRoom ?? Number.POSITIVE_INFINITY);
+      if (tuner.window > announced) grantNow(0);
+      grantNow(m.bytes);
+    }
+    now += Math.max(0.05, Math.min(message / rate, 1));
   }
-  return seen;
+  return { received, windows, edges, overshoot, rate: received / durationMs };
 }
 
-describe("WindowTuner: grow under window-limited flow at a low RTT", () => {
-  it("doubles each round while the RTT stays at its minimum and the consumer takes the window", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    const clock = { now: 1000 };
-    expect(rounds(tuner, clock, 4, 10)).toEqual([32, 64, 128, 256].map((n) => n * KiB));
-  });
+const sizes = (initial: number, more: Partial<AdaptiveWindow> = {}) =>
+  adaptiveWindowOf({ initial, min: more.min ?? 64 * KiB, max: more.max ?? 16 * MiB });
+/** A port agreed at `agreed`, wanting `window` now (a port that grew there). */
+const tunerOf = (agreed: number, more: Partial<AdaptiveWindow> = {}, window = agreed) => {
+  const t = new WindowTuner(sizes(agreed, more), new RttFilter(), agreed);
+  t.window = window;
+  return t;
+};
 
-  it("does not grow when the consumer took less than half a window in a round (a slow reader)", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    const clock = { now: 1000 };
-    expect(rounds(tuner, clock, 10, 10, 0.25)).toEqual(Array(10).fill(16 * KiB));
-  });
-
-  it("a round ends only with a byte past the edge the credit left behind", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    tuner.onGrant(0, 16 * KiB, 20 * KiB, 0, 16 * KiB);
-    expect(tuner.onArrived(5, 16 * KiB, 16 * KiB)).toBe(false);
-    expect(tuner.target).toBe(16 * KiB);
-    expect(tuner.onArrived(6, 16 * KiB + 1, 16 * KiB)).toBe(true);
-    expect(tuner.target).toBe(32 * KiB);
-  });
-
-  it("one round at a time: a credit sent while a round runs does not restart it", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    tuner.onGrant(0, 16 * KiB, 20 * KiB, 0, 16 * KiB);
-    tuner.onGrant(50, 20 * KiB, 24 * KiB, 4 * KiB, 16 * KiB);
-    tuner.onArrived(100, 16 * KiB + 1, 16 * KiB);
-    // The round ran from 0, so its RTT is 100: the first sample is the minimum.
-    tuner.onGrant(100, 40 * KiB, 56 * KiB, 16 * KiB, 32 * KiB);
-    expect(tuner.onArrived(160, 40 * KiB + 1, 48 * KiB)).toBe(true);
-    expect(tuner.target).toBe(64 * KiB);
+describe("RttFilter", () => {
+  it("keeps the minimum and lets it rise only after its window passes", () => {
+    const f = new RttFilter(1000);
+    f.update(50, 0);
+    f.update(40, 10);
+    f.update(80, 500);
+    expect(f.get()).toBe(40);
+    f.update(70, 1200);
+    f.update(60, 2100);
+    expect(f.get()).toBeGreaterThanOrEqual(60);
+    expect(f.get()).toBeLessThanOrEqual(70);
   });
 });
 
-describe("WindowTuner: only a credit that moves the right edge starts a round", () => {
-  it("a shrink credit that keeps the edge where it was starts none", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    // A shrinking credit: 8 KiB granted, the window 8 KiB smaller, the edge unmoved.
-    tuner.onGrant(0, 64 * KiB, 64 * KiB, 0, 64 * KiB);
-    // Bytes past it were released by an earlier credit: no round to end.
-    expect(tuner.onArrived(500, 64 * KiB + 1, 64 * KiB)).toBe(false);
-    // The next credit that moves the edge starts one, timed from itself.
-    tuner.onGrant(600, 64 * KiB, 72 * KiB, 64 * KiB, 56 * KiB);
-    expect(tuner.onArrived(610, 64 * KiB + 1, 128 * KiB)).toBe(true);
+describe("WindowTuner: what it measures", () => {
+  it("measures the round trip from a credit to the first byte past the edge it moved", () => {
+    const rtt = new RttFilter();
+    const t = new WindowTuner(sizes(100, { min: 10, max: 1000 }), rtt, 100);
+    t.granted(100, 150, 5);
+    t.received(100, 20);
+    expect(rtt.get()).toBe(Number.POSITIVE_INFINITY);
+    t.received(110, 35);
+    expect(rtt.get()).toBe(30);
+  });
+
+  it("a credit that does not move the right edge (a shrinking one) starts no round", () => {
+    const rtt = new RttFilter();
+    const t = new WindowTuner(sizes(1000, { min: 100, max: 1000 }), rtt, 1000);
+    // 50 bytes granted and the window 50 smaller: the edge stays at 1000.
+    t.granted(1000, 1000, 1);
+    // A byte past 1000 was released by an earlier credit, not this one.
+    t.received(1010, 50);
+    expect(rtt.get()).toBe(Number.POSITIVE_INFINITY);
+    t.granted(1010, 1060, 60);
+    t.received(1020, 100);
+    expect(rtt.get()).toBe(40);
+  });
+
+  it("a credit posted after bytes already passed its old edge gives no sample", () => {
+    const rtt = new RttFilter();
+    const t = new WindowTuner(sizes(1000, { min: 100, max: 1000 }), rtt, 1000);
+    t.received(1200, 0);
+    t.granted(1000, 1500, 1);
+    t.received(1300, 9);
+    expect(rtt.get()).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
-describe("WindowTuner: shrink on RTT inflation", () => {
-  it("shrinks by a quarter per round once the RTT passes twice its minimum, down to the floor", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    const clock = { now: 1000 };
-    const state = { granted: 0, consumed: 0, window: tuner.target };
-    rounds(tuner, clock, 4, 10, 1, state);
-    expect(tuner.target).toBe(256 * KiB);
-    const shrinking = rounds(tuner, clock, 12, 50, 1, state);
-    expect(shrinking.slice(0, 3)).toEqual([192 * KiB, 144 * KiB, 108 * KiB]);
-    for (let i = 1; i < shrinking.length; i++) {
-      expect(shrinking[i]).toBeLessThanOrEqual(shrinking[i - 1] as number);
+describe("WindowTuner on a simulated link", () => {
+  it("grows while a port is window-limited and the round trip stays at its minimum (long fat pipe)", () => {
+    const t = tunerOf(256 * KiB);
+    const r = simulate({ tuner: t, rate: 12_500, rttMs: 100, durationMs: 4000 });
+    expect(t.window).toBeGreaterThanOrEqual(1.25e6);
+    expect(t.window).toBeLessThanOrEqual(4 * 1.25e6);
+    expect(Math.max(...r.windows)).toBeGreaterThan(256 * KiB);
+    expect(r.overshoot).toBeLessThanOrEqual(0);
+  });
+
+  it("shrinks when the round trip under load inflates (a window larger than the BDP), never moving the edge back", () => {
+    const t = tunerOf(64 * KiB, {}, 1 * MiB);
+    const r = simulate({ tuner: t, rate: 1250, rttMs: 80, durationMs: 8000 });
+    expect(t.window).toBeLessThan(400 * KiB);
+    expect(t.window).toBeGreaterThanOrEqual(64 * KiB);
+    for (let i = 1; i < r.edges.length; i++) {
+      expect(r.edges[i]).toBeGreaterThanOrEqual(r.edges[i - 1] as number);
     }
-    expect(shrinking.at(-1)).toBe(16 * KiB);
+    expect(r.overshoot).toBeLessThanOrEqual(0);
   });
 
-  it("neither grows nor shrinks between near the minimum and inflated", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    const clock = { now: 1000 };
-    const state = { granted: 0, consumed: 0, window: tuner.target };
-    rounds(tuner, clock, 2, 10, 1, state);
-    expect(rounds(tuner, clock, 5, 18, 1, state)).toEqual(Array(5).fill(64 * KiB));
+  it("holds a window that is about one BDP", () => {
+    const t = tunerOf(256 * KiB, { min: 64 * KiB });
+    simulate({ tuner: t, rate: 6250, rttMs: 30, durationMs: 4000 });
+    expect(t.window).toBeGreaterThanOrEqual(128 * KiB);
+    expect(t.window).toBeLessThanOrEqual(512 * KiB);
   });
 
-  it("a minimum RTT not seen for 10 s gives way to the latest: a longer path is not inflation forever", () => {
-    const tuner = new WindowTuner(16 * KiB, 1024 * KiB);
-    const clock = { now: 1000 };
-    const state = { granted: 0, consumed: 0, window: tuner.target };
-    rounds(tuner, clock, 3, 10, 1, state);
-    expect(tuner.target).toBe(128 * KiB);
-    // The path now takes 100 ms: inflated, so the window shrinks...
-    rounds(tuner, clock, 3, 100, 1, state);
-    expect(tuner.target).toBeLessThan(128 * KiB);
-    // ...until the old minimum expires; then it grows again at the new RTT.
-    clock.now += 10_001;
-    const after = rounds(tuner, clock, 3, 100, 1, state);
-    expect(after[2]).toBeGreaterThan(after[0] as number);
+  it("stays within the floor and the ceiling", () => {
+    const big = tunerOf(256 * KiB, { max: 512 * KiB });
+    const r0 = simulate({ tuner: big, rate: 12_500, rttMs: 100, durationMs: 4000 });
+    expect(Math.max(...r0.windows)).toBe(512 * KiB);
+    expect(big.window).toBe(512 * KiB);
+    const small = tunerOf(128 * KiB, { min: 128 * KiB }, 256 * KiB);
+    const r = simulate({ tuner: small, rate: 125, rttMs: 200, durationMs: 30_000 });
+    expect(Math.min(...r.windows)).toBe(128 * KiB);
+    expect(small.window).toBeLessThanOrEqual(2 * 128 * KiB);
+  });
+
+  it("never goes below the window agreed for the port, whatever `min` says", () => {
+    const t = tunerOf(256 * KiB, { min: 16 * KiB }, 1 * MiB);
+    expect(t.floor).toBe(256 * KiB);
+    const r = simulate({ tuner: t, rate: 125, rttMs: 200, durationMs: 20_000 });
+    expect(Math.min(...r.windows)).toBeGreaterThanOrEqual(256 * KiB);
+  });
+
+  it("does not grow for a sender that does not fill its window", () => {
+    const t = tunerOf(256 * KiB);
+    simulate({ tuner: t, rate: 12_500, rttMs: 100, durationMs: 2000, appBytes: 64 * KiB });
+    expect(t.window).toBe(256 * KiB);
+  });
+
+  it("does not grow while this side's reader is behind", () => {
+    const t = tunerOf(256 * KiB);
+    simulate({ tuner: t, rate: 12_500, rttMs: 100, durationMs: 4000, unconsumed: 200 * KiB });
+    expect(t.window).toBe(256 * KiB);
+  });
+
+  it("grows no further than the mux's budget allows", () => {
+    const t = tunerOf(256 * KiB);
+    simulate({ tuner: t, rate: 12_500, rttMs: 100, durationMs: 4000, budgetRoom: 0 });
+    expect(t.window).toBe(256 * KiB);
   });
 });
 
-describe("WindowTuner: bounds", () => {
-  it("never passes the ceiling, however long the flow stays window-limited", () => {
-    const tuner = new WindowTuner(16 * KiB, 100 * KiB);
-    const clock = { now: 0 };
-    const seen = rounds(tuner, clock, 20, 5);
-    expect(Math.max(...seen)).toBe(100 * KiB);
-    for (const target of seen) expect(target).toBeLessThanOrEqual(100 * KiB);
-  });
-
-  it("never goes below the floor", () => {
-    const tuner = new WindowTuner(16 * KiB, 100 * KiB);
-    const clock = { now: 0 };
-    rounds(tuner, clock, 1, 5);
-    for (const target of rounds(tuner, clock, 20, 500)) {
-      expect(target).toBeGreaterThanOrEqual(16 * KiB);
-    }
-  });
-});
-
-describe("resolveWindow", () => {
+describe("adaptive window options", () => {
   it("a plain number, or none, is what it always was: asked for and granted at most", () => {
     expect(resolveWindow(64 * KiB)).toEqual({ ask: 64 * KiB, grant: 64 * KiB });
     expect(resolveWindow(undefined)).toEqual({ ask: undefined, grant: undefined });
   });
 
-  it('`{ initial, max }` asks for initial and grants a peer\'s port initial at first; "auto" is DEFAULT_AUTO_WINDOW', () => {
+  it("an adaptive window asks for initial, starts a peer's port at initial too, and fills in defaults", () => {
     expect(resolveWindow({ initial: 16 * KiB, max: 1024 * KiB })).toEqual({
       ask: 16 * KiB,
       grant: 16 * KiB,
-      max: 1024 * KiB,
+      adaptive: { initial: 16 * KiB, min: 16 * KiB, max: 1024 * KiB, budget: 4096 * KiB },
     });
     expect(resolveWindow("auto")).toEqual({
-      ask: DEFAULT_AUTO_WINDOW.initial,
-      grant: DEFAULT_AUTO_WINDOW.initial,
-      max: DEFAULT_AUTO_WINDOW.max,
+      ask: 256 * KiB,
+      grant: 256 * KiB,
+      adaptive: DEFAULT_AUTO_WINDOW,
     });
-    expect(DEFAULT_AUTO_WINDOW).toEqual({ initial: 256 * KiB, max: 16 * 1024 * KiB });
+    expect(DEFAULT_AUTO_WINDOW).toEqual({
+      initial: 256 * KiB,
+      min: 64 * KiB,
+      max: 16 * MiB,
+      budget: 64 * MiB,
+    });
   });
 
-  it("refuses an adaptive window that is not positive integers with initial <= max", () => {
+  it("refuses sizes that cannot work", () => {
     for (const bad of [
       { initial: 0, max: 10 },
       { initial: 20, max: 10 },
       { initial: 1.5, max: 10 },
+      { initial: 10, min: 20, max: 30 },
+      { initial: 10, max: 30, budget: 20 },
       { initial: 10 },
       "fast",
     ]) {

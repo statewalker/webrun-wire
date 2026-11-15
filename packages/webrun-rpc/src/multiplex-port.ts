@@ -16,7 +16,7 @@ import type {
   PortMuxOptions,
 } from "./port-types.js";
 import { newVirtualPort, type VirtualPortHandle } from "./virtual-port.js";
-import { resolveWindow, WindowTuner } from "./window-tuner.js";
+import { RttFilter, resolveWindow, WindowTuner } from "./window-tuner.js";
 
 /**
  * The message of the error that fails the calls still in flight on a
@@ -111,6 +111,9 @@ export function multiplexPort(
   // granted, and, for an adaptive window, its ceiling. A plain number is both.
   const windows = resolveWindow(options.window);
   const window = windows.ask;
+  // The base round trip of the path every port shares, for the adaptive window.
+  const rttFilter = windows.adaptive ? new RttFilter() : undefined;
+  const clock = (): number => performance.now();
   const misses = keepalive?.misses ?? 3;
   if (
     keepalive &&
@@ -159,12 +162,10 @@ export function multiplexPort(
      * a smaller one is reached by granting less as bytes are consumed.
      */
     recvWindow: number;
-    /** This end adapts `recvWindow` (`PortMuxOptions.window` `{ initial, max }` or `"auto"`). */
+    /** This end adapts `recvWindow` (an adaptive `PortMuxOptions.window`). */
     tuner?: WindowTuner;
     /** Bytes granted back to the peer, in all. */
     granted: number;
-    /** Bytes this end's consumer took, in all. */
-    consumed: number;
     /** Bytes of the peer's messages (and frames) that arrived, in all. */
     arrived: number;
     /**
@@ -445,7 +446,6 @@ export function multiplexPort(
   const grant = (id: number, c: Credit, bytes: number): void => {
     c.unconsumed -= bytes;
     c.toGrant += bytes;
-    c.consumed += bytes;
     const send = () => {
       c.grantScheduled = false;
       postGrant(id, c);
@@ -468,10 +468,9 @@ export function multiplexPort(
   const postGrant = (id: number, c: Credit): void => {
     if (!open.has(id)) return;
     const bytes = c.toGrant;
-    const next = c.tuner ? Math.max(c.tuner.target, c.recvWindow - bytes) : c.recvWindow;
+    const next = c.tuner ? Math.max(c.tuner.window, c.recvWindow - bytes) : c.recvWindow;
     if (!bytes && next === c.recvWindow) return;
     const edge = c.granted + c.recvWindow;
-    const before = c.recvWindow;
     c.toGrant = 0;
     c.granted += bytes;
     if (next === c.recvWindow) post({ type: "credit", id, bytes });
@@ -479,30 +478,47 @@ export function multiplexPort(
       c.recvWindow = next;
       post({ type: "credit", id, bytes, window: next });
     }
-    if (c.enforced) {
-      c.tuner?.onGrant(performance.now(), edge, c.granted + c.recvWindow, c.consumed, before);
-    }
+    if (c.enforced) c.tuner?.granted(edge, c.granted + c.recvWindow, clock());
   };
   /**
-   * `bytes` of the peer's arrived on a windowed port: they may end the
-   * tuner's round, and a larger window goes to the peer at once.
+   * THE ADAPTIVE WINDOW's budget: what this mux's adaptive ports may grant in
+   * all. Each is charged what it may come to hold: the window it announced
+   * (all it can hold, the right edge never moving back), or more, the window
+   * it wants or a probe will take back.
+   */
+  const charge = (c: Credit): number => Math.max(c.recvWindow, c.tuner?.reserved() ?? 0);
+  /** What the budget leaves `c` to grow by past its window. */
+  const budgetRoom = (c: Credit): number => {
+    if (!windows.adaptive) return 0;
+    let others = 0;
+    for (const entry of open.values()) {
+      if (entry.credit?.tuner && entry.credit !== c) others += charge(entry.credit);
+    }
+    return windows.adaptive.budget - others - charge(c);
+  };
+  /**
+   * `bytes` of the peer's arrived on a windowed port: they may end a round of
+   * its tuner, and a larger window goes to the peer at once; a smaller one
+   * waits for the grants that reach it.
    */
   const arrive = (id: number, c: Credit, bytes: number): void => {
     c.arrived += bytes;
-    if (!c.tuner || !c.enforced) return;
-    if (c.tuner.onArrived(performance.now(), c.arrived, c.consumed)) {
-      if (c.tuner.target > c.recvWindow) postGrant(id, c);
-    }
+    const tuner = c.tuner;
+    if (!tuner || !c.enforced) return;
+    const now = clock();
+    tuner.received(c.arrived, now);
+    const next = tuner.adjust(now, c.unconsumed, () => budgetRoom(c));
+    if (next != null && next > c.recvWindow) postGrant(id, c);
   };
   /**
    * An adaptive window starts adapting from the window agreed for the port,
-   * the least it ever grants: a peer that does not read a credit's `window`
-   * (any earlier version) keeps counting against that one.
+   * which its floor never goes below: a peer that does not read a credit's
+   * `window` (any earlier version) keeps counting against that one.
    */
   const startTuning = (c: Credit): void => {
-    if (windows.max != null && c.recvWindow < windows.max) {
-      c.tuner = new WindowTuner(c.recvWindow, windows.max);
-    }
+    const sizes = windows.adaptive;
+    if (!sizes || !rttFilter || c.tuner || c.recvWindow >= sizes.max) return;
+    c.tuner = new WindowTuner(sizes, rttFilter, c.recvWindow, c.arrived);
   };
 
   const attach = (
@@ -520,7 +536,6 @@ export function multiplexPort(
             sendWindow: portWindow,
             recvWindow: portWindow,
             granted: 0,
-            consumed: 0,
             arrived: 0,
             // Nobody holds back until the other end has shown it reads credit:
             // the responder's ack proves that to the opener, and the opener's

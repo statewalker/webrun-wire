@@ -154,24 +154,30 @@ export interface PortMuxOptions {
    * clamped to this one, and the ack says so; the opener takes it. An opener
    * that does not list it (an earlier version) keeps the window it asked for.
    *
-   * ADAPTIVE: `{ initial, max }` or `"auto"` (`DEFAULT_AUTO_WINDOW`: 256 KiB
-   * to 16 MiB). A port this mux opens asks for `initial`; on a port the peer
-   * opens, `initial` is also the clamp above (an opener that asks for more
-   * starts at `initial`, and the window grows from there). From the
-   * window agreed for the port, the receiving end of each direction adapts
-   * what it grants, like TCP's receive-buffer autotuning, and announces it
-   * in its credits (`{ type: "credit", id, bytes, window }`): it doubles
-   * while the port is limited by its window (the consumer took at least half
-   * a window in a round trip) and the round trip stays near its minimum,
-   * and shrinks by a quarter when the round trip passes twice its minimum.
-   * It never grants more than `max`, so a port never holds more than `max`
-   * of this end's memory, and never less than the window agreed for the
-   * port. A smaller window is reached by granting less as the consumer frees
-   * bytes, so what the peer sent under the larger one is never refused; the
-   * peer's sends follow the latest window it heard. Each end adapts only
-   * what it receives: the window that holds its own sends is the peer's to
-   * set. A peer of an earlier version ignores the announced window and keeps
-   * the agreed one, which an adaptive end never goes below.
+   * ADAPTIVE: `{ initial, min?, max, budget? }` or `"auto"`
+   * (`DEFAULT_AUTO_WINDOW`: initial 256 KiB, min 64 KiB, max 16 MiB, budget
+   * 64 MiB). A port this mux opens asks for `initial`; on a port the peer
+   * opens, `initial` is also the clamp above (an opener that asks for more,
+   * even the ceiling, starts at `initial`). From there the receiving end of
+   * each direction sizes what it grants to about one bandwidth-delay product,
+   * like TCP's receive-buffer autotuning, and announces it in its credits
+   * (`{ type: "credit", id, bytes, window }`): it measures the round trip
+   * from a credit that moves the window's right edge to the first byte past
+   * the old edge, grows (×2, then ×1.25 after a growth that did not pay;
+   * every growth judged by the rate it brings and taken back under 5% more)
+   * while the port fills its window, the round trip stays near its minimum
+   * and the reader keeps up, shrinks toward 1.5 BDPs when the round trip
+   * inflates, and drains to its floor once it fills the window and every
+   * 10 s after, to re-measure the base round trip.
+   *
+   * Bounds: never more than `max` per port; never more than `budget` summed
+   * over the mux's adaptive ports; never less than `min`, nor than the window
+   * agreed for the port. A smaller window is reached by granting less as the
+   * consumer frees bytes (the right edge never moves back), so what the peer
+   * sent under the larger one is never refused; the peer's sends follow the
+   * latest window it heard. A peer of an earlier version ignores the
+   * announced window and keeps the agreed one, which an adaptive end never
+   * goes below, so no capability gates it.
    *
    * A plain number keeps the fixed window exactly as before: this end never
    * announces another (it still follows one its peer announces).

@@ -10,6 +10,7 @@ import type {
   PortWindow,
 } from "../src/index.js";
 import * as current from "../src/index.js";
+import { estimateMessageSize } from "../src/multiplex-port.js";
 
 // #188: a port's window adapts after the ack. The receiving end of each
 // direction grants a larger window while the port is limited by its window
@@ -529,4 +530,156 @@ describe("interop with 0.14.0", () => {
     expect(t.client.ports()[0]?.window).toBe(256 * KiB);
     expect(t.server.ports()[0]?.window).toBe(256 * KiB);
   }, 30_000);
+});
+
+// Over an emulated link with a rate limit (a FIFO bottleneck), from the
+// statewalker/httpeers#128 prototype: what the window buys where bandwidth,
+// not latency alone, bounds a port.
+
+/** Two ends of a link: `rate` bytes/ms each way, `delayMs` one way, FIFO. */
+function rateLink(rate: number, delayMs: number): [MessageTarget, MessageTarget] {
+  type Listener = (event: MessageEvent) => unknown;
+  const listeners: [Set<Listener>, Set<Listener>] = [new Set(), new Set()];
+  const busyUntil = [0, 0];
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  cleanups.push(() => {
+    for (const t of timers) clearTimeout(t);
+  });
+  const end = (self: 0 | 1): MessageTarget => {
+    const peer = self === 0 ? 1 : 0;
+    return {
+      postMessage(message: unknown) {
+        const data = structuredClone(message);
+        const now = performance.now();
+        const env = data as { payload?: unknown };
+        const size = estimateMessageSize(env.payload ?? data);
+        const departs = Math.max(now, busyUntil[self] ?? 0) + size / rate;
+        busyUntil[self] = departs;
+        const timer = setTimeout(
+          () => {
+            timers.delete(timer);
+            for (const l of listeners[peer]) void l({ data } as MessageEvent);
+          },
+          departs + delayMs - now,
+        );
+        timers.add(timer);
+      },
+      addEventListener: (_type, l) => listeners[self].add(l as Listener),
+      removeEventListener: (_type, l) => listeners[self].delete(l as Listener),
+    };
+  };
+  return [end(0), end(1)];
+}
+
+/** Uploads `total` bytes on one port over a `rateLink`; times only what the window governs. */
+async function upload(opts: { rate: number; delayMs: number; total: number; window: PortWindow }) {
+  const [a, b] = rateLink(opts.rate, opts.delayMs);
+  let got = 0;
+  let done: () => void = () => {};
+  const finished = new Promise<void>((r) => {
+    done = r;
+  });
+  const server = NEW.multiplexPort(b, {
+    codec: NEW.structuredCodec,
+    side: "responder",
+    window: opts.window,
+    onPort: (p) => {
+      p.addEventListener("message", (e) => {
+        got += (e.data as Uint8Array).byteLength;
+        if (got >= opts.total) done();
+      });
+      return true;
+    },
+  });
+  const caller = NEW.multiplexPort(a, {
+    codec: NEW.structuredCodec,
+    side: "initiator",
+    window: opts.window,
+  });
+  cleanups.push(async () => {
+    await caller.close();
+    await server.close();
+  });
+  const port = await openAgreed({ client: caller, server });
+  const started = performance.now();
+  for (let sent = 0; sent < opts.total; sent += 4 * KiB) {
+    port.postMessage(new Uint8Array(4 * KiB));
+    await NEW.whenPortReady(port, 16 * KiB);
+  }
+  await finished;
+  return { elapsed: performance.now() - started, server, caller };
+}
+
+describe("adaptive window over a rate-limited link", () => {
+  // 10 Mbit/s (1250 bytes/ms), RTT 40 ms: a BDP of 50 KB, against an 8 KiB start.
+  const rate = 1250;
+  const delayMs = 20;
+  const total = 384 * KiB;
+
+  it("grows past a too-small start and fills the link, where the fixed window cannot", async () => {
+    const fixed = await upload({ rate, delayMs, total, window: 8 * KiB });
+    const adaptive = await upload({
+      rate,
+      delayMs,
+      total,
+      window: { initial: 8 * KiB, min: 8 * KiB, max: 1024 * KiB },
+    });
+    expect(fixed.elapsed).toBeGreaterThan(1500);
+    expect(adaptive.elapsed).toBeLessThan(fixed.elapsed / 2);
+    const port = adaptive.server.ports()[0];
+    expect(port?.window).toBeGreaterThan(8 * KiB);
+    expect(port?.window).toBeLessThanOrEqual(1024 * KiB);
+  }, 20_000);
+
+  it("keeps the sum of a mux's windows within its budget", async () => {
+    const [a, b] = rateLink(rate, delayMs);
+    // Three ports at 8 KiB hold 24 KiB of a 32 KiB budget: 8 KiB is left to
+    // grow by, across all three, though the link's BDP (50 KB) has room for more.
+    const max = 32 * KiB;
+    const budget = 32 * KiB;
+    const window = { initial: 8 * KiB, min: 8 * KiB, max, budget };
+    const server = NEW.multiplexPort(b, {
+      codec: NEW.structuredCodec,
+      side: "responder",
+      window,
+      onPort: (p) => {
+        p.addEventListener("message", () => {});
+        return true;
+      },
+    });
+    const caller = NEW.multiplexPort(a, { codec: NEW.structuredCodec, side: "initiator", window });
+    cleanups.push(async () => {
+      await caller.close();
+      await server.close();
+    });
+    const ports = await Promise.all([caller.openPort(), caller.openPort(), caller.openPort()]);
+    // Before the ack nothing holds back: start once every port holds to its window.
+    await waitFor(
+      () =>
+        caller.ports().length === 3 &&
+        caller.ports().every((p) => p.window !== undefined) &&
+        server.ports().length === 3 &&
+        server.ports().every((p) => p.window !== undefined),
+      "the windows agreed",
+    );
+    let peak = 0;
+    let grew = 0;
+    const deadline = performance.now() + 1500;
+    await Promise.all(
+      ports.map(async (port) => {
+        while (performance.now() < deadline) {
+          port.postMessage(new Uint8Array(4 * KiB));
+          await NEW.whenPortReady(port, 16 * KiB);
+          const windows = server.ports().map((p) => p.window ?? 0);
+          peak = Math.max(
+            peak,
+            windows.reduce((n, w) => n + w, 0),
+          );
+          grew = Math.max(grew, ...windows);
+        }
+      }),
+    );
+    expect(grew).toBeGreaterThan(8 * KiB);
+    expect(peak).toBeLessThanOrEqual(budget);
+  }, 20_000);
 });
