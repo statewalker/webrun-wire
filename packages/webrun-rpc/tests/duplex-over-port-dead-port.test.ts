@@ -43,6 +43,26 @@ function openInput() {
 }
 
 describe("throughAbort", () => {
+  it("ends when the signal fired while its consumer held a value, though the source's return() never settles", async () => {
+    const controller = new AbortController();
+    let pulls = 0;
+    // A hand-written source: its second next() and its return() never settle.
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          pulls++ === 0 ? Promise.resolve({ done: false, value: 1 }) : new Promise(() => {}),
+        return: () => new Promise(() => {}),
+      }),
+    };
+    const through = throughAbort(source, controller.signal);
+    expect((await through.next()).value).toBe(1);
+    // aborted between two next() calls: the consumer was still busy with the value
+    controller.abort(new Error("gone"));
+    expect(await settledWithin(through.next(), 1000)).toEqual({
+      value: { done: true, value: undefined },
+    });
+  });
+
   it("ends on abort while the source's next() is pending", async () => {
     const controller = new AbortController();
     const { input } = openInput();

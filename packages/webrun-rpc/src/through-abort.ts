@@ -43,6 +43,9 @@ export async function* throughAbort<T>(
  * reaction per chunk until the stream ends).
  */
 function nextOrAbort<T>(iter: AsyncIterator<T>, signal: AbortSignal): Promise<IteratorResult<T>> {
+  // Aborted while the consumer held the last value: a listener added now would
+  // never fire, and the source may never settle `next()` after its `return()`.
+  if (signal.aborted) return Promise.resolve({ done: true, value: undefined });
   // `Promise.resolve`: a sync iterator's `next()` returns its result as is.
   const next = Promise.resolve(iter.next());
   return new Promise<IteratorResult<T>>((resolve, reject) => {
