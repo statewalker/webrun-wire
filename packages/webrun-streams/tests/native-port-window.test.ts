@@ -251,3 +251,89 @@ describe("native port window: a bounded send-ahead (statewalker/webrun-wire#195)
     expect(ch.channel.pipe.needsDrain).toBe(true);
   });
 });
+
+/** The credit frames among `frames`, as the bytes each grants. */
+const credits = (frames: Uint8Array[]): number[] =>
+  frames
+    .filter((f) => f[0] === CONTROL_BYTE && f[1] === 2)
+    .map((f) => new DataView(f.buffer, f.byteOffset, f.byteLength).getUint32(2));
+
+describe("native port window: credit on a full transport (review of #196)", () => {
+  /** An agreed port with a 64 KiB window whose listener consumes every message at once. */
+  async function uploadingPort(drainTimeoutMs?: number) {
+    const ch = fillableChannel();
+    const control = newNativePortMux({
+      name: "t",
+      codec: json,
+      maxMessageSize: 1,
+      window: MIN_PORT_WINDOW,
+      ...(drainTimeoutMs !== undefined ? { drainTimeoutMs } : {}),
+      open: async () => ({ ...ch.channel, window: "agreed" }),
+    });
+    const port = await control.mux.openPort();
+    port.addEventListener("message", () => {});
+    ch.deliver(hello(MIN_PORT_WINDOW));
+    await tick();
+    const frame = json.encode("u".repeat(20 * 1024));
+    return { ch, port, frame };
+  }
+
+  it("no credit goes on a transport that needs to drain; one combined credit goes after it drains", async () => {
+    const { ch, port, frame } = await uploadingPort();
+    ch.fill(1024 * 1024); // the peer stopped reading this end's bytes
+    const before = ch.sent.length;
+    for (let i = 0; i < 100; i++) ch.deliver(frame); // and keeps uploading
+    await tick();
+    await tick();
+    expect(credits(ch.sent.slice(before))).toEqual([]);
+    ch.drain();
+    await tick();
+    await tick();
+    const granted = credits(ch.sent.slice(before));
+    expect(granted.length).toBe(1);
+    expect(granted[0]).toBe(100 * frame.byteLength);
+    expect(port.closeSignal.aborted).toBe(false);
+  });
+
+  it("credit held back for drain longer than `drainTimeoutMs` fails the port", async () => {
+    const { ch, port, frame } = await uploadingPort(50);
+    ch.fill(1024 * 1024);
+    for (let i = 0; i < 10; i++) ch.deliver(frame);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(port.closeSignal.aborted).toBe(true);
+    expect(String((port.closeSignal.reason as Error).message)).toMatch(/drain/);
+    expect(ch.failed.length).toBe(1);
+  });
+});
+
+describe("native port window: `drainTimeoutMs` values (review of #196)", () => {
+  const make = (drainTimeoutMs: number, ch = fillableChannel()) =>
+    newNativePortMux({
+      name: "t",
+      codec: json,
+      maxMessageSize: 1,
+      window: MIN_PORT_WINDOW,
+      drainTimeoutMs,
+      open: async () => ({ ...ch.channel, window: "agreed" }),
+    });
+
+  it("0 and Infinity mean no bound; a negative number or NaN is refused", () => {
+    expect(() => make(0)).not.toThrow();
+    expect(() => make(Number.POSITIVE_INFINITY)).not.toThrow();
+    expect(() => make(-1)).toThrow(RangeError);
+    expect(() => make(Number.NaN)).toThrow(RangeError);
+  });
+
+  for (const value of [0, Number.POSITIVE_INFINITY, 2 ** 32]) {
+    it(`${value}: a write blocked on drain is not failed at once`, async () => {
+      const ch = fillableChannel();
+      const port = await make(value, ch).mux.openPort();
+      ch.deliver(hello(MIN_PORT_WINDOW));
+      ch.fill(1024 * 1024);
+      port.postMessage("a");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(port.closeSignal.aborted).toBe(false);
+      await port.close();
+    });
+  }
+});

@@ -144,7 +144,9 @@ export interface NativePortMuxOptions<Info> {
    * How long, in ms, a write on a windowed port may wait for its channel to
    * drain before the port fails and its channel is broken off (`fail`): a peer
    * that stops reading at the transport. Only a write blocked on drain counts:
-   * a quiet port is never timed out. Unset: no bound.
+   * a quiet port is never timed out. Credit for the peer is held back while
+   * the channel needs to drain, and counts too. Unset, 0 or Infinity: no
+   * bound; negative or NaN: a `RangeError`; past 2^31 - 1 ms: clamped to that.
    */
   drainTimeoutMs?: number;
 }
@@ -169,11 +171,17 @@ export function newNativePortMux<I = unknown>(
 ): NativePortMuxControl<I> {
   const { name, codec, maxMessageSize, onPort, connectionSignal } = options;
   checkPortWindow(name, options.window);
-  const { drainTimeoutMs } = options;
-  if (drainTimeoutMs !== undefined && !(drainTimeoutMs > 0)) {
-    throw new RangeError(
-      `${name}: \`drainTimeoutMs\` must be a positive number, got ${drainTimeoutMs}`,
-    );
+  let { drainTimeoutMs } = options;
+  if (drainTimeoutMs !== undefined) {
+    if (Number.isNaN(drainTimeoutMs) || drainTimeoutMs < 0) {
+      throw new RangeError(
+        `${name}: \`drainTimeoutMs\` must be 0 (no bound), a positive number or Infinity, got ${drainTimeoutMs}`,
+      );
+    }
+    // 0 and Infinity: no bound, as the deprecated libp2p protocol took 0.
+    if (drainTimeoutMs === 0 || drainTimeoutMs === Number.POSITIVE_INFINITY) {
+      drainTimeoutMs = undefined;
+    }
   }
   const live = new Set<NativePort>();
   let closed = false;

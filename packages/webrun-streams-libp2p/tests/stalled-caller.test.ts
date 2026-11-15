@@ -1,9 +1,16 @@
 import net from "node:net";
 import type { Libp2p } from "@libp2p/interface";
 import { multiaddr } from "@multiformats/multiaddr";
+import { deserialize, serialize } from "@statewalker/webrun-msgpack";
 import { afterEach, describe, expect, it } from "vitest";
 import { connect, portProtocolOf, serve } from "../src/connect-serve.js";
-import { DEFAULT_PORT_MAX_MESSAGE_SIZE } from "../src/port-mux.js";
+import { encodeVarint } from "../src/duplex-over-stream.js";
+import {
+  DEFAULT_PORT_MAX_MESSAGE_SIZE,
+  libp2pPortMux,
+  type StreamPort,
+  windowProtocolOf,
+} from "../src/port-mux.js";
 import { DEFAULT_PROTOCOL } from "../src/shared.js";
 import { createNode } from "./make-libp2p-pair.js";
 
@@ -143,4 +150,81 @@ describe("a caller that stalls its transport (statewalker/webrun-wire#195)", () 
     expect(worst).toBeLessThanOrEqual(DEFAULT_PORT_MAX_MESSAGE_SIZE + 64 * KiB);
     expect(state.released).toBe(true);
   }, 30_000);
+});
+
+// Review of #196: credit for the peer went out even while the stream needed to
+// drain, and no stall timer watched it. A peer that uploads without regard for
+// the window, to a port that keeps consuming, and never reads its own stream,
+// made the server append a credit frame per consumed batch to yamux's
+// unbounded write buffer, for ever. The attacker is a raw stream here: the
+// honest stack would stop uploading once it ran out of credit.
+describe("a peer that uploads and never reads (review of #196)", () => {
+  it("credit is held back while the stream needs to drain, and the stall timeout resets the stream", async () => {
+    const pair = await stalledPair();
+    const protocol = "/stall-upload/1.0.0";
+    const codec = { encode: serialize, decode: deserialize };
+    let port: StreamPort | undefined;
+    let consumed = 0;
+    const mux = await libp2pPortMux({
+      node: pair.server,
+      codec,
+      protocol,
+      window: 64 * KiB, // credit goes back per 16 KiB consumed
+      drainTimeoutMs: 2_000,
+      onPort: (p) => {
+        port = p;
+        p.addEventListener("message", (event) => {
+          consumed += (event.data as Uint8Array).byteLength;
+        });
+        return true;
+      },
+    });
+    cleanups.push(() => mux.close());
+    const stream = await pair.client.dialProtocol(pair.server.peerId, windowProtocolOf(protocol));
+    cleanups.push(() => stream.abort(new Error("test over")));
+    // The attacker never reads what the server sends: its yamux stops granting
+    // the server window on this stream, while the connection stays live.
+    stream.pause();
+    const frame = (bytes: Uint8Array) => {
+      const header = encodeVarint(bytes.byteLength);
+      const out = new Uint8Array(header.byteLength + bytes.byteLength);
+      out.set(header, 0);
+      out.set(bytes, header.byteLength);
+      return out;
+    };
+    const hello = new Uint8Array([0xc1, 0x01, 0, 0, 0, 0]);
+    new DataView(hello.buffer).setUint32(2, 64 * KiB);
+    const data = frame(codec.encode(new Uint8Array(16 * KiB).fill(1)));
+    stream.send(frame(hello));
+    const writeBuffer = () => {
+      let bytes = 0;
+      for (const c of pair.server.getConnections())
+        for (const s of c.streams)
+          if (s.protocol === windowProtocolOf(protocol)) bytes += s.writeBufferLength;
+      return bytes;
+    };
+    // Enough to spend the attacker's yamux receive window (256 KiB) on credit
+    // frames (7 bytes per 16 KiB consumed), and then some.
+    let worst = 0;
+    const started = Date.now();
+    while (consumed < 1024 * MiB && !port?.closeSignal.aborted && Date.now() - started < 40_000) {
+      if (stream.status !== "open") break;
+      if (!stream.send(data)) {
+        await Promise.race([
+          new Promise((resolve) => stream.addEventListener("drain", resolve, { once: true })),
+          new Promise((resolve) => setTimeout(resolve, 100)),
+        ]);
+      }
+      worst = Math.max(worst, writeBuffer());
+    }
+    // The upload has stopped (or the server reset it): the stall timeout ends the port.
+    const deadline = Date.now() + 10_000;
+    while (!port?.closeSignal.aborted && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(consumed).toBeGreaterThan(300 * MiB);
+    expect(worst).toBeLessThanOrEqual(1 * KiB);
+    expect(port?.closeSignal.aborted).toBe(true);
+    expect(String((port?.closeSignal.reason as Error | undefined)?.message)).toMatch(/drain/);
+  }, 90_000);
 });

@@ -37,7 +37,10 @@ What the adapter adds on top of a raw stream:
   needs to drain, so a peer that stops reading at the transport holds about one
   frame of this end's memory. A write that has waited for drain longer than
   `drainTimeoutMs` (default 5 minutes) resets the stream; a quiet call (an event
-  stream between events) is never timed out.
+  stream between events) is never timed out. Credit for the peer is held back
+  while the stream needs to drain too, and sent as one frame after it, so a peer
+  that uploads and never reads cannot grow the buffer with credit frames either;
+  it is dropped after the same timeout.
 - **Error fidelity.** A handler's `Error` reaches the caller with `message`,
   `stack` and custom fields.
 - **Cancellation** in both directions: a caller's `.return()` ends the call at
@@ -97,7 +100,7 @@ runs (Node or browser).
 | `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
 | `maxOutboundStreams` | `number` | libp2p's (64) | Passed to `dialProtocol`. |
 | `runOnLimitedConnection` | `boolean` | unset | Passed to `dialProtocol`. Allows relayed or otherwise limited connections. |
-| `drainTimeoutMs` | `number` | `DEFAULT_DRAIN_TIMEOUT_MS` (5 min) | How long a write may wait for the stream to drain before the stream is reset and the call fails. Only a write blocked on drain counts. Both protocols. |
+| `drainTimeoutMs` | `number` | `DEFAULT_DRAIN_TIMEOUT_MS` (5 min) | How long a write (or credit for the peer's upload) may wait for the stream to drain before the stream is reset and the call fails. Only what is held back for drain counts. Both protocols; on the port protocol 0 or `Infinity` means no bound (the deprecated protocol drops at once on 0). |
 | `readHighWaterBytes` | `number` | 64 KiB | **Deprecated**: the deprecated protocol only (an older server). |
 
 `ServeLibp2pParams`: `node`, `protocol`, `window`, `timeout`, `maxFrameBytes`,

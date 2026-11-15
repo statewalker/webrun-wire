@@ -100,8 +100,10 @@ export interface Libp2pPortMuxOptions {
    * How long, in ms, a write on a windowed port may wait for its stream to
    * drain (a peer that stopped reading at the transport) before the stream
    * is reset and the port fails. Only a write blocked on drain counts: a
-   * quiet call (an event stream between events) is never timed out. Default
-   * {@link DEFAULT_DRAIN_TIMEOUT_MS} (5 minutes).
+   * quiet call (an event stream between events) is never timed out. Credit
+   * for the peer is held back while the stream needs to drain, and counts
+   * too. Default {@link DEFAULT_DRAIN_TIMEOUT_MS} (5 minutes); 0 or `Infinity`:
+   * no bound.
    */
   drainTimeoutMs?: number;
 }

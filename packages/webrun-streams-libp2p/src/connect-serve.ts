@@ -90,7 +90,8 @@ export interface ConnectLibp2pParams {
    * the call fails; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes). Only
    * a write blocked on drain counts: a quiet call is never timed out. Applies
    * to the port protocol (statewalker/webrun-wire#195) and to the deprecated
-   * one.
+   * one. On the port protocol, 0 or `Infinity` means no bound (the deprecated
+   * protocol drops a backpressured stream at once on 0).
    */
   drainTimeoutMs?: number;
   /**
@@ -152,8 +153,12 @@ export interface ServeLibp2pParams {
    * stream's backpressure (nothing written while it needs to drain), a
    * stalled call holds about one frame, for at most this long. Only a write
    * blocked on drain counts: a quiet call (an event stream between events) is
-   * never timed out. Applies to the port protocol
-   * (statewalker/webrun-wire#195) and to the deprecated one.
+   * never timed out. Credit for the caller's upload is held back while the
+   * stream needs to drain, and counts too (a caller that uploads and never
+   * reads is dropped). Applies to the port protocol
+   * (statewalker/webrun-wire#195) and to the deprecated one. On the port
+   * protocol, 0 or `Infinity` means no bound (the deprecated protocol drops a
+   * backpressured stream at once on 0).
    */
   drainTimeoutMs?: number;
   /**

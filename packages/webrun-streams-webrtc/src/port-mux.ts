@@ -72,7 +72,12 @@ export interface WebRtcPortMuxOptions {
    * How long, in ms, a write on a windowed port may wait for its data channel
    * to drain (a peer that stopped reading) before the channel is closed and
    * the port fails. Only a write blocked on drain counts: a quiet port is
-   * never timed out. Default {@link DEFAULT_PORT_DRAIN_TIMEOUT_MS} (5 minutes).
+   * never timed out. Default {@link DEFAULT_PORT_DRAIN_TIMEOUT_MS} (5 minutes);
+   * 0 or `Infinity`: no bound.
+   *
+   * Windowed ports hold data while the channel's `bufferedAmount` is above
+   * {@link PORT_DRAIN_LOW_WATER} (256 KiB), which may lower throughput on
+   * links with a large bandwidth-delay product (unmeasured; statewalker/webrun-wire#189).
    */
   drainTimeoutMs?: number;
 }
