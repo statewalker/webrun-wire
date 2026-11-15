@@ -1,5 +1,24 @@
 # @statewalker/webrun-http-browser
 
+## 0.15.0
+
+### Minor Changes
+
+- e29084d: **Breaking:** the deprecated misspelt aliases are removed (#150). Import the correctly spelt names instead: `receiveIterator` (was `recieveIterator`) from webrun-streams, `receive` and `ReceiveOptions` (were `recieve` and `RecieveOptions`) from webrun-rpc, and `newInvocationChannel` (was `newInvokationChannel`) from webrun-http-browser. webrun-streams' dormant `flow-control.ts` stays until #153 is decided.
+- 689ed1d: Relay mode tells embedders apart by origin (#129). The relay iframe stamps the embedder's origin into every `REGISTER`, `UNREGISTER` and `CONNECT` it bridges, as `params.origin`. The worker passes it to `canRegister` (a new fourth argument) and to a new `canConnect` option, which can refuse a `CONNECT` before it reaches the service; `onlyRegistrantOrigin` keeps each embedder's services to that embedder, and the registrant's origin is kept in the registry. `getRelayWindowMessageHandler` gets `allowedOrigins` and `canConnect` options that refuse an embedder outright. The README documents that by default every embedder can reach every service, and `demo/demo-2.html` now serves the folder under a random key. Defaults are unchanged.
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [e29084d]
+- Updated dependencies [a3429b4]
+- Updated dependencies [98242dc]
+- Updated dependencies [e4e6228]
+- Updated dependencies [c229e2e]
+  - @statewalker/webrun-http-streams@0.7.0
+  - @statewalker/webrun-streams@0.5.0
+  - @statewalker/webrun-rpc@0.13.0
+
 ## 0.14.1
 
 ### Patch Changes

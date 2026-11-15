@@ -1,5 +1,31 @@
 # @statewalker/webrun-streams
 
+## 0.5.0
+
+### Minor Changes
+
+- e29084d: **Breaking:** the deprecated misspelt aliases are removed (#150). Import the correctly spelt names instead: `receiveIterator` (was `recieveIterator`) from webrun-streams, `receive` and `ReceiveOptions` (were `recieve` and `RecieveOptions`) from webrun-rpc, and `newInvocationChannel` (was `newInvokationChannel`) from webrun-http-browser. webrun-streams' dormant `flow-control.ts` stays until #153 is decided.
+- a3429b4: One port-lifecycle module behind the WebRTC and libp2p native port muxes (#152).
+  
+  - `@statewalker/webrun-streams` adds `newNativePortMux`. It owns the codec over each channel's bytes, messages held until a port's first listener, close signals, accept and refuse, binding of the caller's signal, and close-all. It also adds the `ValueCodec`, `NativePort` and `NativeChannel` types.
+  - `webrtcPortMux` and `libp2pPortMux` are built on it. Each supplies only how to open a channel, how inbound channels arrive, and the channel's bytes: the data channel goes through `newMessagePipe`, the stream through `messageTargetOverStream`.
+  - `DataChannelPort` and `StreamPort` are now the shared `NativePort`.
+  - libp2p now holds messages that arrive before a port's first listener, as WebRTC did.
+  - A frame neither transport can decode now fails the port the same way on both. Over libp2p that still resets the stream.
+  - `@statewalker/webrun-streams-conformance` adds `describePortMux`, the contract suite. It runs against an in-memory transport, against libp2p, and against WebRTC (in the browser suite).
+- 98242dc: One pipe module behind the four `messageTargetOver*` adapters (#151).
+  
+  - `@statewalker/webrun-streams` adds `newMessagePipe(transport, options)`. It owns the listener set, delivery that a faulty listener cannot stop, the pipe's life, the byte check on `postMessage`, the frame ceiling, `bufferedAmount` / `whenDrained` and `close()`. A transport supplies only `send`, its buffered bytes, its drain wait and its close.
+  - `messageTargetOverWebSocket`, `messageTargetOverPeerJs`, `messageTargetOverLiveKit` and `messageTargetOverByteChannel` are now built on it, and depend on `@statewalker/webrun-streams` at runtime. Each target now carries `closeSignal` and `maxMessageSize`. The WebSocket and byte-channel adapters gain an optional `maxFrameBytes` (unset by default, as before), and the WebSocket adapter an optional `maxMessageSize`.
+  - `@statewalker/webrun-rpc`'s `overPipe` takes `signal` and `maxMessageSize` from the pipe's own `closeSignal` and `maxMessageSize` when they are not given, so `overPipe(target, { codec, side })` is enough.
+  - `@statewalker/webrun-streams-conformance` adds `describeMessagePipe`, the pipe contract suite. It runs against an in-memory transport and against each adapter.
+  
+  Existing call sites keep working: adapters still return `{ target, signal, maxMessageSize }`.
+
+### Patch Changes
+
+- e4e6228: A WebRTC port no longer loses what the peer sends as soon as its data channel opens (a regression from #152, not yet released). A `NativeChannel` may now carry `ready`: `newNativePortMux` builds the port, which starts listening and holding messages, before it waits for the channel to open, as `webrtcPortMux` did before #152.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,5 +1,28 @@
 # @statewalker/webrun-rpc
 
+## 0.13.0
+
+### Minor Changes
+
+- e29084d: **Breaking:** the deprecated misspelt aliases are removed (#150). Import the correctly spelt names instead: `receiveIterator` (was `recieveIterator`) from webrun-streams, `receive` and `ReceiveOptions` (were `recieve` and `RecieveOptions`) from webrun-rpc, and `newInvocationChannel` (was `newInvokationChannel`) from webrun-http-browser. webrun-streams' dormant `flow-control.ts` stays until #153 is decided.
+- 98242dc: One pipe module behind the four `messageTargetOver*` adapters (#151).
+  
+  - `@statewalker/webrun-streams` adds `newMessagePipe(transport, options)`. It owns the listener set, delivery that a faulty listener cannot stop, the pipe's life, the byte check on `postMessage`, the frame ceiling, `bufferedAmount` / `whenDrained` and `close()`. A transport supplies only `send`, its buffered bytes, its drain wait and its close.
+  - `messageTargetOverWebSocket`, `messageTargetOverPeerJs`, `messageTargetOverLiveKit` and `messageTargetOverByteChannel` are now built on it, and depend on `@statewalker/webrun-streams` at runtime. Each target now carries `closeSignal` and `maxMessageSize`. The WebSocket and byte-channel adapters gain an optional `maxFrameBytes` (unset by default, as before), and the WebSocket adapter an optional `maxMessageSize`.
+  - `@statewalker/webrun-rpc`'s `overPipe` takes `signal` and `maxMessageSize` from the pipe's own `closeSignal` and `maxMessageSize` when they are not given, so `overPipe(target, { codec, side })` is enough.
+  - `@statewalker/webrun-streams-conformance` adds `describeMessagePipe`, the pipe contract suite. It runs against an in-memory transport and against each adapter.
+  
+  Existing call sites keep working: adapters still return `{ target, signal, maxMessageSize }`.
+- c229e2e: The responder bounds the window a peer's `open` asks for (#145). Windowed ports gain the `"window"` capability. Where both ends speak it, the responder holds the port to the smaller of the opener's window and its own `window` option, and names it in its ack (`{ type: "credit", bytes: 0, caps, window }`); the opener takes it, so an opener can no longer lift the responder's layer-2 bound by asking for a huge window. An ack only ever shrinks the opener's window. Ports opened later on the same mux ask for the learned window. A port presumed with `presumeAck: "always"` that sent more than the clamped window before its ack carries on, and fails only if the responder refused what passed. Openers from earlier versions do not list `"window"`, so they keep the window they ask for, as before, and they keep working.
+
+### Patch Changes
+
+- Updated dependencies [e29084d]
+- Updated dependencies [a3429b4]
+- Updated dependencies [98242dc]
+- Updated dependencies [e4e6228]
+  - @statewalker/webrun-streams@0.5.0
+
 ## 0.12.1
 
 ### Patch Changes

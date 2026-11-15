@@ -1,5 +1,21 @@
 # @statewalker/webrun-rpc-http
 
+## 0.4.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies [e29084d]
+- Updated dependencies [a3429b4]
+- Updated dependencies [98242dc]
+- Updated dependencies [e4e6228]
+  - @statewalker/webrun-streams@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes
