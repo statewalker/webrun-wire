@@ -5,6 +5,7 @@ import {
   duplexOverPort,
   multiplexPort,
   type PortMux,
+  type PortWindow,
   serveDuplexOverPort,
   structuredCodec,
 } from "../src/index.js";
@@ -17,7 +18,21 @@ import {
  * L6 (spec D17): this stack withholds a chunk's confirmation until the consumer has pulled past
  * it, so a producer is never more than a chunk ahead; the pair declares one 4 KiB chunk.
  */
-const makeNewStackPair: MakePair = async (tuning) => {
+const makeNewStackPair: MakePair = (tuning) => makeStackPair(tuning);
+
+/**
+ * The same stack with a `window` on both muxes. A windowed port pipelines its
+ * chunks, so a stalled consumer has the producer up to the largest window the
+ * receiver grants ahead, plus a chunk in each end's hands.
+ */
+function makeWindowedPair(window: PortWindow, largest: number): MakePair {
+  return (tuning) => makeStackPair(tuning, { window, runAheadBytes: largest + 2 * 4096 });
+}
+
+const makeStackPair = async (
+  tuning: Parameters<MakePair>[0],
+  { window, runAheadBytes = 4096 }: { window?: PortWindow; runAheadBytes?: number } = {},
+): ReturnType<MakePair> => {
   const channel = new MessageChannel();
   channel.port1.start();
   channel.port2.start();
@@ -26,12 +41,13 @@ const makeNewStackPair: MakePair = async (tuning) => {
   let clientMux: PortMux | undefined;
 
   return {
-    runAheadBytes: 4096,
+    runAheadBytes,
     async connect() {
       clientMux ??= multiplexPort(channel.port1, {
         codec: structuredCodec,
         side: "initiator",
         maxMessageSize: tuning?.maxMessageSize,
+        window,
       });
       const mux = clientMux;
       const call: Duplex = (input) =>
@@ -52,6 +68,7 @@ const makeNewStackPair: MakePair = async (tuning) => {
         codec: structuredCodec,
         side: "responder",
         maxMessageSize: tuning?.maxMessageSize,
+        window,
         onPort: (port) => {
           serveDuplexOverPort(port, handler, { maxMessageSize: mux.maxMessageSize });
         },
@@ -86,3 +103,14 @@ const makeNewStackPair: MakePair = async (tuning) => {
 };
 
 describeDuplexAdapter("webrun-rpc (multiplexPort + duplexOverPort)", makeNewStackPair);
+
+// #188: the same suite over an adaptive window, and over the fixed one it
+// starts from.
+describeDuplexAdapter(
+  "webrun-rpc (multiplexPort + duplexOverPort, window 16 KiB)",
+  makeWindowedPair(16 * 1024, 16 * 1024),
+);
+describeDuplexAdapter(
+  "webrun-rpc (multiplexPort + duplexOverPort, adaptive window 16-128 KiB)",
+  makeWindowedPair({ initial: 16 * 1024, max: 128 * 1024 }, 128 * 1024),
+);

@@ -1,4 +1,5 @@
 import type { MessageTarget } from "./message-target.js";
+import type { PortWindow } from "./window-tuner.js";
 
 /**
  * What a multiplexer exchanges over the underlying port.
@@ -18,7 +19,10 @@ export type PortEnvelope =
    * The responder's zero-byte ack carries `caps`, the shared subset, when the
    * opener listed some, and, when they share `"window"`, the `window` the
    * responder holds the port to: the opener's, or the responder's own if that
-   * is smaller.
+   * is smaller. After the ack, a `window` on a credit is the window the
+   * receiver grants from now on (an adaptive window, #188): larger or
+   * smaller, it never moves the right edge (bytes granted plus the window)
+   * back. An earlier version ignores it there.
    */
   | {
       type: "credit";
@@ -149,8 +153,29 @@ export interface PortMuxOptions {
    * opener lists the `"window"` capability, a larger window it asks for is
    * clamped to this one, and the ack says so; the opener takes it. An opener
    * that does not list it (an earlier version) keeps the window it asked for.
+   *
+   * ADAPTIVE: `{ initial, max }` or `"auto"` (`DEFAULT_AUTO_WINDOW`: 256 KiB
+   * to 16 MiB). A port this mux opens asks for `initial`; on a port the peer
+   * opens, `max` is the most this end grants (the clamp above). From the
+   * window agreed for the port, the receiving end of each direction adapts
+   * what it grants, like TCP's receive-buffer autotuning, and announces it
+   * in its credits (`{ type: "credit", id, bytes, window }`): it doubles
+   * while the port is limited by its window (the consumer took at least half
+   * a window in a round trip) and the round trip stays near its minimum,
+   * and shrinks by a quarter when the round trip passes twice its minimum.
+   * It never grants more than `max`, so a port never holds more than `max`
+   * of this end's memory, and never less than the window agreed for the
+   * port. A smaller window is reached by granting less as the consumer frees
+   * bytes, so what the peer sent under the larger one is never refused; the
+   * peer's sends follow the latest window it heard. Each end adapts only
+   * what it receives: the window that holds its own sends is the peer's to
+   * set. A peer of an earlier version ignores the announced window and keeps
+   * the agreed one, which an adaptive end never goes below.
+   *
+   * A plain number keeps the fixed window exactly as before: this end never
+   * announces another (it still follows one its peer announces).
    */
-  window?: number;
+  window?: PortWindow;
   /**
    * When a windowed port this mux opens takes its window as agreed: at once,
    * or only once the responder's ack arrives, a round trip later. Until then
@@ -252,8 +277,18 @@ export interface PortInfo {
    * when it listed `caps` and this mux had already read a `credit`. Absent on
    * a port that asked for one from a peer that never answers credit (an
    * older version).
+   *
+   * It is the window this end grants the peer (what may be delivered here
+   * and not yet consumed); with an adaptive window (`PortMuxOptions.window`)
+   * it moves.
    */
   window?: number;
+  /**
+   * With a window, reported alongside `window`: the window the peer grants
+   * this end, which holds its sends. The agreed one, or the latest an
+   * adaptive peer announced.
+   */
+  sendWindow?: number;
   /** With a window: bytes waiting in this port's send queue. */
   queued?: number;
   /** With a window: bytes sent and not yet granted back by the peer. */

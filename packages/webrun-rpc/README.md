@@ -77,6 +77,7 @@ Port multiplexing:
 | `transferPortMux(target, options?: TransferPortMuxOptions)` | Multiplexing with real transferred `MessagePort`s. |
 | `PortMux` | `openPort(meta?, { signal }?)`, `close(reason?)`, `ports?()`, `maxMessageSize`. |
 | `portBufferedAmount(port)`, `whenPortReady(port, below?)` | A windowed port's queued bytes, and a promise for room. See below. |
+| `PortWindow`, `AdaptiveWindow`, `DEFAULT_AUTO_WINDOW` | The `window` option: a number, `{ initial, max }` or `"auto"` (256 KiB to 16 MiB). See "A port's window adapts after the ack" below. |
 | `PortInfo`, `OpenPortOptions` | What `ports()` reports per port (`id`, `meta`, `openedAt`, `lastActivity`); `openPort`'s options. |
 | `PortCodec`, `PortEnvelope` | The wire seam: `post(port, envelope, transfer?)`, `read(event)`, and optionally `encode(envelope)` / `decode(data)` for byte codecs (exact window sizes, frames) and `halfClose: true` for a codec that reads `end`. |
 | `structuredCodec` | Envelopes passed through unencoded. |
@@ -291,7 +292,7 @@ port cannot grow memory here.
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
-| `window` | Per-port flow control in bytes, off when unset. On a port the peer opens, it is also the most this end grants: a larger window asked for by an opener that speaks `"window"` is clamped to it. See "A port with a window holds only its own bytes" and "The responder bounds the window" below. |
+| `window` | Per-port flow control in bytes, off when unset. On a port the peer opens, it is also the most this end grants: a larger window asked for by an opener that speaks `"window"` is clamped to it. See "A port with a window holds only its own bytes" and "The responder bounds the window" below. `{ initial, max }` or `"auto"` adapts it after the ack: see "A port's window adapts after the ack" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
 | `maxReassembledBytes` | Ceiling on what the peer's framed messages hold past their ports' windows, summed over all ports, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what a port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
@@ -409,6 +410,33 @@ the same window. An ack can only shrink the opener's window, never widen it. A r
 version before it) keeps the window it asked for: clamping it unannounced would fail this end's
 checks on its honest traffic. So a peer bounded this way is one that runs this version or later.
 `tests/port-window-clamp.test.ts` covers it, against the published 0.10 too.
+
+**A port's window adapts after the ack** (statewalker/webrun-wire#188). With `window: { initial,
+max }`, or `"auto"` (`DEFAULT_AUTO_WINDOW`, 256 KiB to 16 MiB), a port this mux opens asks for
+`initial`, and on a port the peer opens `max` is the clamp above. From the window agreed for the
+port, the receiving end of each direction adapts what it grants, like TCP's receive-buffer
+autotuning, and says so in its credits: `{ type: "credit", id, bytes, window }`. It measures one
+round trip at a time, from a credit that moves the window's right edge to the first byte past the
+old edge, which the peer could only send once that credit arrived; the consumer's own pace is not
+in it.
+
+- The round trip stays near its minimum and the consumer took at least half a window during it
+  (the port is limited by its window, not by its reader or its writer): the window doubles.
+- The round trip passes twice its minimum (bytes queue somewhere, or the path got longer): the
+  window shrinks by a quarter. A minimum not seen again for 10 s gives way to the latest sample.
+- It never grants more than `max`, so a port never holds more than `max` of this end's memory, and
+  never less than the window agreed for the port. A reader that stops holds the window it had, at
+  most `max`; a reader slower than the link never grows it.
+
+A smaller window never refuses what the peer sent under the larger one: the receiver never moves
+the right edge (bytes granted plus the window) back, it grants less as its consumer frees bytes
+until the window is down to the new size. The sender holds its sends to the latest window it
+heard. Each end adapts only what it receives; a fixed `window: n` never announces another window
+and stays exactly as before, but it follows one an adaptive peer announces. A peer of an earlier
+version ignores a `window` on a credit after the ack and keeps the agreed window, which an
+adaptive end never goes below, so no capability gates it. `tests/port-window-adaptive.test.ts`
+covers it, against the published 0.14 both ways; `tests/window-tuner.test.ts` covers the
+adaptation on explicit time.
 
 **Where `end` is agreed, each direction of a port can end on its own.** An `end` envelope leaves
 behind everything already posted on that port: it is a size-0 item in the port's window queue, so

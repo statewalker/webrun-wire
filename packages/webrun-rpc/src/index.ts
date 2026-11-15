@@ -39,3 +39,8 @@ export * from "./receive.js";
 export * from "./send.js";
 export { structuredCodec } from "./structured-codec.js";
 export * from "./transfer-port-mux.js";
+export {
+  type AdaptiveWindow,
+  DEFAULT_AUTO_WINDOW,
+  type PortWindow,
+} from "./window-tuner.js";
