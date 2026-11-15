@@ -41,6 +41,13 @@ export interface NativeChannel {
   /** The channel's bytes. */
   pipe: BytePipeTarget;
   /**
+   * Resolves once the channel carries messages, for a channel `open` hands
+   * back while it is still opening (a WebRTC data channel). The port is
+   * built first, so what the peer sends meanwhile is held for it; `openPort`
+   * resolves once this does, and rejects (closing the port) if it rejects.
+   */
+  ready?: Promise<void>;
+  /**
    * Ends the channel because this side broke it off: a port refused, a frame
    * the codec cannot decode. A transport that can tell its peer (a libp2p
    * stream reset) does so here. Default: `pipe.close()`.
@@ -243,6 +250,17 @@ export function newNativePortMux<I = unknown>(
         throw new Error(`${name}: port mux closed`);
       }
       const { port } = wrap(channel);
+      if (channel.ready) {
+        try {
+          await channel.ready;
+        } catch (err) {
+          void port.close();
+          if (closing.signal.aborted && !signal?.aborted) {
+            throw new Error(`${name}: port mux closed`, { cause: err });
+          }
+          throw err;
+        }
+      }
       if (signal) {
         const onAbort = () => void port.close();
         if (signal.aborted) onAbort();

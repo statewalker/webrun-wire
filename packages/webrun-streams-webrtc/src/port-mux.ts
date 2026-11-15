@@ -164,7 +164,10 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
       });
       const pipe = pipeOf(dc);
       const gone = AbortSignal.any([pipe.closeSignal, connectionGone.signal]);
-      await new Promise<void>((resolve, reject) => {
+      // Handed back at once, with `ready`: the port is built (and listening)
+      // before the channel opens, so what the peer sends as soon as it sees the
+      // channel is held for it rather than lost.
+      const ready = new Promise<void>((resolve, reject) => {
         if (gone.aborted) {
           void pipe.close();
           return reject(gone.reason);
@@ -193,7 +196,7 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
         gone.addEventListener("abort", fail, { once: true });
         signal?.addEventListener("abort", cancel, { once: true });
       });
-      return { pipe };
+      return { pipe, ready };
     },
     stopAccepting() {
       pc.removeEventListener("datachannel", onChannel);

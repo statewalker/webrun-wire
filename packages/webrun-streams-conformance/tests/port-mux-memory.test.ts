@@ -123,3 +123,47 @@ describe("newNativePortMux specifics (review of #182)", () => {
     expect(calls).not.toContain("close");
   });
 });
+
+describe("newNativePortMux: a channel still opening (webrun-wire#182 follow-up)", () => {
+  it("a message the peer sends before the channel is ready reaches the port", async () => {
+    const [near, far] = channelPair();
+    let markReady!: () => void;
+    const ready = new Promise<void>((r) => {
+      markReady = r;
+    });
+    const control = newNativePortMux({
+      name: "memory",
+      codec: {
+        encode: (v) => new TextEncoder().encode(JSON.stringify(v)),
+        decode: (b) => JSON.parse(new TextDecoder().decode(b)),
+      },
+      maxMessageSize: 1024,
+      open: async () => ({ ...near, ready }),
+    });
+    let resolved = false;
+    const opening = control.mux.openPort().then((p) => {
+      resolved = true;
+      return p;
+    });
+    // The peer answers at once, before this end's channel reports it is ready.
+    far.pipe.postMessage(new TextEncoder().encode(JSON.stringify({ greeting: 1 })));
+    await new Promise((r) => setTimeout(r, 10));
+    // openPort waits for the channel to be ready...
+    expect(resolved).toBe(false);
+    markReady();
+    const port = await opening;
+    const got = await new Promise((r) => port.addEventListener("message", (e) => r(e.data)));
+    expect(got).toEqual({ greeting: 1 });
+  });
+
+  it("a channel that fails before it is ready rejects openPort and leaves no port behind", async () => {
+    const [near] = channelPair();
+    const control = newNativePortMux({
+      name: "memory",
+      codec: { encode: () => new Uint8Array(0), decode: () => null },
+      maxMessageSize: 1,
+      open: async () => ({ ...near, ready: Promise.reject(new Error("never opened")) }),
+    });
+    await expect(control.mux.openPort()).rejects.toThrow(/never opened/);
+  });
+});
