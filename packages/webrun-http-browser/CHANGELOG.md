@@ -1,5 +1,23 @@
 # @statewalker/webrun-http-browser
 
+## 0.16.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: dist/index.js, dist/relay-sw.js, dist/relay-worker.js, dist/sw-worker.js, dist/sw.js, 1 more
+  - @statewalker/webrun-rpc crosses a breaking line
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [d9dc580]
+  - @statewalker/webrun-http-streams@0.8.0
+  - @statewalker/webrun-streams@0.6.0
+  - @statewalker/webrun-rpc@0.14.0
+
 ## 0.15.0
 
 ### Minor Changes

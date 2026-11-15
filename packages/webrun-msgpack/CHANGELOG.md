@@ -1,5 +1,18 @@
 # @statewalker/webrun-msgpack
 
+## 0.13.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-rpc crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies [d9dc580]
+  - @statewalker/webrun-rpc@0.14.0
+
 ## 0.12.0
 
 ### Minor Changes
