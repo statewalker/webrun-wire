@@ -8,6 +8,11 @@ export {
   type MessagePipeHarness,
 } from "./describe-message-pipe.js";
 export {
+  describePortMux,
+  type MakePortMuxHarness,
+  type PortMuxHarness,
+} from "./describe-port-mux.js";
+export {
   type ConnectServePair,
   type MakePair,
   makeLoopbackPair,

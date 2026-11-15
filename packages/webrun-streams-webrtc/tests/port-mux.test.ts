@@ -59,6 +59,27 @@ if (isBrowser) {
     makeNativePortPair,
   );
 
+  // The native port lifecycle contract (statewalker/webrun-wire#152): the
+  // same suite libp2p and an in-memory transport run.
+  const { describePortMux } = await import("@statewalker/webrun-streams-conformance");
+  describePortMux("webrtcPortMux", async (portCodec) => {
+    const { clientPc, serverPc } = await connectedPeers();
+    const opener = await webrtcPortMux({ pc: clientPc, codec: portCodec });
+    let serving: Awaited<ReturnType<typeof webrtcPortMux>> | undefined;
+    return {
+      opener,
+      async serve(onPort) {
+        serving = await webrtcPortMux({ pc: serverPc, codec: portCodec, onPort });
+        return serving;
+      },
+      async dispose() {
+        await serving?.close();
+        clientPc.close();
+        serverPc.close();
+      },
+    };
+  });
+
   describe("webrtcPortMux", () => {
     it("each port is its own data channel, labelled; ports from other users of the connection are left alone", async () => {
       const { clientPc, serverPc } = await connectedPeers();
