@@ -291,7 +291,7 @@ port cannot grow memory here.
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
-| `window` | Per-port flow control in bytes, off when unset. See "A port with a window holds only its own bytes" below. |
+| `window` | Per-port flow control in bytes, off when unset. On a port the peer opens, it is also the most this end grants: a larger window asked for by an opener that speaks `"window"` is clamped to it. See "A port with a window holds only its own bytes" and "The responder bounds the window" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
 | `maxReassembledBytes` | Ceiling on what the peer's framed messages hold past their ports' windows, summed over all ports, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what a port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
@@ -371,8 +371,11 @@ So from the second port on (from the first with `"always"`) a request and its re
 round trip, head and body together, also for a streamed upload, and against a 0.10 responder as
 well. A 0.10 opener paired with a newer responder gets the responder's half: a GET's head and body
 together from the second port on, its own uploads still two round trips. The window is the
-opener's own, so the ack can contradict a presumption only in its sizing (`exact`) or its
-capabilities. Then no later port on that mux presumes, and the port fails, closing with reason
+opener's own unless the responder clamps it (below): a presuming port asks for the window an
+earlier ack named, and one that already sent more than a clamped window before its ack carries
+on: it fails only if the responder refused what passed its window (the responder accepts up to its
+window plus one message), which closes the port. Otherwise the ack can
+contradict a presumption only in its sizing (`exact`) or its capabilities. Then no later port on that mux presumes, and the port fails, closing with reason
 `"protocol"`, if it posted anything already (a pipelined chunk the peer ignores, or bytes counted
 the other way), or takes the ack as it is if it posted nothing. A port refused without an ack
 (`maxPorts`) or after one (`onPort`) closes as always; until the refusal arrives, a presuming
@@ -381,7 +384,7 @@ opener may have sent up to one window of it, which the responder drops without b
 time, against the published 0.10.2 and 0.8.0 too.
 
 **A windowed port agrees capabilities in its handshake.** A windowed `open` also lists
-`caps: ["pipeline", "end"]` (`end` only over a codec that declares it, below), what this mux
+`caps: ["pipeline", "end", "window"]` (`end` only over a codec that declares it, below), what this mux
 speaks on the port, and the responder's ack answers with the
 subset both speak, only to an opener that listed some: an older peer never receives a `caps` it
 could misread. There is no option to offer fewer. `duplexOverPort` reads the agreement (see "Flow
@@ -390,6 +393,16 @@ meaning. The responder holds its own sends back only once the opener has answere
 once it has read a `credit` on this mux before (see "An exchange takes one round trip" above): a
 responder over a codec that drops credit envelopes would otherwise wedge its own port after one
 window.
+
+**The responder bounds the window.** An `open` names the window the opener wants, and a peer
+controls that number. Where both ends speak `"window"`, the responder holds the port to the
+smaller of the opener's window and its own (`window`), and its ack names it,
+`{ type: "credit", id, bytes: 0, caps, window }`; the opener takes it, so both ends count against
+the same window. An ack can only shrink the opener's window, never widen it. A responder with no
+`window` of its own takes the opener's, as before. An opener that does not list `"window"` (any
+version before it) keeps the window it asked for: clamping it unannounced would fail this end's
+checks on its honest traffic. So a peer bounded this way is one that runs this version or later.
+`tests/port-window-clamp.test.ts` covers it, against the published 0.10 too.
 
 **Where `end` is agreed, each direction of a port can end on its own.** An `end` envelope leaves
 behind everything already posted on that port: it is a size-0 item in the port's window queue, so
@@ -492,7 +505,7 @@ already claimed with the wrong parity.
 
 `PortEnvelope` is `{ type: "open", id, meta?, window?, exact?, caps? }`,
 `{ type: "message", id, payload }`, `{ type: "close", id, reason? }`, with a window
-`{ type: "credit", id, bytes, exact?, caps? }` and, where agreed, `{ type: "end", id }`, with
+`{ type: "credit", id, bytes, exact?, caps?, window? }` and, where agreed, `{ type: "end", id }`, with
 `frameSize` `{ type: "frame", id, data, last? }`, and with `keepalive` `{ type: "ping", id }` /
 `{ type: "pong", id }` (on `Number.MAX_SAFE_INTEGER`). The codecs' `read` accept only objects with a non-negative integer `id`
 and one of those eight types, so other traffic on a shared port is

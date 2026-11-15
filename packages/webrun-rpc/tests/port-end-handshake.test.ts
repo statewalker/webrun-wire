@@ -65,25 +65,26 @@ function responder(pipe: MessageTarget, window?: number) {
 }
 
 describe("end in the windowed handshake", () => {
-  it("a windowed open offers pipeline and end, and the ack answers both", async () => {
+  it("a windowed open offers pipeline, end and window, and the ack answers them", async () => {
     const ch = channel();
     const peer = hostile(ch.port2);
     const a = multiplexPort(ch.port1, { codec: structuredCodec, window: 64 * KiB });
     cleanups.push(() => a.close());
     await a.openPort({ kind: "stream" });
     await waitFor("the open", () => peer.received.length > 0);
-    expect(peer.received[0]).toMatchObject({ type: "open", caps: ["pipeline", "end"] });
+    expect(peer.received[0]).toMatchObject({ type: "open", caps: ["pipeline", "end", "window"] });
 
     const ch2 = channel();
     const opener = hostile(ch2.port1);
     responder(ch2.port2);
-    opener.post({ type: "open", id: 0, window: 64 * KiB, caps: ["pipeline", "end"] });
+    opener.post({ type: "open", id: 0, window: 64 * KiB, caps: ["pipeline", "end", "window"] });
     await waitFor("the ack", () => opener.received.length > 0);
     expect(opener.received[0]).toEqual({
       type: "credit",
       id: 0,
       bytes: 0,
-      caps: ["pipeline", "end"],
+      caps: ["pipeline", "end", "window"],
+      window: 64 * KiB,
     });
   });
 
@@ -237,9 +238,9 @@ describe("end needs a codec that declares it reads end (halfClose)", () => {
       const open = seenB.find((e) => e.type === "open");
       const ack = seenA.find((e) => e.type === "credit");
       expect(open).toMatchObject({
-        caps: openerCodec === legacyCodec ? ["pipeline"] : ["pipeline", "end"],
+        caps: openerCodec === legacyCodec ? ["pipeline", "window"] : ["pipeline", "end", "window"],
       });
-      expect(ack).toMatchObject({ caps: ["pipeline"] });
+      expect(ack).toMatchObject({ caps: ["pipeline", "window"] });
 
       // The fallback: neither end may end, so a stream run on the port ends
       // with its last chunks and the caller's close.

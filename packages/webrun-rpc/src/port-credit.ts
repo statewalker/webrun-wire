@@ -60,8 +60,13 @@ export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
   return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
 }
 
-/** A capability two ends agree on for one windowed port, in its `open` and the ack. */
-export type PortCap = "pipeline" | "end";
+/**
+ * A capability two ends agree on for one windowed port, in its `open` and the
+ * ack. `"window"`: the
+ * responder's ack carries the window it holds the port to, never more than
+ * the opener asked for, and the opener takes it.
+ */
+export type PortCap = "pipeline" | "end" | "window";
 
 /**
  * What two ends have agreed for one windowed port so far. `caps`: what both

@@ -76,7 +76,7 @@ export async function streamPorts(
   const port1 = await client.openPort({ kind: "stream" });
   const port2 = await served;
   await Promise.all([acked, answered]);
-  if (JSON.stringify(ackCaps) !== JSON.stringify(["pipeline", "end"]) || answer !== 0) {
+  if (JSON.stringify(ackCaps) !== JSON.stringify(["pipeline", "end", "window"]) || answer !== 0) {
     throw new Error(`the ack agreed ${JSON.stringify(ackCaps)}, answered by ${answer}`);
   }
   return {
