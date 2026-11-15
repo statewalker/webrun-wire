@@ -35,4 +35,10 @@ export interface MessageTarget extends MessageSource, MessageSink {
    * An adapter supplies it by shape, without importing this package.
    */
   readonly closeSignal?: AbortSignal;
+  /**
+   * Optional: the largest payload one message may carry over this pipe, where
+   * the transport has a ceiling. `overPipe` takes it when its own
+   * `maxMessageSize` option is unset.
+   */
+  readonly maxMessageSize?: number;
 }

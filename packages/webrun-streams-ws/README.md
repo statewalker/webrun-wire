@@ -31,8 +31,9 @@ runs over any other transport that implements the seam.
 pnpm add @statewalker/webrun-streams-ws @statewalker/webrun-rpc @statewalker/webrun-msgpack
 ```
 
-The pipe imports nothing from this repository; `@statewalker/webrun-rpc` and
-`@statewalker/webrun-msgpack` are what you run over it. No peer dependencies.
+The pipe is built on `newMessagePipe` from `@statewalker/webrun-streams`, its one
+runtime dependency; `@statewalker/webrun-rpc` and `@statewalker/webrun-msgpack` are
+what you run over it. No peer dependencies.
 One entry point, `.`.
 
 - **Browser and worker**: `openWebSocket` uses the global `WebSocket`.
@@ -252,9 +253,9 @@ shared CI hardware is unreliable, and it is excluded from `pnpm test`.
 
 ### Dependencies
 
-- None at runtime from this repository: `src/` imports nothing outside the
-  package, and `messageTargetOverWebSocket` returns a `MessageTarget` by
-  shape.
+- `@statewalker/webrun-streams` at runtime, for `newMessagePipe`: the pipe module every transport adapter shares (listeners, delivery, life, the byte check, the frame ceiling, drain, close), so a pipe rule is fixed once for all of them (#151). The target is a `MessageTarget` by shape and carries its own `closeSignal` and `maxMessageSize`, so `overPipe(target, { codec, side })` needs nothing else.
+  `messageTargetOverWebSocket` takes `maxFrameBytes` and `maxMessageSize`
+  options, both unset by default.
 - `ws`, `@statewalker/webrun-rpc`, `@statewalker/webrun-msgpack` and
   `@statewalker/webrun-streams-conformance` are dev dependencies used only by
   the tests; consumers supply their own `webrun-rpc` and codec.

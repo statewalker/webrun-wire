@@ -59,6 +59,7 @@ runs in browsers, workers and Node.
 | `splitLines(it)` / `joinLines(it)` | Split string chunks on `\n` (lines may span chunks); append `\n` to each string. |
 | `encodeJsonl(it)` / `decodeJsonl(it)` | Values to `\n`-terminated JSON strings; string chunks to parsed values. `decodeJsonl` splits lines itself and skips blank lines. |
 | `map(it, fn)` | Map an `AsyncIterable<I>` through `fn: (item) => O \| Promise<O>`. |
+| `newMessagePipe(transport, options)` | One pipe of byte messages over a transport, for `overPipe`: owns the listener set, delivery past faulty listeners, the pipe's life (`closeSignal`), the byte check on `postMessage`, the frame ceiling (`maxFrameBytes`), `bufferedAmount` / `whenDrained` and `close()`. The transport supplies `send` and, optionally, `canSend`, `bufferedAmount`, `isDrained` / `whenDrained`, `flush` and `close`, and calls `deliver(data)` / `end(reason)`. Every `webrun-streams-*` adapter is built on it; `describeMessagePipe` in `@statewalker/webrun-streams-conformance` is its contract suite. `viewBytes(data)` and `DEFAULT_DRAIN_LOW_WATER` come with it. |
 | `newAsyncGenerator(init, skipValues?)` | Bridge `next(value)` / `done(error?)` callbacks into an `AsyncGenerator<T>`. Both callbacks return `Promise<boolean>`. |
 | `sendIterator(send, iterable)` | Drain an iterable into `send({ done, value, error })` calls, ending with exactly one `{ done: true }` chunk. |
 | `receiveIterator(installer)` | Inverse of `sendIterator`: turn delivered chunks into an `AsyncGenerator<T>`. |

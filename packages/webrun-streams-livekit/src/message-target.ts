@@ -1,6 +1,10 @@
+import {
+  DEFAULT_DRAIN_LOW_WATER,
+  type MessagePipe,
+  type MessagePipeTarget,
+  newMessagePipe,
+} from "@statewalker/webrun-streams";
 import type { Room } from "livekit-client";
-
-type Listener = (event: MessageEvent) => void | Promise<void>;
 
 /**
  * The largest data packet livekit-client (2.x) publishes: `RTCEngine` refuses
@@ -29,7 +33,7 @@ export const DEFAULT_MAX_MESSAGE_SIZE = 12 * 1024;
  * `whenDrained` resolves once the bytes whose publish has not settled are at
  * most this: the room can take more.
  */
-export const DRAIN_LOW_WATER = 256 * 1024;
+export const DRAIN_LOW_WATER = DEFAULT_DRAIN_LOW_WATER;
 
 export interface MessageTargetOverLiveKitOptions {
   /** The largest packet posted; past it the pipe ends with `RangeError`. Default {@link DEFAULT_MAX_FRAME_BYTES}. */
@@ -45,23 +49,16 @@ export interface MessageTargetOverLiveKitOptions {
 }
 
 /** What `messageTargetOverLiveKit` gives: a pipe of bytes to one participant, its life, and its payload ceiling. */
-export interface LiveKitMessageTarget {
+export interface LiveKitMessageTarget extends MessagePipe {
   /**
    * A `MessageTarget` (as `@statewalker/webrun-rpc` defines it) whose messages
-   * are `Uint8Array`s, one reliable data packet each.
+   * are `Uint8Array`s, one reliable data packet each. A post past
+   * `maxFrameBytes` throws `RangeError` and ends the pipe; `close()` detaches
+   * from the room, which stays connected (it is the caller's);
+   * `bufferedAmount` counts bytes whose `publishData` has not settled, and
+   * `whenDrained` waits for it to reach {@link DRAIN_LOW_WATER}.
    */
-  target: {
-    addEventListener(type: "message", listener: Listener): void;
-    removeEventListener(type: "message", listener: Listener): void;
-    /** Publishes one packet. `TypeError` for non-bytes; `RangeError`, ending the pipe, past `maxFrameBytes`. */
-    postMessage(message: unknown): void;
-    /** Detaches from the room. The room itself stays connected: it is the caller's. */
-    close(): Promise<void>;
-    /** Bytes published whose `publishData` has not settled. */
-    readonly bufferedAmount: number;
-    /** Resolves once `bufferedAmount` is at most {@link DRAIN_LOW_WATER}, or the pipe ended. */
-    whenDrained(): Promise<void>;
-  };
+  target: MessagePipeTarget;
   /**
    * Aborts when the room disconnects, the participant leaves, a publish fails
    * (the stream above lost a message), or a post exceeds `maxFrameBytes`.
@@ -112,8 +109,6 @@ export function messageTargetOverLiveKit(
       `messageTargetOverLiveKit: "${peerIdentity}" is not in the room; wait for it to join`,
     );
   }
-  const listeners = new Set<Listener>();
-  const life = new AbortController();
   const roomApi = room as unknown as {
     on(ev: string, fn: (...args: unknown[]) => void): void;
     off(ev: string, fn: (...args: unknown[]) => void): void;
@@ -127,7 +122,7 @@ export function messageTargetOverLiveKit(
   let inFlight = 0;
   const drainWaiters = new Set<() => void>();
   const wakeDrainWaiters = (): void => {
-    if (inFlight > DRAIN_LOW_WATER && !life.signal.aborted) return;
+    if (inFlight > DRAIN_LOW_WATER) return;
     for (const w of [...drainWaiters]) w();
     drainWaiters.clear();
   };
@@ -139,89 +134,37 @@ export function messageTargetOverLiveKit(
       unknown,
       string | undefined,
     ];
-    if (life.signal.aborted || participant?.identity !== peerIdentity) return;
+    if (participant?.identity !== peerIdentity) return;
     if (packetTopic === closeTopic) {
-      end(new Error(`webrun-streams-livekit: "${peerIdentity}" closed the pipe`), false);
+      control.end(new Error(`webrun-streams-livekit: "${peerIdentity}" closed the pipe`));
       return;
     }
     if (packetTopic !== topic) return;
-    const event = new MessageEvent("message", { data: new Uint8Array(payload) });
-    for (const listener of [...listeners]) {
-      try {
-        Promise.resolve(listener(event)).catch(() => undefined);
-      } catch {}
-    }
+    control.deliver(payload);
   };
   const onDisconnected = (): void =>
-    end(new Error("webrun-streams-livekit: the room disconnected"), false);
+    control.end(new Error("webrun-streams-livekit: the room disconnected"));
   const onParticipantDisconnected = (...args: unknown[]): void => {
     if ((args[0] as { identity?: string } | undefined)?.identity !== peerIdentity) return;
-    end(new Error(`webrun-streams-livekit: "${peerIdentity}" left the room`), false);
+    control.end(new Error(`webrun-streams-livekit: "${peerIdentity}" left the room`));
   };
-  /** `tellPeer`: the pipe ended on this side, and the room is still there to say so. */
-  const end = (reason: Error, tellPeer = true): void => {
-    if (life.signal.aborted) return;
-    roomApi.off("dataReceived", onData);
-    roomApi.off("disconnected", onDisconnected);
-    roomApi.off("participantDisconnected", onParticipantDisconnected);
-    life.abort(reason);
-    wakeDrainWaiters();
-    if (tellPeer) {
-      publisher
-        .publishData(new Uint8Array(0), {
-          reliable: true,
-          destinationIdentities: [peerIdentity],
-          topic: closeTopic,
-        })
-        .catch(() => undefined);
-    }
-  };
-  roomApi.on("dataReceived", onData);
-  roomApi.on("disconnected", onDisconnected);
-  roomApi.on("participantDisconnected", onParticipantDisconnected);
-
-  return {
-    signal: life.signal,
-    maxMessageSize,
-    target: {
-      addEventListener: (_type, listener) => {
-        listeners.add(listener);
-      },
-      removeEventListener: (_type, listener) => {
-        listeners.delete(listener);
-      },
-      postMessage(message) {
-        const bytes = toBytes(message);
-        if (!bytes) {
-          throw new TypeError(
-            `webrun-streams-livekit: a byte pipe carries Uint8Array, ArrayBuffer or a view, got ${Object.prototype.toString.call(message)}`,
-          );
-        }
-        if (life.signal.aborted) return; // `signal` says so
-        if (bytes.byteLength > maxFrameBytes) {
-          const err = new RangeError(
-            `webrun-streams-livekit: a ${bytes.byteLength}-byte packet exceeds maxFrameBytes (${maxFrameBytes})`,
-          );
-          end(err);
-          throw err;
-        }
+  const control = newMessagePipe(
+    {
+      send: (bytes) => {
         const size = bytes.byteLength;
         inFlight += size;
         publisher
-          // A copy: livekit-client serializes the packet after an await.
-          .publishData(bytes.slice(), {
-            reliable: true,
-            destinationIdentities: [peerIdentity],
-            topic,
-          })
+          .publishData(bytes, { reliable: true, destinationIdentities: [peerIdentity], topic })
           .then(
             () => undefined,
+            // The stream above lost a message: end, and tell the peer.
             (err: unknown) =>
-              end(
+              control.end(
                 new Error(
                   `webrun-streams-livekit: a reliable publish failed: ${(err as Error)?.message ?? String(err)}`,
                   { cause: err },
                 ),
+                true,
               ),
           )
           .finally(() => {
@@ -229,25 +172,37 @@ export function messageTargetOverLiveKit(
             wakeDrainWaiters();
           });
       },
-      async close() {
-        listeners.clear();
-        end(new Error("webrun-streams-livekit: closed locally"));
-      },
-      get bufferedAmount() {
-        return inFlight;
-      },
-      whenDrained() {
-        if (inFlight <= DRAIN_LOW_WATER || life.signal.aborted) return Promise.resolve();
-        return new Promise<void>((resolve) => drainWaiters.add(resolve));
+      bufferedAmount: () => inFlight,
+      whenDrained: () => new Promise<void>((resolve) => drainWaiters.add(resolve)),
+      /** `local`: the pipe ended on this side, and the room is still there to say so. */
+      close: (local) => {
+        roomApi.off("dataReceived", onData);
+        roomApi.off("disconnected", onDisconnected);
+        roomApi.off("participantDisconnected", onParticipantDisconnected);
+        drainWaiters.clear();
+        if (local) {
+          publisher
+            .publishData(new Uint8Array(0), {
+              reliable: true,
+              destinationIdentities: [peerIdentity],
+              topic: closeTopic,
+            })
+            .catch(() => undefined);
+        }
       },
     },
-  };
-}
-
-function toBytes(data: unknown): Uint8Array | undefined {
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (ArrayBuffer.isView(data))
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  return undefined;
+    {
+      name: "webrun-streams-livekit",
+      maxFrameBytes,
+      maxMessageSize,
+      // livekit-client serializes the packet after an await, and may reuse
+      // the payload buffer it hands out.
+      copyOnSend: true,
+      copyOnDeliver: true,
+    },
+  );
+  roomApi.on("dataReceived", onData);
+  roomApi.on("disconnected", onDisconnected);
+  roomApi.on("participantDisconnected", onParticipantDisconnected);
+  return control.pipe as LiveKitMessageTarget;
 }
