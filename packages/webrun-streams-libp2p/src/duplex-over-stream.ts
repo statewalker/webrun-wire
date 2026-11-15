@@ -20,8 +20,9 @@ const TYPE_ERROR = 0x02;
  * indistinguishable from one that has stopped reading altogether. Override via
  * `drainTimeoutMs` when a deployment knows better.
  *
- * @deprecated The deprecated protocol's (statewalker/webrun-wire#153): kept for
- * one release, as the shim `connect`/`serve` run for older peers, then removed.
+ * Also the default stall bound of the port protocol (`connect`, `serve`,
+ * `serveConnections`, `libp2pPortMux`): a write on a call's stream that has
+ * waited for drain this long resets the stream (statewalker/webrun-wire#195).
  */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 300_000;
 

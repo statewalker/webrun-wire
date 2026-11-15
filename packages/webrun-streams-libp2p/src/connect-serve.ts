@@ -52,9 +52,10 @@ export interface ConnectLibp2pParams {
   /**
    * The port window in bytes (default {@link DEFAULT_WINDOW}, at least 64 KiB):
    * the most this end holds of a call's response delivered and not yet read.
-   * The server's window bounds what a call sends ahead of it. Size it at
-   * least to the bandwidth-delay product of the link (see
-   * {@link DEFAULT_WINDOW}).
+   * It is also the most this end sends ahead of the server: a call's request
+   * runs at most min(the server's window, this window) ahead
+   * (statewalker/webrun-wire#195). Size it at least to the bandwidth-delay
+   * product of the link (see {@link DEFAULT_WINDOW}).
    */
   window?: number;
   /**
@@ -84,11 +85,13 @@ export interface ConnectLibp2pParams {
    */
   runOnLimitedConnection?: boolean;
   /**
-   * The deprecated protocol only (an older server): how long to wait for a
-   * backpressured stream to drain before dropping the peer; defaults to
-   * `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes).
-   *
-   * @deprecated Removed with the deprecated protocol, in the next release.
+   * How long, in ms, a write may wait for a call's stream to drain (the
+   * server stopped reading at the transport) before the stream is reset and
+   * the call fails; defaults to `DEFAULT_DRAIN_TIMEOUT_MS` (5 minutes). Only
+   * a write blocked on drain counts: a quiet call is never timed out. Applies
+   * to the port protocol (statewalker/webrun-wire#195) and to the deprecated
+   * one. On the port protocol, 0 or `Infinity` means no bound (the deprecated
+   * protocol drops a backpressured stream at once on 0).
    */
   drainTimeoutMs?: number;
   /**
@@ -111,7 +114,10 @@ export interface ServeLibp2pParams {
   /**
    * The port window in bytes (default {@link DEFAULT_WINDOW}, at least 64 KiB):
    * the most this end holds of a call's request delivered and not yet read by
-   * the handler. See {@link ConnectLibp2pParams.window}.
+   * the handler. It is also the most a response runs ahead of its caller,
+   * whatever window the caller announces (up to 4 GiB): min(the caller's
+   * window, this window) (statewalker/webrun-wire#195). See
+   * {@link ConnectLibp2pParams.window}.
    */
   window?: number;
   /** Per-call inactivity timeout in ms; see {@link ConnectLibp2pParams.timeout}. */
@@ -139,10 +145,20 @@ export interface ServeLibp2pParams {
    */
   runOnLimitedConnection?: boolean;
   /**
-   * The deprecated protocol only (older callers): how long to wait for a
-   * backpressured stream to drain before dropping the peer (default 5 minutes).
-   *
-   * @deprecated Removed with the deprecated protocol, in the next release.
+   * How long, in ms, a write may wait for a call's stream to drain (the
+   * caller stopped reading at the transport) before the stream is reset and
+   * the handler's output is abandoned; defaults to `DEFAULT_DRAIN_TIMEOUT_MS`
+   * (5 minutes). This bounds what a stalled caller holds on the server: with
+   * the window (at most min(the caller's window, `window`) ahead) and the
+   * stream's backpressure (nothing written while it needs to drain), a
+   * stalled call holds about one frame, for at most this long. Only a write
+   * blocked on drain counts: a quiet call (an event stream between events) is
+   * never timed out. Credit for the caller's upload is held back while the
+   * stream needs to drain, and counts too (a caller that uploads and never
+   * reads is dropped). Applies to the port protocol
+   * (statewalker/webrun-wire#195) and to the deprecated one. On the port
+   * protocol, 0 or `Infinity` means no bound (the deprecated protocol drops a
+   * backpressured stream at once on 0).
    */
   drainTimeoutMs?: number;
   /**
@@ -179,6 +195,7 @@ export const connect: Connect<ConnectLibp2pParams> = async (params) => {
           codec,
           protocol: portProtocolOf(protocol),
           window: params.window ?? DEFAULT_WINDOW,
+          drainTimeoutMs: params.drainTimeoutMs,
           maxMessageBytes: maxFrameBytes,
           maxOutboundStreams,
           runOnLimitedConnection,
@@ -257,6 +274,7 @@ export async function serveConnections(
             codec,
             protocol: portProtocolOf(protocol),
             window: params.window ?? DEFAULT_WINDOW,
+            drainTimeoutMs: params.drainTimeoutMs,
             maxMessageBytes: maxFrameBytes,
             maxInboundStreams,
             maxOutboundStreams,

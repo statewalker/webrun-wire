@@ -34,6 +34,22 @@
  * peer's `hello` raises the window to what it grants. An `"offered"` port
  * without that knowledge counts but does not wait until the peer's `hello`,
  * as a port without a window.
+ *
+ * **A bounded send-ahead** (statewalker/webrun-wire#195). The peer's window
+ * is what it says it will hold, not what this end must buffer for it: a
+ * sender runs at most min(the peer's window, its own window) ahead, so a peer
+ * that announces 4 GiB and stops reading costs this end no more than the
+ * window it chose. And nothing goes on a transport that says it needs to
+ * drain (`transport.needsDrain()`): the frame waits in the port's queue,
+ * which the stream tier waits on (`bufferedAmount`, `ready`), so at most one
+ * frame is written past the transport's buffer. Credit for the peer is held
+ * back too, and goes as one combined frame once the transport drains: a peer
+ * that uploads and never reads cannot grow this end's buffer with credit
+ * frames. A write or credit that has waited for drain longer than
+ * `drainTimeoutMs` breaks the port off (`stall`); a quiet port, with nothing
+ * waiting to go, is never timed out. Withholding credit cannot deadlock past
+ * that bound: a peer waiting for credit while this end waits for its
+ * transport to drain ends in the stall timeout, as any stalled peer does.
  */
 
 /** The first byte of a control frame on a windowed channel. */
@@ -42,6 +58,9 @@ export const CONTROL_BYTE = 0xc1;
 const TYPE_DATA = 0x00;
 const TYPE_HELLO = 0x01;
 const TYPE_CREDIT = 0x02;
+
+/** The longest delay `setTimeout` keeps: a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /** The largest window a `hello` can carry: 4 GiB less one byte. */
 export const MAX_PORT_WINDOW = 0xffffffff;
@@ -154,8 +173,28 @@ export function newPortWindow(options: {
   send(frame: Uint8Array): void;
   /** A queued frame failed to go out: the port is broken. */
   fail(reason: Error): void;
+  /**
+   * The transport's backpressure: while `needsDrain()` says so, data frames
+   * wait in the port's queue, and go once `whenDrained()` resolves. Control
+   * frames (small, and what frees the peer) always go.
+   */
+  transport?: { needsDrain(): boolean; whenDrained(): Promise<void> };
+  /**
+   * How long a write (or credit for the peer) may wait for the transport to
+   * drain before the port is broken off with `stall`. Unset, 0 or Infinity:
+   * no bound; past 2^31 - 1 ms it is clamped to that.
+   */
+  drainTimeoutMs?: number;
+  /** A write waited for drain longer than `drainTimeoutMs`. Default: `fail`. */
+  stall?(reason: Error): void;
 }): PortWindow {
-  const { window: own, send, fail, onHello } = options;
+  const { window: own, send, fail, onHello, transport } = options;
+  // 0 and Infinity: no bound.
+  const drainTimeoutMs =
+    options.drainTimeoutMs === 0 || options.drainTimeoutMs === Number.POSITIVE_INFINITY
+      ? undefined
+      : options.drainTimeoutMs;
+  const stall = options.stall ?? fail;
   const mode = options.presume ? "agreed" : options.mode;
   /** The window the peer grants: the floor until its `hello`, where it is known to speak the window. */
   let peerWindow: number | undefined = mode === "agreed" ? MIN_PORT_WINDOW : undefined;
@@ -182,6 +221,14 @@ export function newPortWindow(options: {
   const sendGrant = (): void => {
     grantScheduled = false;
     if (ended || !speaks()) return;
+    // Credit is cumulative: on a transport that needs to drain it accumulates,
+    // and goes as one frame once it drains (review of #196). Otherwise a peer
+    // that uploads and never reads would grow this end's write buffer by a
+    // credit frame per batch, with no write ever waiting for drain.
+    if (toGrant > 0 && transportFull()) {
+      awaitDrain();
+      return;
+    }
     while (toGrant > 0) {
       const bytes = Math.min(toGrant, MAX_PORT_WINDOW);
       toGrant -= bytes;
@@ -203,13 +250,68 @@ export function newPortWindow(options: {
     }
   };
 
+  /** Set while a wait for the transport to drain is armed. */
+  let draining = false;
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const stopStallTimer = (): void => {
+    if (stallTimer !== undefined) clearTimeout(stallTimer);
+    stallTimer = undefined;
+  };
+
+  const transportFull = (): boolean => transport?.needsDrain() === true;
+
+  /** Waits for the transport to drain, then sends what is queued; bounded by `drainTimeoutMs`. */
+  const awaitDrain = (): void => {
+    if (draining || ended || !transport) return;
+    draining = true;
+    if (drainTimeoutMs !== undefined && stallTimer === undefined) {
+      stallTimer = setTimeout(
+        () => {
+          stallTimer = undefined;
+          if (ended || !draining || (queue.length === 0 && toGrant === 0)) return;
+          stall(
+            new Error(
+              `a write waited for the transport to drain for more than ${drainTimeoutMs} ms: the peer stopped reading`,
+            ),
+          );
+        },
+        Math.min(drainTimeoutMs, MAX_TIMER_MS),
+      );
+      // A peer that stops reading must not keep Node alive.
+      (stallTimer as { unref?: () => void }).unref?.();
+    }
+    let waiting: Promise<void>;
+    try {
+      waiting = transport.whenDrained();
+    } catch (err) {
+      draining = false;
+      stopStallTimer();
+      fail(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    const resume = (): void => {
+      draining = false;
+      stopStallTimer();
+      // Credit first: it is what lets the peer go on.
+      if (toGrant > 0) sendGrant();
+      flush();
+    };
+    waiting.then(resume, resume);
+  };
+
   const blocked = (size: number): boolean =>
-    peerWindow !== undefined && size > 0 && outstanding > 0 && outstanding + size > peerWindow;
+    transportFull() ||
+    (peerWindow !== undefined && size > 0 && outstanding > 0 && outstanding + size > peerWindow);
 
   const flush = (): void => {
     while (queue.length && !ended) {
       // biome-ignore lint/style/noNonNullAssertion: the loop condition checks the queue is not empty.
       const next = queue[0]!;
+      if (transportFull()) {
+        awaitDrain();
+        break;
+      }
       if (blocked(next.size)) break;
       queue.shift();
       queued -= next.size;
@@ -261,6 +363,7 @@ export function newPortWindow(options: {
       if (queue.length || blocked(size)) {
         queue.push({ frame, size });
         queued += size;
+        if (transportFull()) awaitDrain();
         return;
       }
       outstanding += size;
@@ -275,7 +378,9 @@ export function newPortWindow(options: {
         if (granted < MIN_PORT_WINDOW) throw new Error(`a hello below the floor: ${granted}`);
         if (heard) throw new Error("a second hello");
         heard = true;
-        peerWindow = granted;
+        // Clamped to this end's own window: the peer's grant is what it will
+        // hold, not what this end must buffer for it (#195).
+        peerWindow = Math.min(granted, own);
         onHello?.(granted);
         // An opener that asked learns here that the peer reads control frames.
         sayHello();
@@ -322,10 +427,12 @@ export function newPortWindow(options: {
       }
       queue.length = 0;
       queued = 0;
+      stopStallTimer();
       settleWaiters();
     },
     end() {
       ended = true;
+      stopStallTimer();
       queue.length = 0;
       queued = 0;
       settleWaiters();
