@@ -1,3 +1,12 @@
+import {
+  type NativePort,
+  newMessagePipe,
+  newNativePortMux,
+  type ValueCodec,
+} from "@statewalker/webrun-streams";
+
+export type { ValueCodec };
+
 /** The label prefix of a port's data channel: channels without it are someone else's. */
 export const PORT_LABEL_PREFIX = "webrun-port/";
 
@@ -14,28 +23,11 @@ export const DEFAULT_PORT_MAX_MESSAGE_SIZE = DEFAULT_PORT_MAX_FRAME_BYTES - 256;
 export const PORT_DRAIN_LOW_WATER = 256 * 1024;
 
 /**
- * How a port's messages become bytes and back: any value the stream tier posts. `webrun-msgpack`'s
- * `{ encode: serialize, decode: deserialize }` fits.
+ * One port: a data channel as a `MessageTarget` of values, with its close signal on it. Built by
+ * the shared native port lifecycle (`newNativePortMux` in `@statewalker/webrun-streams`). A post
+ * past `maxFrameBytes` throws `RangeError` and fails the port.
  */
-export interface ValueCodec {
-  encode(value: unknown): Uint8Array;
-  decode(bytes: Uint8Array): unknown;
-}
-
-type Listener = (event: MessageEvent) => void | Promise<void>;
-
-/** One port: a data channel as a `MessageTarget` of values, with its close signal on it. */
-export interface DataChannelPort {
-  addEventListener(type: "message", listener: Listener): void;
-  removeEventListener(type: "message", listener: Listener): void;
-  /** Sends one message. `RangeError`, failing the port, past `maxFrameBytes`. */
-  postMessage(message: unknown): void;
-  close(): Promise<void>;
-  readonly bufferedAmount: number;
-  whenDrained(): Promise<void>;
-  /** Aborts when the channel closes or errs, the connection fails, or the port is closed here. */
-  readonly closeSignal: AbortSignal;
-}
+export type DataChannelPort = NativePort;
 
 export interface WebRtcPortMuxOptions {
   /** A connected `RTCPeerConnection` with SCTP negotiated. Signalling is the caller's. */
@@ -85,8 +77,6 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
   const { pc, codec, onPort } = options;
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_PORT_MAX_FRAME_BYTES;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
-  const live = new Set<DataChannelPort>();
-  let closed = false;
 
   const connectionGone = new AbortController();
   const onConnectionState = () => {
@@ -98,177 +88,91 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
   pc.addEventListener("connectionstatechange", onConnectionState);
   onConnectionState(); // a connection that has failed already
 
-  const wrap = (dc: RTCDataChannel): DataChannelPort => {
+  /** A data channel's bytes as a pipe. */
+  const pipeOf = (dc: RTCDataChannel) => {
     dc.binaryType = "arraybuffer";
     dc.bufferedAmountLowThreshold = PORT_DRAIN_LOW_WATER;
-    const life = new AbortController();
-    const end = (reason: Error) => {
-      if (!life.signal.aborted) life.abort(reason);
-    };
-    const listeners = new Set<Listener>();
-    let held: unknown[] | undefined = [];
-    const deliver = (data: unknown) => {
-      if (closeSignal.aborted) return;
-      const event = new MessageEvent("message", { data });
-      for (const l of [...listeners]) {
-        try {
-          Promise.resolve(l(event)).catch(() => undefined);
-        } catch {}
-      }
-    };
-    const onMessage = (ev: MessageEvent) => {
-      if (closeSignal.aborted) return;
-      let data: unknown;
-      try {
-        const raw = ev.data;
-        data = codec.decode(raw instanceof ArrayBuffer ? new Uint8Array(raw) : (raw as Uint8Array));
-      } catch (err) {
-        end(
-          new Error("webrun-streams-webrtc: a frame the port's codec cannot decode", {
-            cause: err,
-          }),
-        );
-        return;
-      }
-      if (held) held.push(data);
-      else deliver(data);
-    };
     // Posts made while the channel is still connecting, sent in order when it opens, as a
     // MessagePort queues them (statewalker/statewalker-root#57). `undefined` once the channel has
     // opened, or when it was open already.
     let queued: Uint8Array[] | undefined = dc.readyState === "connecting" ? [] : undefined;
-    const send = (bytes: Uint8Array) => {
+    const sendNow = (bytes: Uint8Array) => {
       try {
         dc.send(bytes as Uint8Array<ArrayBuffer>);
       } catch (err) {
         // a send queue full, or a channel closing meanwhile: the port is broken
-        end(err instanceof Error ? err : new Error(String(err)));
+        control.end(err instanceof Error ? err : new Error(String(err)), true);
       }
     };
+    const onMessage = (ev: MessageEvent) => control.deliver(ev.data);
     const onOpen = () => {
       const pending = queued;
       queued = undefined;
       for (const bytes of pending ?? []) {
-        if (closeSignal.aborted) return;
-        send(bytes);
+        if (control.ended) return;
+        sendNow(bytes);
       }
     };
-    const onClose = () => end(new Error("webrun-streams-webrtc: the data channel closed"));
+    const onClose = () => control.end(new Error("webrun-streams-webrtc: the data channel closed"));
     const onError = (ev: Event) =>
-      end(
+      control.end(
         new Error(
           `webrun-streams-webrtc: the data channel failed: ${(ev as unknown as { error?: { message?: string } }).error?.message ?? "unknown"}`,
         ),
       );
+    const control = newMessagePipe(
+      {
+        send: (bytes) => {
+          if (queued) queued.push(bytes);
+          else sendNow(bytes);
+        },
+        // a channel closing or closed: its close event ends the pipe
+        canSend: () => !!queued || dc.readyState === "open",
+        bufferedAmount: () => dc.bufferedAmount,
+        whenDrained: () =>
+          new Promise<void>((resolve) =>
+            dc.addEventListener("bufferedamountlow", () => resolve(), { once: true }),
+          ),
+        close: () => {
+          dc.removeEventListener("message", onMessage);
+          dc.removeEventListener("open", onOpen);
+          dc.removeEventListener("close", onClose);
+          dc.removeEventListener("error", onError);
+          queued = undefined;
+          if (dc.readyState !== "closed") dc.close();
+        },
+      },
+      { name: "webrun-streams-webrtc", maxFrameBytes, drainLowWater: PORT_DRAIN_LOW_WATER },
+    );
     dc.addEventListener("message", onMessage);
     dc.addEventListener("open", onOpen);
     dc.addEventListener("close", onClose);
     dc.addEventListener("error", onError);
     if (dc.readyState === "closing" || dc.readyState === "closed") onClose();
-    const closeSignal = AbortSignal.any([life.signal, connectionGone.signal]);
-    const cleanUp = () => {
-      live.delete(port);
-      dc.removeEventListener("message", onMessage);
-      dc.removeEventListener("open", onOpen);
-      queued = undefined;
-      listeners.clear();
-      held = undefined;
-      if (dc.readyState !== "closed") dc.close();
-    };
-    const port: DataChannelPort = {
-      closeSignal,
-      get bufferedAmount() {
-        return dc.bufferedAmount;
-      },
-      whenDrained() {
-        if (closeSignal.aborted || dc.bufferedAmount <= PORT_DRAIN_LOW_WATER)
-          return Promise.resolve();
-        return new Promise<void>((resolve) => {
-          const done = () => {
-            dc.removeEventListener("bufferedamountlow", done);
-            closeSignal.removeEventListener("abort", done);
-            resolve();
-          };
-          dc.addEventListener("bufferedamountlow", done);
-          closeSignal.addEventListener("abort", done);
-        });
-      },
-      postMessage(message) {
-        if (closeSignal.aborted) return; // `closeSignal` says so
-        // a channel closing or closed: its close event aborts `closeSignal`
-        if (!queued && dc.readyState !== "open") return;
-        const bytes = codec.encode(message);
-        if (bytes.byteLength > maxFrameBytes) {
-          const err = new RangeError(
-            `webrun-streams-webrtc: a ${bytes.byteLength}-byte message exceeds maxFrameBytes (${maxFrameBytes})`,
-          );
-          end(err);
-          throw err;
-        }
-        if (queued) queued.push(bytes);
-        else send(bytes);
-      },
-      addEventListener(_type, listener) {
-        listeners.add(listener);
-        if (held) {
-          // delivered after this tick, as a MessagePort dispatches its queue: every listener
-          // added meanwhile (the stream tier adds two in a row) gets the held messages
-          const pending = held;
-          held = undefined;
-          queueMicrotask(() => {
-            for (const data of pending) deliver(data);
-          });
-        }
-      },
-      removeEventListener(_type, listener) {
-        listeners.delete(listener);
-      },
-      async close() {
-        end(new Error("webrun-streams-webrtc: port closed"));
-      },
-    };
-    live.add(port);
-    // a port whose channel or connection was gone already: an abort listener would never fire
-    if (closeSignal.aborted) cleanUp();
-    else closeSignal.addEventListener("abort", cleanUp, { once: true });
-    return port;
+    return control.pipe.target;
   };
 
-  const onChannel = (ev: RTCDataChannelEvent) => {
-    const dc = ev.channel;
-    if (!dc.label.startsWith(PORT_LABEL_PREFIX)) return; // someone else's channel
-    // A mux that accepts no ports (a caller's) leaves inbound ports to the serving mux on the
-    // same connection; of several serving muxes, the first takes each port.
-    if (!onPort || closed || claimed.has(dc)) return;
-    claimed.add(dc);
-    const port = wrap(dc);
-    let accepted = false;
-    try {
-      accepted = onPort(port) !== false;
-    } catch {
-      accepted = false;
-    }
-    if (!accepted) void port.close();
-  };
-  pc.addEventListener("datachannel", onChannel);
-
-  return {
+  const ports = newNativePortMux({
+    name: "webrun-streams-webrtc",
+    codec,
     maxMessageSize,
-    async openPort(_meta, opts) {
-      if (closed) throw new Error("webrun-streams-webrtc: port mux closed");
-      const signal = opts?.signal;
-      signal?.throwIfAborted();
-      if (connectionGone.signal.aborted) throw connectionGone.signal.reason;
+    onPort: onPort ? (port) => onPort(port) : undefined,
+    connectionSignal: connectionGone.signal,
+    async open(signal) {
       const dc = pc.createDataChannel(`${PORT_LABEL_PREFIX}${(counter++).toString(36)}`, {
         ordered: true,
       });
-      const port = wrap(dc);
+      const pipe = pipeOf(dc);
+      const gone = AbortSignal.any([pipe.closeSignal, connectionGone.signal]);
       await new Promise<void>((resolve, reject) => {
-        if (port.closeSignal.aborted) return reject(port.closeSignal.reason);
+        if (gone.aborted) {
+          void pipe.close();
+          return reject(gone.reason);
+        }
         if (dc.readyState === "open") return resolve();
         const settle = () => {
           dc.removeEventListener("open", done);
-          port.closeSignal.removeEventListener("abort", fail);
+          gone.removeEventListener("abort", fail);
           signal?.removeEventListener("abort", cancel);
         };
         const done = () => {
@@ -277,34 +181,36 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
         };
         const fail = () => {
           settle();
-          reject(port.closeSignal.reason);
+          void pipe.close();
+          reject(gone.reason);
         };
         const cancel = () => {
           settle();
-          void port.close();
+          void pipe.close();
           reject(signal?.reason);
         };
         dc.addEventListener("open", done);
-        port.closeSignal.addEventListener("abort", fail, { once: true });
+        gone.addEventListener("abort", fail, { once: true });
         signal?.addEventListener("abort", cancel, { once: true });
       });
-      if (signal) {
-        const onAbort = () => void port.close();
-        signal.addEventListener("abort", onAbort, { once: true });
-        port.closeSignal.addEventListener(
-          "abort",
-          () => signal.removeEventListener("abort", onAbort),
-          { once: true },
-        );
-      }
-      return port;
+      return { pipe };
     },
-    async close() {
-      if (closed) return;
-      closed = true;
+    stopAccepting() {
       pc.removeEventListener("datachannel", onChannel);
       pc.removeEventListener("connectionstatechange", onConnectionState);
-      await Promise.allSettled([...live].map((p) => p.close()));
     },
+  });
+
+  const onChannel = (ev: RTCDataChannelEvent) => {
+    const dc = ev.channel;
+    if (!dc.label.startsWith(PORT_LABEL_PREFIX)) return; // someone else's channel
+    // A mux that accepts no ports (a caller's) leaves inbound ports to the serving mux on the
+    // same connection; of several serving muxes, the first takes each port.
+    if (!onPort || ports.closed || claimed.has(dc)) return;
+    claimed.add(dc);
+    ports.accept({ pipe: pipeOf(dc) }, undefined);
   };
+  pc.addEventListener("datachannel", onChannel);
+
+  return ports.mux as WebRtcPortMux;
 }
