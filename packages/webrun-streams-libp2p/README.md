@@ -3,12 +3,18 @@
 ## What it is
 
 A libp2p adapter for the `Duplex` seam from `@statewalker/webrun-streams`.
-Each `call(input)` opens one new libp2p `Stream` with
-`node.dialProtocol(peer, [protocol])`; the serving side registers with
-`node.handle(protocol, …)` and runs a handler per inbound stream. The default
-protocol id is `/webrun-streams/1.0.0`. It targets libp2p 3.x. `serveConnections`
-additionally tells the handler which peer libp2p authenticated on the
-connection.
+Each `call(input)` is one port of a windowed native port mux: one new libp2p
+`Stream`, negotiating `<protocol>/ports/window`, over which `webrun-rpc`'s
+stream tier runs the call. The serving side handles that protocol and runs a
+handler per call. The default `protocol` is `/webrun-streams/1.0.0`. It targets
+libp2p 3.x. `serveConnections` additionally tells the handler which peer libp2p
+authenticated on the connection.
+
+Releases up to 0.6.0 ran each call straight on a stream negotiating `protocol`
+itself, with their own flow control. That protocol is **deprecated** and kept,
+on both ends, for one release: a new server still answers old callers on it,
+and a new caller falls back to it against an old server (see "Compatibility
+with 0.6.0 and older").
 
 ## Why it exists
 
@@ -20,13 +26,15 @@ natively, there is no multiplexer on top: one call is one real libp2p stream.
 
 What the adapter adds on top of a raw stream:
 
-- **Error fidelity.** A yamux reset carries no message. An in-band `ERROR`
-  frame carries the handler's `Error` with `message`, `stack` and custom
-  fields.
-- **Backpressure** that follows libp2p 3.x's push-based `send()` / `'drain'`
-  model, with a bound for peers that stop reading.
-- **Cancellation** in both directions: a caller's `.return()` resets the
-  stream, and the handler's `finally` runs.
+- **One flow control, bounded.** The port's credit window (default 4 MiB) is
+  the only flow control: up to a window is in flight per round trip, and a
+  producer never runs more than about a window ahead of a consumer that stopped
+  reading, whatever libp2p buffers (statewalker/webrun-wire#153). It is the
+  same stack every other `webrun-rpc` transport runs.
+- **Error fidelity.** A handler's `Error` reaches the caller with `message`,
+  `stack` and custom fields.
+- **Cancellation** in both directions: a caller's `.return()` ends the call at
+  once, and the handler's `finally` runs.
 - **A guard against a burst of calls on a fresh connection**, which would
   otherwise kill the connection's muxer.
 - **Caller identity** for the serving side, through `serveConnections`.
@@ -37,7 +45,9 @@ What the adapter adds on top of a raw stream:
 pnpm add @statewalker/webrun-streams-libp2p @libp2p/interface @multiformats/multiaddr
 ```
 
-Runtime dependency: `@statewalker/webrun-streams`. Peer dependencies:
+Runtime dependencies: `@statewalker/webrun-streams`, `@statewalker/webrun-rpc`
+(the port stack `connect`/`serve` run) and `@statewalker/webrun-msgpack` (the
+calls' wire codec). Peer dependencies:
 
 | Peer | Range | Required |
 | --- | --- | --- |
@@ -51,19 +61,21 @@ runs (Node or browser).
 
 | Export | What it gives |
 | --- | --- |
-| `connect(params)` | `Connect<ConnectLibp2pParams>`. Resolves `{ call, close }` immediately (no dial yet). Each `call(input)` dials one stream. `close()` aborts every stream this `connect` still holds open. |
-| `serve(params, handler)` | `Serve<ServeLibp2pParams>`. `node.handle(protocol)`; runs `handler` per inbound stream. Resolves to an idempotent teardown that calls `node.unhandle(protocol)`. |
-| `serveConnections(params, makeHandler)` | Like `serve`, but `makeHandler(context)` is called once per inbound stream with `{ remotePeer }`, and returns that stream's `Duplex`. |
-| `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
-| `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
-| `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
-| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits, `window`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. Messages that arrive before a port's first listener are now held for it, as over WebRTC. See "MessagePorts over libp2p" below. |
-| `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
+| `connect(params)` | `Connect<ConnectLibp2pParams>`. Resolves `{ call, close }` immediately (no dial yet). Each `call(input)` opens one port (one stream). `close()` closes every port this `connect` still holds open. |
+| `serve(params, handler)` | `Serve<ServeLibp2pParams>`. Handles `<protocol>/ports` (with and without `/window`) and, deprecated, `protocol`; runs `handler` per call. Resolves to an idempotent teardown that unhandles all of them. |
+| `serveConnections(params, makeHandler)` | Like `serve`, but `makeHandler(context)` is called once per call with `{ remotePeer }`, and returns that call's `Duplex`. |
+| `DEFAULT_WINDOW` | `4194304` (4 MiB), the port window `connect`/`serve` grant unless told otherwise. See "Sizing the window". |
+| `portProtocolOf(protocol)` | `protocol + "/ports"`: what a call's stream negotiates (with `/window` appended between two windowed ends). |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
-| `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
-| `DEFAULT_CLOSE_TIMEOUT_MS` | `300_000` (5 minutes), the bound on a graceful close. |
+| `duplexOverStream(stream, input, options?)` | **Deprecated.** The deprecated protocol's primitive: runs one call over one libp2p `Stream`. Removed in the next release. |
+| `PeerGoneError` | What a call fails with when its stream ended before the call finished: the peer died, the connection dropped, or the stream was reset. `cause` is libp2p's close error, if any. |
+| `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
+| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`; what `connect`/`serve` run on. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits, `window`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. See "MessagePorts over libp2p" below. |
+| `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
+| `DEFAULT_DRAIN_TIMEOUT_MS` | **Deprecated** (the deprecated protocol only). `300_000` (5 minutes). |
+| `DEFAULT_CLOSE_TIMEOUT_MS` | **Deprecated** (the deprecated protocol only). `300_000` (5 minutes), the bound on a graceful close. |
 | `DEFAULT_MAX_MESSAGE_BYTES` | `67_108_864` (64 MiB), `messageTargetOverStream`'s cap on one message. |
-| `DEFAULT_MAX_FRAME_BYTES` | `67_108_864` (64 MiB), `duplexOverStream`'s default cap on one inbound frame's payload (`maxFrameBytes`). |
+| `DEFAULT_MAX_FRAME_BYTES` | `67_108_864` (64 MiB), the default cap on one inbound frame (`maxFrameBytes`). |
 | `ConnectLibp2pParams`, `ServeLibp2pParams`, `ConnectionContext`, `ServeConnectionsHandler`, `DuplexOverStreamOptions` | Types, below. |
 
 `ConnectLibp2pParams`:
@@ -72,26 +84,32 @@ runs (Node or browser).
 | --- | --- | --- | --- |
 | `node` | `Libp2p` | required | The local node. Only `dialProtocol` is required; `getConnections` is used when present. |
 | `peer` | `PeerId \| Multiaddr` | required | Who to dial. |
-| `protocol` | `string` | `DEFAULT_PROTOCOL` | Protocol id. |
-| `drainTimeoutMs` | `number` | `300_000` | How long a backpressured send waits for `'drain'`. |
-| `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame payload accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
+| `protocol` | `string` | `DEFAULT_PROTOCOL` | The protocol id both ends are configured with. Calls negotiate `portProtocolOf(protocol)`; `protocol` itself is the deprecated fallback. |
+| `window` | `number` | `DEFAULT_WINDOW` (4 MiB) | The port window in bytes, at least 64 KiB: the most this end holds of a response delivered and not yet read. See "Sizing the window". |
+| `timeout` | `number` | none | Per-call inactivity timeout in ms, reset by any chunk in either direction. Unset, a slow consumer is throttled, never failed. |
+| `maxFrameBytes` | `number` | `DEFAULT_MAX_FRAME_BYTES` | The largest frame accepted from the peer. Past it, or on a malformed frame length, the call fails and the stream is aborted. |
 | `maxOutboundStreams` | `number` | libp2p's (64) | Passed to `dialProtocol`. |
 | `runOnLimitedConnection` | `boolean` | unset | Passed to `dialProtocol`. Allows relayed or otherwise limited connections. |
+| `drainTimeoutMs`, `readHighWaterBytes` | `number` | 5 min, 64 KiB | **Deprecated**: the deprecated protocol only (an older server). |
 
-`ServeLibp2pParams`: `node`, `protocol`, `drainTimeoutMs`, `maxFrameBytes`,
+`ServeLibp2pParams`: `node`, `protocol`, `window`, `timeout`, `maxFrameBytes`,
 `maxOutboundStreams` and `runOnLimitedConnection` as above (passed to
-`node.handle`), plus `maxInboundStreams` (libp2p default 32).
+`node.handle` for each served protocol), plus `maxInboundStreams` (libp2p
+default 32), and the deprecated `drainTimeoutMs` and `readHighWaterBytes`
+(older callers only). The server's `window` bounds what a call sends ahead of
+the handler.
 
 `ConnectionContext`: `{ remotePeer: PeerId }`.
 `ServeConnectionsHandler`: `(context: ConnectionContext) => Duplex`.
 
-`DuplexOverStreamOptions`:
+`DuplexOverStreamOptions` (**deprecated**, with `duplexOverStream`):
 
 | Field | Meaning |
 | --- | --- |
-| `onPeerInputEnd?(err?)` | Called once when the peer's side ends: closed, `ERROR` frame (passed as `err`) or torn down. `serveConnections` uses it to end the handler's input. |
-| `onSourceCompleted?()` | Called only when the peer's side ended normally. `connect` uses it to choose a graceful close over an abort. |
-| `drainTimeoutMs?` | As above. |
+| `onPeerInputEnd?(err?)` | Called once when the peer's side ends: closed, `ERROR` frame (passed as `err`) or torn down. |
+| `onSourceCompleted?()` | Called only when the peer's side ended normally. |
+| `drainTimeoutMs?` | How long a backpressured send waits for `'drain'`. |
+| `readHighWaterBytes?` | Received bytes held for a consumer that is not reading before the stream is paused. |
 | `maxFrameBytes?` | As above. |
 
 ## Examples
@@ -160,7 +178,83 @@ const { call } = await connect({ node, peer, protocol: "/my-app/1.0.0", maxOutbo
 
 ## Internals
 
-### Frames on the stream
+### A call is a port
+
+`connect` builds a `libp2pPortMux` for `portProtocolOf(protocol)` with
+`window` (default `DEFAULT_WINDOW`) and hands it to `webrun-rpc`'s `connect`
+through `overPorts`; `serve` does the same with `webrun-rpc`'s `serve`. So one
+call is one port, one port is one libp2p stream, and the stream tier
+(`duplexOverPort`) runs the call: its chunks (at most 256 KiB each) go as
+msgpack messages, pipelined up to the peer's window, and the window's credit
+is their confirmation. yamux still multiplexes the streams, but its windows no
+longer bound anything this package promises: the port's credit bounds what is
+in flight per call. There is no flow control of this package's own any more;
+the bespoke yamux pause/resume run-ahead bound of the deprecated protocol goes
+with it in the next release.
+
+Both ends of a call between two releases from this one on always run the
+window, so a call's stream negotiates `<protocol>/ports/window`; the mux also
+serves (and dials, second) `<protocol>/ports`, unwindowed.
+
+### Sizing the window
+
+A call moves at most one window per round trip, so its throughput is capped at
+`window / RTT`, and a producer runs at most about one window (plus a chunk at
+each end) ahead of a consumer that stopped reading. Size it at least to the
+link's bandwidth-delay product:
+
+| Link | BDP | Window |
+| --- | --- | --- |
+| LAN, 1 Gbit/s at 1 ms | 125 KB | the 64 KiB floor would cap it; 1 MiB is ample |
+| 70 Mbit/s at 11 ms | 96 KB | 1 MiB |
+| 200 Mbit/s at 100 ms | 2.5 MB | the 4 MiB default |
+| 1 Gbit/s at 100 ms | 12.5 MB | 16 MiB |
+
+Measured over an emulated 100 ms / 200 Mbit/s link (statewalker/webrun-wire#153):
+a 1 MiB window capped a 16 MiB echo at 7.4 MiB/s, the 4 MiB window reached
+15 MiB/s, as fast as the deprecated protocol. Far above the bottleneck's queue a
+window only adds latency (bufferbloat): on an 11 ms link 4 MiB was slower than
+1 MiB. Both ends set their own window: the caller's bounds the response, the
+server's the request. Memory per call is bounded by the window, so a server
+with many concurrent calls may want a smaller one.
+
+### Compatibility with 0.6.0 and older
+
+Deprecated shims, on both ends, for one release; removed in the next one:
+
+- **New server, old caller.** `serve`/`serveConnections` also handle
+  `protocol` itself with the deprecated protocol (`legacy-connect-serve.ts`),
+  so an old `connect` keeps working.
+- **New caller, old server.** An old server refuses `<protocol>/ports…`
+  (libp2p's `UnsupportedProtocolError`, before any of the call's input is
+  read), and the call runs on `protocol` instead. The node remembers the
+  refusal per peer and protocol for that connection, so later calls, from any
+  `connect()` on the node, dial `protocol` directly; a new connection (the peer
+  restarted, perhaps upgraded) is probed again. The first call to an old server
+  costs one extra protocol negotiation.
+
+`tests/interop-0-6.test.ts` runs the conformance suite (L0–L6) and the cases
+above against the published 0.6.0 in both directions.
+
+Behaviour that differs from the deprecated protocol:
+
+- **A call ends with the peer's output.** When the handler's output ends, the
+  call ends: input the caller has not sent yet is abandoned, and a handler
+  still reading its input is told the caller abandoned the stream. The
+  deprecated protocol kept sending until the input ended too.
+- **No drain timeout.** A peer that stops reading holds at most a window per
+  call; set `timeout` to fail idle calls. `drainTimeoutMs` and
+  `readHighWaterBytes` apply to the deprecated protocol only.
+- **Chunks.** A response arrives in chunks of up to 256 KiB (64 KiB before).
+- **Failures on the serving side are not logged**: they reach the handler
+  (its input throws) and the caller.
+
+### The deprecated protocol
+
+The sections below describe the deprecated protocol, which `serve` still
+answers and `connect` falls back to until the next release.
+
+#### Frames on the stream
 
 ```
 +--------+-----------------+-----------------+
@@ -190,7 +284,7 @@ or `webrun-streams-libp2p: a malformed frame length`, and aborts the stream:
 a peer not speaking this framing would otherwise make the receiver buffer
 without bound. On the serving side the handler's input throws that error.
 
-### Why identity reaches the handler by closure
+#### Why identity reaches the handler by closure
 
 `Duplex` is bytes-only, so `serveConnections` passes identity to a factory
 instead of to the handler. `remotePeer` is `connection.remotePeer`, the peer id
@@ -201,7 +295,7 @@ inside it. Reusing one handler built outside it for every connection is how
 identity-by-closure gets broken. `serve` is `serveConnections` with the context
 ignored, so both share framing, teardown and failure handling.
 
-### Why sends wait for the `'drain'` event
+#### Why sends wait for the `'drain'` event
 
 libp2p 3.x streams are push-based: `stream.send(chunk)` returns `false` when
 the write buffer is full, and the stream emits `'drain'` when it can take
@@ -212,7 +306,7 @@ so after the first backpressure cycle it resolves immediately while the buffer
 is still full, and a write loop built on it fills the buffer without bound.
 `tests/backpressure.test.ts` covers this.
 
-### Why both timeouts are minutes, not seconds
+#### Why both timeouts are minutes, not seconds
 
 - **Drain timeout** (`DEFAULT_DRAIN_TIMEOUT_MS`, 5 minutes, `drainTimeoutMs`
   per call site). A peer that requests something and then stops reading,
@@ -233,36 +327,7 @@ is still full, and a write loop built on it fills the buffer without bound.
   `[webrun-streams-libp2p] closeStream: graceful close of protocol <p> failed (bound <ms>ms), aborting instead (peer may see truncated data): <reason>`.
   The close timeout is not configurable through `connect` / `serve` params.
 
-### Why a burst of calls is serialised on a fresh connection
-
-With no connection to the peer yet, every call dials and they all share the
-one connection libp2p establishes. Their streams can reach the remote while it
-is still upgrading that connection. yamux counts those as early streams and,
-past `maxEarlyStreams` (10 by default), aborts the whole muxer: every stream
-on the connection dies, the remote sees EOF during protocol negotiation, and
-this side sees `StreamResetError`. Raising the limit on your own nodes would
-not help against other peers.
-
-So until one stream has negotiated its protocol on an open connection, calls
-open their streams one at a time; after that they open concurrently. If the
-proven connection closes, the next burst is gated again (this re-check needs
-`node.getConnections`; a node that offers only `dialProtocol` stays proven
-after its first stream). The state is shared by every `connect()` to the same
-peer from the same node, because callers often `connect()` per request.
-
-### Stream limits
-
-libp2p caps the number of open streams for one protocol per connection, and
-past the cap a new stream is reset, not queued. One call is one stream, so a
-caller with more concurrent calls than the cap sees calls rejected with no
-other symptom. `maxInboundStreams`, `maxOutboundStreams` and
-`runOnLimitedConnection` are passed through unchanged; an unset option is left
-out of the options object so libp2p's own default applies (inbound 32,
-outbound 64, limited connections refused). `tests/stream-limits.test.ts`
-checks both that a raised `maxInboundStreams` admits more than 32 concurrent
-streams and that an unconfigured server stops at 32.
-
-### How calls end
+#### How calls end
 
 - **Normal end.** Both sides finished: the stream is closed gracefully,
   bounded by the close timeout.
@@ -300,14 +365,43 @@ streams and that an unconfigured server stops at 32.
   A caller that sent its whole request and then stopped reading the response
   (`.return()` mid-stream) is ordinary and is not logged.
 
+### Why a burst of calls is serialised on a fresh connection
+
+With no connection to the peer yet, every call dials and they all share the
+one connection libp2p establishes. Their streams can reach the remote while it
+is still upgrading that connection. yamux counts those as early streams and,
+past `maxEarlyStreams` (10 by default), aborts the whole muxer: every stream
+on the connection dies, the remote sees EOF during protocol negotiation, and
+this side sees `StreamResetError`. Raising the limit on your own nodes would
+not help against other peers.
+
+So until one stream has negotiated its protocol on an open connection, calls
+open their streams one at a time; after that they open concurrently. If the
+proven connection closes, the next burst is gated again (this re-check needs
+`node.getConnections`; a node that offers only `dialProtocol` stays proven
+after its first stream). The state is shared by every `connect()` to the same
+peer from the same node, because callers often `connect()` per request.
+
+### Stream limits
+
+libp2p caps the number of open streams for one protocol per connection, and
+past the cap a new stream is reset, not queued. One call is one stream, so a
+caller with more concurrent calls than the cap sees calls rejected with no
+other symptom. `maxInboundStreams`, `maxOutboundStreams` and
+`runOnLimitedConnection` are passed through unchanged; an unset option is left
+out of the options object so libp2p's own default applies (inbound 32,
+outbound 64, limited connections refused). `tests/stream-limits.test.ts`
+checks both that a raised `maxInboundStreams` admits more than 32 concurrent
+streams and that an unconfigured server stops at 32.
+
 ### MessagePorts over libp2p, and the port stack on them
 
-`connect` / `serve` above stream each call's bytes straight onto a libp2p
-stream, and so inherit libp2p's buffering: a consumer that stops reading does
-not slow its producer (see Tests, L6). `webrun-rpc`'s port stack does: each
-call's chunk waits for the peer's confirmation that its consumer pulled the
-last one, so a producer is never more than a chunk ahead, whatever the
-transport buffers underneath. Two ways to put libp2p under it:
+`connect` / `serve` above are the first of the two ways below, with a window
+and msgpack set for you. Use the port mux directly to choose the codec, the
+chunk size or the multiplexing, or to put other port users on the same node.
+`webrun-rpc`'s port stack bounds a producer to its consumer whatever the
+transport buffers underneath: each chunk waits for the peer's confirmation, or,
+on a windowed port, for the window's credit. Two ways to put libp2p under it:
 
 ```ts
 import { deserialize, msgpackCodec, serialize } from "@statewalker/webrun-msgpack";
@@ -349,8 +443,8 @@ run against it (`tests/port-window.test.ts`).
 
 Each native port carries `closeSignal`, aborted when its stream ends, the peer
 goes, or the port is closed here; `webrun-rpc`'s `getPortCloseSignal` reads it
-from the port, so a call on a dead stream fails instead of waiting, and this
-package still imports nothing from `webrun-rpc`. Ports are opened through the
+from the port, so a call on a dead stream fails instead of waiting, and
+`libp2pPortMux` itself imports nothing from `webrun-rpc`. Ports are opened through the
 same early-stream gate as `connect()`. A port `onPort` refuses (returns
 `false`) is aborted: the opener's signal aborts with `PeerGoneError` and a call
 on it fails. A frame the port's codec cannot decode (a peer speaking another
@@ -401,6 +495,8 @@ reader buffer without bound. Raise it with
 
 ### Constraints
 
+The two below concern the deprecated protocol.
+
 - On the serving side, request bytes are queued for the handler without a
   bound; backpressure applies to the handler's output, not to its input.
 - `duplexOverStream` must start reading the stream without an intervening
@@ -416,9 +512,19 @@ its connection in-process and SIGKILLing a forked server
 (`tests/fixtures/greeting-server.ts`, run with `tsx`), with 100 open channels
 each; every channel must fail with an error within 1 s. The shared conformance
 suite (`tests/conformance.test.ts`, about 7 s) runs in the same `pnpm test`, with
-`skipHugeBody`.
+`skipHugeBody`, for `connect`/`serve` and for the deprecated protocol on both
+ends.
 
-**Run-ahead is bounded for `connect` / `serve`** (spec D17, L6;
+**`connect`/`serve` over the windowed port mux** (`tests/connect-over-ports.test.ts`):
+the protocol ids negotiated, the 4 MiB default window and a 1 MiB `window`
+option holding a producer to the window (L6, in both directions, over yamux's
+16 MiB stream window), identity per call, and the window floor.
+**Interop** (`tests/interop-0-6.test.ts`): the conformance suite L0–L6 and the
+fallback cases between this release and the published 0.6.0
+(`webrun-streams-libp2p-0-6`, an npm alias), old caller to new server and new
+caller to old server.
+
+**Run-ahead is bounded for the deprecated protocol** (spec D17, L6;
 `tests/run-ahead.test.ts`, always on). L6 first found none: a consumer that
 stopped reading let the producer run 22-24 MiB ahead until libp2p's 4 MiB read
 buffer killed the stream. Two things buffered without limit:
@@ -487,13 +593,16 @@ the signal never aborted.
 
 ### Dependencies
 
-- `@statewalker/webrun-streams` (`workspace:^`): the seam types and
-  `serializeError` / `deserializeError`.
+- `@statewalker/webrun-streams` (`workspace:^`): the seam types, the native
+  port mux and `serializeError` / `deserializeError`.
+- `@statewalker/webrun-rpc` (`workspace:^`): the port stack `connect`/`serve`
+  run (`connect`, `serve`, `overPorts`).
+- `@statewalker/webrun-msgpack` (`workspace:^`): the calls' value codec.
 - `@libp2p/interface`, `@multiformats/multiaddr` (peers, types only) and
   `libp2p` (optional peer). Dev dependencies `@chainsafe/libp2p-noise`,
   `@chainsafe/libp2p-yamux`, `@libp2p/tcp` and `@libp2p/utils` build the test
-  nodes; `@statewalker/webrun-rpc` and `@statewalker/webrun-msgpack` run the
-  multiplexer tests, and `tsx` runs the forked server.
+  nodes, `webrun-streams-libp2p-0-6` (the published 0.6.0) is the old peer of
+  the interop tests, and `tsx` runs the forked server.
 
 ## License
 

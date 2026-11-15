@@ -1,7 +1,8 @@
 import type { Libp2p, Stream } from "@libp2p/interface";
 import { afterEach, describe, expect, it } from "vitest";
-import { connect, DEFAULT_PROTOCOL, serve } from "../src/connect-serve.js";
+import { DEFAULT_PROTOCOL, serve } from "../src/connect-serve.js";
 import { encodeVarint, parseFrames } from "../src/duplex-over-stream.js";
+import { legacyConnect, legacyServeConnections } from "../src/legacy-connect-serve.js";
 import { createNode } from "./make-libp2p-pair.js";
 
 const cleanups: Array<() => unknown> = [];
@@ -20,6 +21,10 @@ async function waitFor(cond: () => boolean, ms: number): Promise<boolean> {
   while (!cond() && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
   return cond();
 }
+
+// The deprecated protocol's framing (statewalker/webrun-wire#153): `serve`
+// still answers it on `protocol` itself, for older callers, so the raw streams
+// below reach the shim a new server runs.
 
 /**
  * A server whose handler reads its whole input and records how that ended, and a raw stream to
@@ -88,17 +93,19 @@ describe("duplexOverStream — frame limits", () => {
     const size = 4 * 1024 * 1024;
     const body = new Uint8Array(size);
     for (let i = 0; i < size; i++) body[i] = (i * 7) & 0xff;
-    await serve({ node: serverNode }, (input) =>
-      (async function* () {
-        for await (const _ of input) {
-          /* drain */
-        }
-        yield body;
-      })(),
+    await legacyServeConnections(
+      { node: serverNode },
+      () => (input) =>
+        (async function* () {
+          for await (const _ of input) {
+            /* drain */
+          }
+          yield body;
+        })(),
     );
     const addr = serverNode.getMultiaddrs()[0];
     if (!addr) throw new Error("no listen address");
-    const { call, close } = await connect({ node: await node(), peer: addr });
+    const { call, close } = await legacyConnect({ node: await node(), peer: addr });
     cleanups.push(close);
     const chunks: Uint8Array[] = [];
     for await (const c of call([new Uint8Array([1])])) chunks.push(c);

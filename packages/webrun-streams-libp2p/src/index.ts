@@ -3,6 +3,8 @@ export {
   type ConnectLibp2pParams,
   connect,
   DEFAULT_PROTOCOL,
+  DEFAULT_WINDOW,
+  portProtocolOf,
   type ServeConnectionsHandler,
   type ServeLibp2pParams,
   serve,

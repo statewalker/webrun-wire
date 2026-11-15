@@ -93,7 +93,7 @@ export interface Libp2pPortMuxOptions {
   window?: number;
 }
 
-/** A `webrun-rpc` `PortMux` by shape; this package imports nothing from it. */
+/** A `webrun-rpc` `PortMux` by shape; the port mux imports nothing from it. */
 export interface Libp2pPortMux {
   openPort(meta?: unknown, options?: { signal?: AbortSignal }): Promise<StreamPort>;
   close(reason?: unknown): Promise<void>;
@@ -119,9 +119,21 @@ export interface Libp2pPortMux {
  * `connect()`. `meta` is not sent: the protocol says what a port is for.
  */
 export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp2pPortMux> {
+  return openLibp2pPortMux(options, DEFAULT_PORT_STREAM_LIMIT);
+}
+
+/**
+ * {@link libp2pPortMux}, with `streamLimit` as the default of both stream
+ * limits; `undefined` leaves libp2p's own defaults (what `connect`/`serve`
+ * have always passed through). Internal.
+ */
+export async function openLibp2pPortMux(
+  options: Libp2pPortMuxOptions,
+  streamLimit: number | undefined,
+): Promise<Libp2pPortMux> {
   const { node, peer, codec, onPort, maxMessageBytes, runOnLimitedConnection } = options;
-  const maxInboundStreams = options.maxInboundStreams ?? DEFAULT_PORT_STREAM_LIMIT;
-  const maxOutboundStreams = options.maxOutboundStreams ?? DEFAULT_PORT_STREAM_LIMIT;
+  const maxInboundStreams = options.maxInboundStreams ?? streamLimit;
+  const maxOutboundStreams = options.maxOutboundStreams ?? streamLimit;
   const protocol = options.protocol ?? DEFAULT_PORT_PROTOCOL;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
   // Checked by the shared lifecycle, before the protocols are handled.
@@ -140,7 +152,8 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
       : {}),
   });
 
-  const dialOptions: DialProtocolOptions = { maxOutboundStreams };
+  const dialOptions: DialProtocolOptions = {};
+  if (maxOutboundStreams !== undefined) dialOptions.maxOutboundStreams = maxOutboundStreams;
   if (runOnLimitedConnection !== undefined)
     dialOptions.runOnLimitedConnection = runOnLimitedConnection;
 
@@ -165,7 +178,9 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
   });
 
   if (onPort) {
-    const handleOptions: StreamHandlerOptions = { maxInboundStreams, maxOutboundStreams };
+    const handleOptions: StreamHandlerOptions = {};
+    if (maxInboundStreams !== undefined) handleOptions.maxInboundStreams = maxInboundStreams;
+    if (maxOutboundStreams !== undefined) handleOptions.maxOutboundStreams = maxOutboundStreams;
     if (runOnLimitedConnection !== undefined)
       handleOptions.runOnLimitedConnection = runOnLimitedConnection;
     const served = window !== undefined ? [protocol, windowProtocol] : [protocol];

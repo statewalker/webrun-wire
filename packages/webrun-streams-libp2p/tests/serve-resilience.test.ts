@@ -5,6 +5,7 @@ import { tcp } from "@libp2p/tcp";
 import { createLibp2p } from "libp2p";
 import { describe, expect, it, vi } from "vitest";
 import { connect, serveConnections } from "../src/index.js";
+import { legacyConnect, legacyServeConnections } from "../src/legacy-connect-serve.js";
 
 async function node(listen: boolean): Promise<Libp2p> {
   return createLibp2p({
@@ -44,69 +45,84 @@ async function drain(source: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
  * `expected [ Error: hostile peer input ] to deeply equal []` and vitest
  * additionally reports the same rejection as an unhandled error.
  */
-describe("serveConnections resilience", () => {
-  it("survives a peer whose request errors, and keeps serving other peers", async () => {
-    const server = await node(true);
-    const hostile = await node(false);
-    const friendly = await node(false);
+const stacks = [
+  // Over the port stack the failure reaches the handler and the caller; nothing is logged.
+  { name: "ports", connect, serveConnections, logs: false },
+  // The deprecated protocol logs the failed inbound stream.
+  {
+    name: "deprecated protocol",
+    connect: legacyConnect,
+    serveConnections: legacyServeConnections,
+    logs: true,
+  },
+] as const;
 
-    // Node terminates on unhandled rejections only when nothing listens, so
-    // observe them directly rather than trying to survive a process exit.
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on("unhandledRejection", onUnhandled);
-    // The fix logs the failure; keep the expected noise out of the report and
-    // assert it was actually reported.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+describe.each(stacks)(
+  "serveConnections resilience ($name)",
+  ({ connect, serveConnections, logs }) => {
+    it("survives a peer whose request errors, and keeps serving other peers", async () => {
+      const server = await node(true);
+      const hostile = await node(false);
+      const friendly = await node(false);
 
-    try {
-      const stop = await serveConnections({ node: server }, () => echo);
-      const addr = server.getMultiaddrs()[0];
-      if (addr == null) throw new Error("server has no listen address");
+      // Node terminates on unhandled rejections only when nothing listens, so
+      // observe them directly rather than trying to survive a process exit.
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      // The fix logs the failure; keep the expected noise out of the report and
+      // assert it was actually reported.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      const hostileConn = await connect({ node: hostile, peer: addr });
       try {
-        // The peer's own source throws mid-stream. `framedOutbound` turns that
-        // into an ERROR frame on the wire, which the handler side rethrows.
-        await drain(
-          hostileConn.call(
+        const stop = await serveConnections({ node: server }, () => echo);
+        const addr = server.getMultiaddrs()[0];
+        if (addr == null) throw new Error("server has no listen address");
+
+        const hostileConn = await connect({ node: hostile, peer: addr });
+        try {
+          // The peer's own source throws mid-stream. `framedOutbound` turns that
+          // into an ERROR frame on the wire, which the handler side rethrows.
+          await drain(
+            hostileConn.call(
+              (async function* () {
+                yield encoder.encode("hello");
+                throw new Error("hostile peer input");
+              })(),
+            ),
+          );
+        } catch {
+          // What the hostile caller itself sees is not under test — only that
+          // the server outlives it.
+        }
+        await hostileConn.close();
+
+        // Give the rejection a chance to be reported before asserting on it.
+        await new Promise((r) => setTimeout(r, 250));
+
+        expect(unhandled).toEqual([]);
+        if (logs) expect(warn).toHaveBeenCalled();
+
+        // The server is still serving: a different peer's call still round-trips.
+        const friendlyConn = await connect({ node: friendly, peer: addr });
+        const out = await drain(
+          friendlyConn.call(
             (async function* () {
-              yield encoder.encode("hello");
-              throw new Error("hostile peer input");
+              yield encoder.encode("still alive");
             })(),
           ),
         );
-      } catch {
-        // What the hostile caller itself sees is not under test — only that
-        // the server outlives it.
+        await friendlyConn.close();
+        expect(out.map((c) => decoder.decode(c)).join("")).toBe("still alive");
+
+        await stop();
+      } finally {
+        warn.mockRestore();
+        process.off("unhandledRejection", onUnhandled);
+        await Promise.allSettled([server.stop(), hostile.stop(), friendly.stop()]);
       }
-      await hostileConn.close();
-
-      // Give the rejection a chance to be reported before asserting on it.
-      await new Promise((r) => setTimeout(r, 250));
-
-      expect(unhandled).toEqual([]);
-      expect(warn).toHaveBeenCalled();
-
-      // The server is still serving: a different peer's call still round-trips.
-      const friendlyConn = await connect({ node: friendly, peer: addr });
-      const out = await drain(
-        friendlyConn.call(
-          (async function* () {
-            yield encoder.encode("still alive");
-          })(),
-        ),
-      );
-      await friendlyConn.close();
-      expect(out.map((c) => decoder.decode(c)).join("")).toBe("still alive");
-
-      await stop();
-    } finally {
-      warn.mockRestore();
-      process.off("unhandledRejection", onUnhandled);
-      await Promise.allSettled([server.stop(), hostile.stop(), friendly.stop()]);
-    }
-  });
-});
+    });
+  },
+);

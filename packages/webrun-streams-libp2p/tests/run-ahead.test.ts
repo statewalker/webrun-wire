@@ -1,5 +1,7 @@
 /**
- * L6 (spec D17) for `connect` / `serve`, always on: a consumer that stops
+ * L6 (spec D17) for the deprecated protocol (`legacyConnect` /
+ * `legacyServeConnections`, the shim `connect`/`serve` keep for one release,
+ * statewalker/webrun-wire#153), always on: a consumer that stops
  * reading throttles its producer, in either direction, instead of letting it
  * run 22-24 MiB ahead until libp2p's read buffer killed the stream (the
  * finding before the paced reader). The bound is two receive windows plus
@@ -9,11 +11,15 @@
  */
 import { measureRunAhead } from "@statewalker/webrun-streams-conformance";
 import { describe, expect, it } from "vitest";
-import { makeLibp2pPair, makePairWith, PAIR_STREAM_WINDOW } from "./make-libp2p-pair.js";
+import {
+  makeLegacyPair as makeLibp2pPair,
+  makeLegacyPairWith as makePairWith,
+  PAIR_STREAM_WINDOW,
+} from "./make-libp2p-pair.js";
 
 const MiB = 1024 * 1024;
 
-describe("run-ahead past a stalled consumer (L6)", () => {
+describe("deprecated protocol: run-ahead past a stalled consumer (L6)", () => {
   for (const direction of ["response", "request"] as const) {
     it(`${direction}: a 1 MiB window bounds the producer, every byte arrives in place`, async () => {
       const m = await measureRunAhead(makeLibp2pPair, direction);
