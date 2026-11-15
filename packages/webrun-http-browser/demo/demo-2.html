@@ -19,7 +19,7 @@
     <p>
       Click <strong>Open folder</strong> and pick a directory. A relay
       ServiceWorker will serve the folder's contents from an in-browser URL
-      rooted at <code>~FS/</code>.
+      rooted at <code>~FS-&lt;random id&gt;/</code>.
     </p>
     <button type="button" id="open">Open folder</button>
     <button type="button" id="reload" style="display: none;">Reload tree</button>
@@ -44,7 +44,9 @@
           throw new Error("Permission denied");
         }
 
-        const SERVICE_KEY = "FS";
+        // AN UNGUESSABLE KEY: every page that embeds the relay could call a
+        // service under a fixed key and read the folder (#129).
+        const SERVICE_KEY = `FS-${crypto.randomUUID()}`;
         const connection = await WebRunHttp.newRemoteRelayChannel();
         const serviceBaseUrl = `${connection.baseUrl}~${SERVICE_KEY}`;
 
