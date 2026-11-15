@@ -14,6 +14,13 @@
  */
 
 import type { MessagePipeListener } from "./message-pipe.js";
+import {
+  checkPortWindow,
+  newPortWindow,
+  PORT_FLOW,
+  type PortFlow,
+  type PortWindow,
+} from "./native-port-window.js";
 
 /**
  * How a port's messages become bytes and back: any value the stream tier
@@ -55,6 +62,16 @@ export interface NativeChannel {
    * stream reset) does so here. Default: `pipe.close()`.
    */
   fail?(reason: Error): void;
+  /**
+   * Whether this channel runs the per-port window (statewalker/webrun-wire#153),
+   * as the transport negotiated it at open; ignored by a mux without `window`.
+   * `"agreed"`: the open settled that both ends speak it (a libp2p protocol
+   * id; a WebRTC responder that saw the opener ask). `"offered"`: this end
+   * asked, and only the peer's `hello` can tell (a WebRTC opener); an older
+   * peer then never answers, and the port runs without a window. Unset: no
+   * window.
+   */
+  window?: "agreed" | "offered";
 }
 
 /** One port: a channel as a `MessageTarget` of values, with its close signal on it. */
@@ -68,6 +85,8 @@ export interface NativePort {
   whenDrained(): Promise<void>;
   /** Aborts when the channel ends, the connection goes, or the port is closed here. */
   readonly closeSignal: AbortSignal;
+  /** On a windowed port: its flow state (`portFlow(port)`), which `webrun-rpc`'s stream tier reads. */
+  readonly [PORT_FLOW]?: PortFlow;
 }
 
 /** A `webrun-rpc` `PortMux` by shape. */
@@ -100,6 +119,16 @@ export interface NativePortMuxOptions<Info> {
   open(signal?: AbortSignal): Promise<NativeChannel>;
   /** Stops the transport offering inbound channels; runs once, on `close()`. */
   stopAccepting?(): void | Promise<void>;
+  /**
+   * Per-port flow control, in bytes (off when unset; from `MIN_PORT_WINDOW`,
+   * 64 KiB, to `MAX_PORT_WINDOW`): on each channel the
+   * transport marks `window`, the most this end holds of the peer's messages
+   * delivered and not yet consumed. See `native-port-window.ts`. Both ends'
+   * codecs must not produce frames that start with byte 0xC1 for an older
+   * peer (msgpack and UTF-8 text never do); between two windowed ends such a
+   * frame goes escaped.
+   */
+  window?: number;
 }
 
 /** What `newNativePortMux` hands back: the mux, and where the transport reports inbound channels. */
@@ -121,10 +150,13 @@ export function newNativePortMux<I = unknown>(
   options: NativePortMuxOptions<I>,
 ): NativePortMuxControl<I> {
   const { name, codec, maxMessageSize, onPort, connectionSignal } = options;
+  checkPortWindow(name, options.window);
   const live = new Set<NativePort>();
   let closed = false;
   /** Aborts on `close()`: a channel still opening is given up, and its `openPort` rejects. */
   const closing = new AbortController();
+  /** A peer's `hello` answered a port this end offered: the peer's serving mux speaks the window (`presume`). */
+  let heardHello = false;
 
   const wrap = (channel: NativeChannel): { port: NativePort; fail(reason: Error): void } => {
     const { pipe } = channel;
@@ -135,15 +167,25 @@ export function newNativePortMux<I = unknown>(
     const listeners = new Set<MessagePipeListener>();
     // Messages that arrive before the first listener: held for it, then
     // delivered after that tick, as a MessagePort dispatches its queue.
-    let held: unknown[] | undefined = [];
-    const deliver = (data: unknown): void => {
+    let held: { data: unknown; size: number }[] | undefined = [];
+    // With a window, a message's credit goes back once every listener is done with it.
+    let win: PortWindow | undefined;
+    const deliver = (data: unknown, size: number): void => {
       if (closeSignal.aborted) return;
       const event = new MessageEvent("message", { data });
+      const pending: Promise<unknown>[] = [];
       for (const listener of [...listeners]) {
         try {
-          Promise.resolve(listener(event)).catch(() => undefined);
+          const result = listener(event);
+          if (result && typeof (result as Promise<void>).then === "function") {
+            pending.push(Promise.resolve(result).catch(() => undefined));
+          }
         } catch {}
       }
+      if (!win) return;
+      const w = win;
+      if (pending.length === 0) w.consumed(size);
+      else void Promise.all(pending).then(() => w.consumed(size));
     };
     /** Set once the channel was broken off: it must not also be closed gracefully. */
     let failedHard = false;
@@ -162,17 +204,31 @@ export function newNativePortMux<I = unknown>(
     };
     const onBytes = (event: MessageEvent): void => {
       if (closeSignal.aborted) return;
+      let bytes = event.data as Uint8Array;
+      if (win) {
+        let payload: Uint8Array | undefined;
+        try {
+          payload = win.receive(bytes);
+        } catch (err) {
+          fail(new Error(`${name}: a control frame the port cannot read`, { cause: err }));
+          return;
+        }
+        if (!payload) return;
+        bytes = payload;
+      }
       let data: unknown;
       try {
-        data = codec.decode(event.data as Uint8Array);
+        data = codec.decode(bytes);
       } catch (err) {
         // A peer speaking another codec, or a corrupt frame: fail the port
         // rather than drop the message and leave its call waiting.
         fail(new Error(`${name}: a frame the port's codec cannot decode`, { cause: err }));
         return;
       }
-      if (held) held.push(data);
-      else deliver(data);
+      const size = bytes.byteLength;
+      win?.arrived(size);
+      if (held) held.push({ data, size });
+      else deliver(data, size);
     };
     pipe.addEventListener("message", onBytes);
     const cleanUp = (): void => {
@@ -180,6 +236,7 @@ export function newNativePortMux<I = unknown>(
       pipe.removeEventListener("message", onBytes);
       listeners.clear();
       held = undefined;
+      win?.end();
       if (!failedHard) void pipe.close().catch(() => undefined);
     };
     const port: NativePort = {
@@ -192,7 +249,8 @@ export function newNativePortMux<I = unknown>(
         if (closeSignal.aborted) return; // `closeSignal` says so
         const bytes = codec.encode(message);
         try {
-          pipe.postMessage(bytes);
+          if (win) win.post(bytes);
+          else pipe.postMessage(bytes);
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
           if (!local.signal.aborted) local.abort(error);
@@ -207,7 +265,7 @@ export function newNativePortMux<I = unknown>(
           const pending = held;
           held = undefined;
           queueMicrotask(() => {
-            for (const data of pending) deliver(data);
+            for (const { data, size } of pending) deliver(data, size);
           });
         }
       },
@@ -215,10 +273,35 @@ export function newNativePortMux<I = unknown>(
         listeners.delete(listener);
       },
       async close() {
+        // What the window held back goes out first: the peer gets every
+        // message posted before the close.
+        if (!closeSignal.aborted) win?.flushAll();
         if (!local.signal.aborted) local.abort(new Error(`${name}: port closed`));
         await pipe.close().catch(() => undefined);
       },
     };
+    if (options.window !== undefined && channel.window) {
+      win = newPortWindow({
+        window: options.window,
+        mode: channel.window,
+        presume: heardHello,
+        // Only the answer to a port this end offered shows that the peer's
+        // serving mux speaks the window; a hello on a port the peer opened
+        // shows only its opening mux does (review of #184).
+        ...(channel.window === "offered"
+          ? {
+              onHello: () => {
+                heardHello = true;
+              },
+            }
+          : {}),
+        send: (frame) => pipe.postMessage(frame),
+        fail: (reason) => {
+          if (!local.signal.aborted) local.abort(reason);
+        },
+      });
+      Object.defineProperty(port, PORT_FLOW, { value: win.flow });
+    }
     live.add(port);
     // A channel or connection gone already: an abort listener would never fire.
     if (closeSignal.aborted) cleanUp();

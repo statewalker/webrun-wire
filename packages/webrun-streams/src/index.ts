@@ -7,6 +7,15 @@ export * from "./lines.js";
 export * from "./map.js";
 export * from "./message-pipe.js";
 export * from "./native-port-mux.js";
+export {
+  CONTROL_BYTE,
+  MAX_PORT_WINDOW,
+  MIN_PORT_WINDOW,
+  type NativePortAgreement,
+  PORT_FLOW,
+  type PortFlow,
+  portFlow,
+} from "./native-port-window.js";
 export * from "./new-async-generator.js";
 export * from "./normalize.js";
 export * from "./readable-streams.js";

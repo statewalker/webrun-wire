@@ -84,7 +84,10 @@ if (isBrowser) {
     it("each port is its own data channel, labelled; ports from other users of the connection are left alone", async () => {
       const { clientPc, serverPc } = await connectedPeers();
       const labels: string[] = [];
-      serverPc.addEventListener("datachannel", (e) => labels.push(e.channel.label));
+      // The bootstrap channel `connectedPeers` opened may still announce itself here: not counted.
+      serverPc.addEventListener("datachannel", (e) => {
+        if (e.channel.label !== "webrun/bootstrap") labels.push(e.channel.label);
+      });
       const accepted: unknown[] = [];
       await webrtcPortMux({
         pc: serverPc,

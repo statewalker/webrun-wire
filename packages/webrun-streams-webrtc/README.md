@@ -44,7 +44,7 @@ below.
 | `serve({ pc }, handler)` | `Serve<WebRtcParams>`. Listens for `datachannel` events on `pc` and runs `handler` on each channel. Resolves to an idempotent teardown that stops accepting new channels; calls in flight continue. |
 | `duplexOverDataChannel(dc, input)` | The primitive under both: runs one call over one data channel. Sends `input` framed, and returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
 | `WebRtcParams` | `{ pc: RTCPeerConnection }`. |
-| `webrtcPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own data channel (labelled `webrun-port/…`), for `overPorts`. `options`: `pc`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `onPort(port)` (to accept ports), `maxMessageSize`, `maxFrameBytes`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. See "MessagePorts over WebRTC" below. |
+| `webrtcPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own data channel (labelled `webrun-port/…`), for `overPorts`. `options`: `pc`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `onPort(port)` (to accept ports), `maxMessageSize`, `maxFrameBytes`, `window`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. See "MessagePorts over WebRTC" below. |
 | `DEFAULT_PORT_MAX_FRAME_BYTES`, `DEFAULT_PORT_MAX_MESSAGE_SIZE`, `PORT_DRAIN_LOW_WATER`, `PORT_LABEL_PREFIX` | 16 KiB, 16 KiB − 256, 256 KiB, `"webrun-port/"`. |
 
 ## Examples
@@ -211,6 +211,17 @@ that has failed already makes `openPort` reject, as does an aborted `signal`.
 `whenDrained()` waits on `bufferedamountlow` (256 KiB). The suite runs a
 second conformance pair over these ports (`tests/port-mux.test.ts`), with L6 at
 a one-chunk bound.
+
+**A window per port.** One confirmed chunk per round trip is 16 KiB per RTT per
+call. With `window: n` (bytes) on both ends, a port's data channel opens with
+`protocol` `WINDOW_CHANNEL_PROTOCOL`; a serving mux with `window` that sees it
+answers with a hello carrying its window, each end then grants the other `n`
+bytes of messages delivered and not yet consumed, and the stream tier pipelines
+its chunks up to the peer's window (statewalker/webrun-wire#153). A serving mux
+without `window` (an older one) never answers, and the port runs as before.
+Keep `n` well under Chromium's 16 MiB data channel send buffer; 1-4 MiB is a
+reasonable range. `describePortWindow` and L6 at the window's bound run against
+it (`tests/port-window.test.ts`).
 
 ### How cancellation reaches the handler
 

@@ -13,6 +13,13 @@ export {
   type PortMuxHarness,
 } from "./describe-port-mux.js";
 export {
+  type DescribePortWindowOptions,
+  describePortWindow,
+  type MakePortWindowHarness,
+  type PortWindowHarness,
+  type PortWindows,
+} from "./describe-port-window.js";
+export {
   type ConnectServePair,
   type MakePair,
   makeLoopbackPair,

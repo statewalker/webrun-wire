@@ -19,6 +19,13 @@ export const DEFAULT_PORT_MAX_FRAME_BYTES = 16 * 1024;
 /** What one message on a port may carry before the stream tier chunks: 256 bytes under the frame limit (spec D10). */
 export const DEFAULT_PORT_MAX_MESSAGE_SIZE = DEFAULT_PORT_MAX_FRAME_BYTES - 256;
 
+/**
+ * The `protocol` of a windowed port's data channel: a mux with `window` opens
+ * its ports' channels with it, and a serving mux with `window` that sees it
+ * answers with its window (statewalker/webrun-wire#153).
+ */
+export const WINDOW_CHANNEL_PROTOCOL = "webrun-port-window/1";
+
 /** `whenDrained` resolves once the channel's `bufferedAmount` is at most this. */
 export const PORT_DRAIN_LOW_WATER = 256 * 1024;
 
@@ -44,6 +51,19 @@ export interface WebRtcPortMuxOptions {
   maxMessageSize?: number;
   /** Default {@link DEFAULT_PORT_MAX_FRAME_BYTES}. */
   maxFrameBytes?: number;
+  /**
+   * Per-port flow control, in bytes (off when unset; from 64 KiB): the most this end holds
+   * of a port's messages delivered and not yet consumed
+   * (statewalker/webrun-wire#153). A port whose two ends both set it agrees
+   * the window over its data channel ({@link WINDOW_CHANNEL_PROTOCOL}, then
+   * the serving end's hello), and `webrun-rpc`'s stream tier then pipelines
+   * its chunks, up to the peer's window in flight, instead of waiting for
+   * each chunk's confirmation; against a mux without it (an older peer) the
+   * port runs as before. Keep it well under the browser's data channel send
+   * buffer (16 MiB in Chromium, which closes a channel that overflows it):
+   * 1-4 MiB is a reasonable range.
+   */
+  window?: number;
 }
 
 /** A `webrun-rpc` `PortMux` by shape; this package imports nothing from it. */
@@ -74,7 +94,7 @@ const claimed = new WeakSet<RTCDataChannel>();
  * and sent, in order, when it opens.
  */
 export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebRtcPortMux> {
-  const { pc, codec, onPort } = options;
+  const { pc, codec, onPort, window } = options;
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_PORT_MAX_FRAME_BYTES;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
 
@@ -158,9 +178,11 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
     maxMessageSize,
     onPort: onPort ? (port) => onPort(port) : undefined,
     connectionSignal: connectionGone.signal,
+    window,
     async open(signal) {
       const dc = pc.createDataChannel(`${PORT_LABEL_PREFIX}${(counter++).toString(36)}`, {
         ordered: true,
+        ...(window !== undefined ? { protocol: WINDOW_CHANNEL_PROTOCOL } : {}),
       });
       const pipe = pipeOf(dc);
       const gone = AbortSignal.any([pipe.closeSignal, connectionGone.signal]);
@@ -196,7 +218,8 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
         gone.addEventListener("abort", fail, { once: true });
         signal?.addEventListener("abort", cancel, { once: true });
       });
-      return { pipe, ready };
+      // Asked, not agreed: only the serving end's hello says it speaks the window.
+      return { pipe, ready, ...(window !== undefined ? { window: "offered" as const } : {}) };
     },
     stopAccepting() {
       pc.removeEventListener("datachannel", onChannel);
@@ -211,7 +234,12 @@ export async function webrtcPortMux(options: WebRtcPortMuxOptions): Promise<WebR
     // same connection; of several serving muxes, the first takes each port.
     if (!onPort || ports.closed || claimed.has(dc)) return;
     claimed.add(dc);
-    ports.accept({ pipe: pipeOf(dc) }, undefined);
+    // The opener asked for the window: this end, with one, agrees and says hello at once.
+    const windowed = window !== undefined && dc.protocol === WINDOW_CHANNEL_PROTOCOL;
+    ports.accept(
+      { pipe: pipeOf(dc), ...(windowed ? { window: "agreed" as const } : {}) },
+      undefined,
+    );
   };
   pc.addEventListener("datachannel", onChannel);
 

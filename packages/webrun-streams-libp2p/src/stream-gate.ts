@@ -55,13 +55,15 @@ function connectionOf(node: Libp2p, stream: Stream): Connection | null {
 export async function openGatedStream(
   node: Libp2p,
   peer: PeerId | Multiaddr,
-  proto: string,
+  proto: string | string[],
   dialOptions?: DialProtocolOptions,
 ): Promise<Stream> {
+  // Several: the remote picks the first it speaks (a windowed port's protocol, then the plain one).
+  const protocols = Array.isArray(proto) ? proto : [proto];
   const gate = streamGateFor(node, peer);
   while (!isProven(gate)) {
     if (gate.firstOpening == null) {
-      const opening = node.dialProtocol(peer, [proto], dialOptions);
+      const opening = node.dialProtocol(peer, protocols, dialOptions);
       gate.firstOpening = opening;
       try {
         const stream = await opening;
@@ -73,5 +75,5 @@ export async function openGatedStream(
     }
     await gate.firstOpening.catch(() => undefined);
   }
-  return node.dialProtocol(peer, [proto], dialOptions);
+  return node.dialProtocol(peer, protocols, dialOptions);
 }
