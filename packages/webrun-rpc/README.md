@@ -413,7 +413,7 @@ checks on its honest traffic. So a peer bounded this way is one that runs this v
 
 **A port's window adapts after the ack** (statewalker/webrun-wire#188). With `window: { initial,
 max }`, or `"auto"` (`DEFAULT_AUTO_WINDOW`, 256 KiB to 16 MiB), a port this mux opens asks for
-`initial`, and on a port the peer opens `max` is the clamp above. From the window agreed for the
+`initial`, and on a port the peer opens `initial` is the clamp above too: an opener that asks for more, even a hostile one asking for the ceiling, starts at `initial`. From the window agreed for the
 port, the receiving end of each direction adapts what it grants, like TCP's receive-buffer
 autotuning, and says so in its credits: `{ type: "credit", id, bytes, window }`. It measures one
 round trip at a time, from a credit that moves the window's right edge to the first byte past the

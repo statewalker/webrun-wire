@@ -7,7 +7,10 @@ export type PortWindow = number | AdaptiveWindow | "auto";
 
 /** An adaptive window (`PortMuxOptions.window`): where it starts, and its ceiling. */
 export interface AdaptiveWindow {
-  /** What a port this mux opens asks for, and the least it ever grants. */
+  /**
+   * What a port this mux opens asks for, and the most a port the peer opens
+   * starts with (the clamp of #145); the window grows from there.
+   */
   initial: number;
   /** The most this end ever grants on one port: what one port may hold of its memory. */
   max: number;
@@ -113,7 +116,7 @@ export class WindowTuner {
 export interface ResolvedWindow {
   /** What a port this mux opens asks for in its `open`; unset: no window. */
   ask: number | undefined;
-  /** The most a port the peer opens is granted (the clamp of #145). */
+  /** The most a port the peer opens is granted at its open (the clamp of #145). */
   grant: number | undefined;
   /** The ceiling of an adaptive window; unset: the window is fixed. */
   max?: number;
@@ -130,5 +133,8 @@ export function resolveWindow(window: PortWindow | undefined): ResolvedWindow {
       `webrun-rpc: window must be a number, "auto" or { initial, max } with positive integers, initial <= max; got ${JSON.stringify(window)}`,
     );
   }
-  return { ask: initial, grant: max, max };
+  // A peer's port starts at `initial` too, never at the ceiling: the opener
+  // names the window it asks for, and a hostile or older one asking for the
+  // ceiling would otherwise commit it at once, as the floor it never leaves.
+  return { ask: initial, grant: initial, max };
 }

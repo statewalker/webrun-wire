@@ -156,7 +156,8 @@ export interface PortMuxOptions {
    *
    * ADAPTIVE: `{ initial, max }` or `"auto"` (`DEFAULT_AUTO_WINDOW`: 256 KiB
    * to 16 MiB). A port this mux opens asks for `initial`; on a port the peer
-   * opens, `max` is the most this end grants (the clamp above). From the
+   * opens, `initial` is also the clamp above (an opener that asks for more
+   * starts at `initial`, and the window grows from there). From the
    * window agreed for the port, the receiving end of each direction adapts
    * what it grants, like TCP's receive-buffer autotuning, and announces it
    * in its credits (`{ type: "credit", id, bytes, window }`): it doubles

@@ -507,7 +507,7 @@ describe("interop with 0.14.0", () => {
     expect(closes(t.wire)).toEqual([]);
   }, 30_000);
 
-  it("0.14 opener downloading from an adaptive responder: the clamp holds, and so does the agreed window", async () => {
+  it("0.14 opener downloading from an adaptive responder: clamped to initial, and the agreed window holds", async () => {
     const t = setup({ kit: OLD, window: 1 * MiB }, { kit: NEW, window: ADAPTIVE });
     const port = await openAgreed(t);
     const got = consume(port);
@@ -516,9 +516,17 @@ describe("interop with 0.14.0", () => {
     await produce(NEW, t.inbound[0] as MessageTarget, 1 * MiB);
     await waitFor(() => got.bytes >= 1 * MiB, "every byte arrives");
     expect(got.outOfOrder).toBe(0);
-    // 0.14 lists "window": the responder clamped 1 MiB to its ceiling.
-    expect(t.client.ports()[0]?.window).toBe(ADAPTIVE.max);
-    expect(responder.max.sendWindow).toBe(ADAPTIVE.max);
+    // 0.14 lists "window": the responder clamped 1 MiB to its `initial`, not
+    // its ceiling, and the window grows from there only where it is read.
+    expect(t.client.ports()[0]?.window).toBe(ADAPTIVE.initial);
+    expect(responder.max.sendWindow).toBe(ADAPTIVE.initial);
     expect(closes(t.wire)).toEqual([]);
+  }, 30_000);
+
+  it('a 0.14 opener asking for 16 MiB of an "auto" responder is held to its initial 256 KiB', async () => {
+    const t = setup({ kit: OLD, window: 16 * MiB }, { kit: NEW, window: "auto" });
+    await openAgreed(t);
+    expect(t.client.ports()[0]?.window).toBe(256 * KiB);
+    expect(t.server.ports()[0]?.window).toBe(256 * KiB);
   }, 30_000);
 });

@@ -132,15 +132,15 @@ describe("resolveWindow", () => {
     expect(resolveWindow(undefined)).toEqual({ ask: undefined, grant: undefined });
   });
 
-  it('`{ initial, max }` asks for initial and grants at most max; "auto" is DEFAULT_AUTO_WINDOW', () => {
+  it('`{ initial, max }` asks for initial and grants a peer\'s port initial at first; "auto" is DEFAULT_AUTO_WINDOW', () => {
     expect(resolveWindow({ initial: 16 * KiB, max: 1024 * KiB })).toEqual({
       ask: 16 * KiB,
-      grant: 1024 * KiB,
+      grant: 16 * KiB,
       max: 1024 * KiB,
     });
     expect(resolveWindow("auto")).toEqual({
       ask: DEFAULT_AUTO_WINDOW.initial,
-      grant: DEFAULT_AUTO_WINDOW.max,
+      grant: DEFAULT_AUTO_WINDOW.initial,
       max: DEFAULT_AUTO_WINDOW.max,
     });
     expect(DEFAULT_AUTO_WINDOW).toEqual({ initial: 256 * KiB, max: 16 * 1024 * KiB });
