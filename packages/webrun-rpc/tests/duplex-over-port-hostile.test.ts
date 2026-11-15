@@ -172,7 +172,7 @@ describe.each([
     // (any handler that awaits something first), `deliver` is still
     // undefined and a hand-rolled `void deliver?.(...)` would be a silent
     // no-op. Routing the poison through `controller.abort()` is what makes
-    // `recieveIterator`'s installer replay the error once the handler does
+    // `receiveIterator`'s installer replay the error once the handler does
     // start pulling, instead of leaving it to wait forever.
     const channel = await streamPorts(windowed, open);
     const seen: Uint8Array[] = [];

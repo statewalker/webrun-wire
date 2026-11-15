@@ -136,16 +136,16 @@ describe("sendIterator + receiveIterator roundtrip", () => {
   });
 });
 
-describe("receiveIterator and its deprecated alias recieveIterator (#150)", () => {
-  it("are exported under both names from the package entry, as the same function", async () => {
-    const entry = await import("../src/index.js");
+describe("receiveIterator (#150)", () => {
+  it("is exported, and the misspelt alias recieveIterator is gone", async () => {
+    const entry = (await import("../src/index.js")) as Record<string, unknown>;
     expect(typeof entry.receiveIterator).toBe("function");
-    expect(entry.recieveIterator).toBe(entry.receiveIterator);
+    expect(entry).not.toHaveProperty("recieveIterator");
   });
 
-  it("both names receive delivered chunks", async () => {
+  it("receives delivered chunks", async () => {
     const entry = await import("../src/index.js");
-    for (const fn of [entry.receiveIterator, entry.recieveIterator]) {
+    for (const fn of [entry.receiveIterator]) {
       const iter = fn<number>((deliver) => {
         void (async () => {
           await deliver({ done: false, value: 1 });

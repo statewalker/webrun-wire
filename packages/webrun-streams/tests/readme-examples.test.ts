@@ -44,7 +44,6 @@ describe("README export table", () => {
       "newAsyncGenerator",
       "sendIterator",
       "receiveIterator",
-      "recieveIterator",
       "toReadableStream",
       "fromReadableStream",
       "normalizeToUint8Array",

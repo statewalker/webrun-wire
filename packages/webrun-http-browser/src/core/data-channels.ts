@@ -1,6 +1,6 @@
 import {
   deserializeError,
-  recieveIterator,
+  receiveIterator,
   type SerializedError,
   sendIterator,
   serializeError,
@@ -115,9 +115,6 @@ export function newInvocationChannel({
 
   return { start, close, invoke };
 }
-
-/** @deprecated Misspelt; use `newInvocationChannel`. */
-export const newInvokationChannel = newInvocationChannel;
 
 export async function* sendStream<T>(
   communicationPort: MessageTarget,
@@ -250,7 +247,7 @@ function newStreamChannel<T>(port: MessageTarget): StreamChannel<T> {
   };
 
   async function* receiveAll(): AsyncGenerator<T, void, unknown> {
-    yield* recieveIterator<T>((deliver) => {
+    yield* receiveIterator<T>((deliver) => {
       listeners.push(deliver as DataListener);
       return () => {
         listeners = listeners.filter((l) => l !== deliver);

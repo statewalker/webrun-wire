@@ -26,7 +26,7 @@ export interface CallBidiArgs {
  *
  * If the outer `callPort` rejects (e.g., the peer's handler threw and
  * `listenPort` surfaced the error as `response:error`), the inner `ioSend`'s
- * recieveIterator is force-closed via an internal cancel signal so the
+ * receiveIterator is force-closed via an internal cancel signal so the
  * consumer doesn't hang waiting for chunks that will never come. The outer
  * error is then re-thrown to the caller.
  */

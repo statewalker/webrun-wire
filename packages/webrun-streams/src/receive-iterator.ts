@@ -31,6 +31,3 @@ export function receiveIterator<T>(installer: ReceiverInstaller<T>): AsyncGenera
     return undefined;
   });
 }
-
-/** @deprecated Misspelt name kept for existing importers; use {@link receiveIterator}. */
-export const recieveIterator: typeof receiveIterator = receiveIterator;
