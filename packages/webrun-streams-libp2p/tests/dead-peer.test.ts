@@ -11,6 +11,7 @@ import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it } from "vitest";
 import { connect, serve } from "../src/connect-serve.js";
 import { PeerGoneError } from "../src/duplex-over-stream.js";
+import { legacyConnect, legacyServeConnections } from "../src/legacy-connect-serve.js";
 import { messageTargetOverStream } from "../src/message-target-over-stream.js";
 
 const CHANNELS = 100;
@@ -135,34 +136,62 @@ describe("a dead peer fails every call, never ends it cleanly", () => {
   }
 });
 
-it("a peer that ended its side, then died, fails a call still sending", async () => {
+describe("a peer that ended its side, then died", () => {
   // The tunnel case: the peer's output is complete, ours is still open.
-  const node = await createNode();
-  await serve({ node }, () =>
-    (async function* () {
-      yield new Uint8Array([1]);
-    })(),
-  );
-  const addr = node.getMultiaddrs()[0];
-  if (!addr) throw new Error("no listen address");
-  const client = await connect({ node: await createNode(), peer: addr });
-  async function* input() {
-    yield new Uint8Array([0]);
-    await new Promise(() => {});
-  }
-  const out = client.call(input())[Symbol.asyncIterator]();
-  expect((await out.next()).value).toEqual(new Uint8Array([1]));
-  const pending = out.next();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  for (const connection of node.getConnections()) connection.abort(new Error("network dropped"));
-  const outcome = await Promise.race([
-    pending.then(
-      () => "settled",
-      (error) => error,
-    ),
-    new Promise((resolve) => setTimeout(() => resolve("pending"), SETTLE_MS)),
-  ]);
-  expect(outcome).toBeInstanceOf(PeerGoneError);
+  it("deprecated protocol: fails a call still sending", async () => {
+    const node = await createNode();
+    await legacyServeConnections(
+      { node },
+      () => () =>
+        (async function* () {
+          yield new Uint8Array([1]);
+        })(),
+    );
+    const addr = node.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    const client = await legacyConnect({ node: await createNode(), peer: addr });
+    async function* input() {
+      yield new Uint8Array([0]);
+      await new Promise(() => {});
+    }
+    const out = client.call(input())[Symbol.asyncIterator]();
+    expect((await out.next()).value).toEqual(new Uint8Array([1]));
+    const pending = out.next();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const connection of node.getConnections()) connection.abort(new Error("network dropped"));
+    const outcome = await Promise.race([
+      pending.then(
+        () => "settled",
+        (error) => error,
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), SETTLE_MS)),
+    ]);
+    expect(outcome).toBeInstanceOf(PeerGoneError);
+  });
+
+  // Over the port stack a call ends with the peer's output: input not yet sent
+  // is abandoned (the peer's handler is told), so there is no call left for
+  // the peer's death to fail (statewalker/webrun-wire#153).
+  it("ports: the call already ended, cleanly, with the peer's output", async () => {
+    const node = await createNode();
+    await serve({ node }, () =>
+      (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+    );
+    const addr = node.getMultiaddrs()[0];
+    if (!addr) throw new Error("no listen address");
+    const client = await connect({ node: await createNode(), peer: addr });
+    async function* input() {
+      yield new Uint8Array([0]);
+      await new Promise(() => {});
+    }
+    const out = client.call(input())[Symbol.asyncIterator]();
+    expect((await out.next()).value).toEqual(new Uint8Array([1]));
+    expect(await out.next()).toEqual({ done: true, value: undefined });
+    for (const connection of node.getConnections()) connection.abort(new Error("network dropped"));
+    await client.close();
+  });
 });
 
 describe("a multiplexer over one libp2p stream closes with its connection", () => {
