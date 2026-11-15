@@ -638,21 +638,11 @@ export function multiplexPort(
     const clamped = listed?.has("window") ? validWindow(ack.window) : undefined;
     if (clamped != null && clamped < c.window) {
       // A presuming port may have sent past the smaller window before the ack
-      // came; the responder refuses what passes its window, so the port fails
-      // here too rather than wait for a close. Later ports still presume: they
-      // ask for the window learned here, and so never pass it.
+      // came. Only the responder knows whether it refused any of it (it
+      // accepts up to its window plus one message, and one message begun
+      // with nothing held): if it did, it closes the port, and that close is
+      // what fails it here. Later ports ask for the window learned here.
       learnedWindow = Math.min(learnedWindow ?? clamped, clamped);
-      if (c.presumed && c.outstanding > clamped) {
-        failPort(
-          entry.id,
-          entry,
-          new Error(
-            `webrun-rpc: the peer holds port ${entry.id} to a window of ${clamped} bytes, and ${c.outstanding} were already sent on the presumed one; the port is closed`,
-          ),
-          "protocol",
-        );
-        return false;
-      }
       c.window = clamped;
     }
     const presumed = c.presumed;

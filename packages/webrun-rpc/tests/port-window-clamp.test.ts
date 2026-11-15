@@ -165,19 +165,22 @@ describe("new opener, new responder", () => {
     expect(later.map((o) => o.window)).toEqual([SMALL, SMALL]);
   });
 
-  it('with presumeAck "always", a first port that sent past the clamped window fails; later ports complete', async () => {
+  it('with presumeAck "always", a first port that sent past the clamped window still completes where the responder accepted it', async () => {
+    // Review of #178: one 32 KiB chunk passes a 16 KiB window, and the
+    // responder accepts a message begun with nothing held; so must the opener.
     const { link, client } = pair(
       { kit: NEW, window: LARGE, options: { presumeAck: "always" } },
       { kit: NEW, window: SMALL },
     );
-    await expect(uploadCount(NEW, client, 100, 1000)).rejects.toThrow(/window of 16384 bytes/);
+    expect(await uploadCount(NEW, client, 1, 32 * KiB)).toBe(String(32 * KiB));
+    expect(await uploadCount(NEW, client, 2, 10 * KiB)).toBe(String(20 * KiB));
     for (let i = 0; i < 3; i++) expect(await uploadCount(NEW, client, 100, 1000)).toBe("100000");
-    // Still presumed: each later open carries its early answer and the learned window.
+    // Later opens ask for the learned window.
     expect(
       opens(link)
         .slice(1)
-        .map((o) => o.window),
-    ).toEqual([SMALL, SMALL, SMALL]);
+        .every((o) => o.window === SMALL),
+    ).toBe(true);
   });
 
   it('with presumeAck "always", a first port that stayed within the clamped window completes', async () => {

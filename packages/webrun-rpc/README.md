@@ -372,8 +372,9 @@ round trip, head and body together, also for a streamed upload, and against a 0.
 well. A 0.10 opener paired with a newer responder gets the responder's half: a GET's head and body
 together from the second port on, its own uploads still two round trips. The window is the
 opener's own unless the responder clamps it (below): a presuming port asks for the window an
-earlier ack named, and one that already sent more than a clamped window before its ack fails,
-closing with reason `"protocol"`, while later ports go on presuming. Otherwise the ack can
+earlier ack named, and one that already sent more than a clamped window before its ack carries
+on: it fails only if the responder refused what passed its window (the responder accepts up to its
+window plus one message), which closes the port. Otherwise the ack can
 contradict a presumption only in its sizing (`exact`) or its capabilities. Then no later port on that mux presumes, and the port fails, closing with reason
 `"protocol"`, if it posted anything already (a pipelined chunk the peer ignores, or bytes counted
 the other way), or takes the ack as it is if it posted nothing. A port refused without an ack

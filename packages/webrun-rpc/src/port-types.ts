@@ -177,8 +177,9 @@ export interface PortMuxOptions {
    * posts its answer to the ack right behind its `open`, so a responder that
    * waits for that answer (0.10) pipelines from the start too. The
    * window is the opener's own, or the one an earlier ack clamped it to; a
-   * port that sent more than a clamped window before its ack fails (reason
-   * `"protocol"`), and later ports still presume. Otherwise the ack can
+   * port that sent more than a clamped window before its ack carries on, and
+   * fails only if the responder refused what passed (its close), while later
+   * ports ask for the clamped window. Otherwise the ack can
    * contradict only the sizing or the capabilities: then no later port on this mux presumes, and the port
    * fails (closes with reason `"protocol"`) if it already posted anything,
    * or takes the ack as it is if not. A refused port (`maxPorts`, `onPort`)
