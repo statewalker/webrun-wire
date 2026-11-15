@@ -1,3 +1,4 @@
+import { portFlow } from "@statewalker/webrun-streams";
 import type { MessageTarget } from "./message-target.js";
 
 /**
@@ -49,7 +50,7 @@ export function setPortSendState(port: MessageTarget, state: PortSendState): voi
  * `whenPortReady` before posting more.
  */
 export function portBufferedAmount(port: MessageTarget): number {
-  return states.get(port)?.bufferedAmount() ?? 0;
+  return states.get(port)?.bufferedAmount() ?? portFlow(port)?.bufferedAmount() ?? 0;
 }
 
 /**
@@ -57,7 +58,13 @@ export function portBufferedAmount(port: MessageTarget): number {
  * task (for a port without flow control, on the next one).
  */
 export function whenPortReady(port: MessageTarget, below = 0): Promise<void> {
-  return states.get(port)?.ready(below) ?? new Promise<void>((resolve) => nextTask(resolve));
+  const state = states.get(port);
+  if (state) return state.ready(below);
+  // A windowed native port (`@statewalker/webrun-streams`' `portFlow`): its
+  // own wait, then a later task, as for every other port.
+  const flow = portFlow(port);
+  const ready = flow ? flow.ready(below) : Promise.resolve();
+  return ready.then(() => new Promise<void>((resolve) => nextTask(resolve)));
 }
 
 /**
@@ -94,7 +101,11 @@ export function setPortAgreement(port: MessageTarget, agreement: () => PortAgree
  * on a port without a window. Not exported from the package.
  */
 export function portAgreement(port: MessageTarget): PortAgreement | undefined {
-  return agreements.get(port)?.();
+  const agreement = agreements.get(port);
+  if (agreement) return agreement();
+  // A windowed native port agrees `pipeline` once the peer's hello arrived;
+  // it has no `end`, so the caller closes the port as without a window.
+  return portFlow(port)?.agreement();
 }
 
 /** @internal The half-close of one windowed port (capability `"end"`). */

@@ -41,6 +41,7 @@ peer dependencies. One entry point, `.`.
 | `measureRunAhead(makePair, direction)` | function | L6's run-ahead measurement, for one direction: resolves `{ bound, ahead, complete, intact }`. |
 | `RunAheadMeasurement` | type | What `measureRunAhead` resolves. |
 | `DescribeDuplexAdapterOptions` | type | `{ concurrency?: number; skipHugeBody?: boolean }`. |
+| `describePortWindow(name, make)` | function | The per-port window of native ports (`window` on a native port mux, statewalker/webrun-wire#153): agreement, a stalled consumer holding the sender to the window, credit coming back, a message larger than the window, a close sending what the window held, and both mixed cases against a mux without a window. `make(codec, { opener?, server? })` builds two connected ends with those windows (`PortWindowHarness`). |
 
 | Option | Default | Effect |
 | --- | --- | --- |

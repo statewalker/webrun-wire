@@ -57,7 +57,7 @@ runs (Node or browser).
 | `duplexOverStream(stream, input, options?)` | The primitive under both: runs one call over one libp2p `Stream`. Returns an `AsyncGenerator<Uint8Array>` of the peer's bytes. |
 | `PeerGoneError` | What a call fails with when the stream ended before both sides finished it: the peer died, the connection dropped, or the stream was reset after the peer's side ended. `cause` is libp2p's close error, if any. |
 | `messageTargetOverStream(stream, options?)` | `{ target, signal }`: one stream as a pipe of `Uint8Array` messages for `multiplexPort` / `overPipe`, and an `AbortSignal` that aborts when the stream is over. `options.maxMessageBytes` caps one message. See below. |
-| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. Messages that arrive before a port's first listener are now held for it, as over WebRTC. See "MessagePorts over libp2p" below. |
+| `libp2pPortMux(options)` | Native MessagePorts: a `webrun-rpc` `PortMux` (by shape) whose every port is its own libp2p stream, for `overPorts`. `options`: `node`, `codec` (a value codec: `{ encode: serialize, decode: deserialize }` from `webrun-msgpack`), `peer` (to open ports), `onPort(port, { remotePeer, connection })` (to accept them), `protocol`, `maxMessageSize`, stream limits, `window`. The port lifecycle (codec wrapping, messages held until a port's first listener, close signals, accept/refuse, the caller's signal, close-all) is the shared `newNativePortMux` from `@statewalker/webrun-streams`; `describePortMux` (`webrun-streams-conformance`) is its contract, run against this transport too. Messages that arrive before a port's first listener are now held for it, as over WebRTC. See "MessagePorts over libp2p" below. |
 | `DEFAULT_PORT_PROTOCOL`, `DEFAULT_PORT_MAX_MESSAGE_SIZE` | `"/webrun-ports/1.0.0"`, 256 KiB. |
 | `DEFAULT_PROTOCOL` | `"/webrun-streams/1.0.0"`. |
 | `DEFAULT_DRAIN_TIMEOUT_MS` | `300_000` (5 minutes). |
@@ -335,6 +335,17 @@ Both pass the shared conformance suite, including L6 at a one-chunk bound
 | one slow call | holds its own stream only | shares the stream; `frameSize` interleaves |
 | who is calling | `onPort` gets `{ remotePeer, connection }` | the stream's connection, once |
 | 4 MiB echo, in-process TCP, setup excluded (three runs) | 35–38 MiB/s (64 KiB chunks), 71–88 MiB/s (256 KiB) | 37–48 MiB/s, 79–87 MiB/s |
+
+**A window per port.** By default the stream tier waits for each chunk's
+confirmation on a native port, so one call moves one chunk (256 KiB) per round
+trip. With `window: n` (bytes) on both ends, a port's stream negotiates
+`windowProtocolOf(protocol)` (`protocol` + `/window`), each end grants the other
+`n` bytes of messages delivered and not yet consumed, and the stream tier
+pipelines its chunks up to the peer's window (statewalker/webrun-wire#153). A
+mux with `window` dials the windowed protocol first and falls back to
+`protocol`, and serves both, so it works against an older peer, unwindowed.
+`describePortWindow` (`webrun-streams-conformance`) and L6 at the window's bound
+run against it (`tests/port-window.test.ts`).
 
 Each native port carries `closeSignal`, aborted when its stream ends, the peer
 goes, or the port is closed here; `webrun-rpc`'s `getPortCloseSignal` reads it

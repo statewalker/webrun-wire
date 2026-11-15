@@ -314,6 +314,12 @@ resolves on a later task, never synchronously: a producer loop with room to spar
 never yield, and the transport's own events (the credit that refills the window, the socket's
 writes) would never run.
 
+Native ports carry their own window (statewalker/webrun-wire#153): `libp2pPortMux` and
+`webrtcPortMux` with `window` on both ends. `portBufferedAmount`, `whenPortReady` and the stream
+tier read it from the port (`portFlow` in `@statewalker/webrun-streams`), so `duplexOverPort`
+pipelines its chunks on such a port as on a windowed virtual port. A native port has no `end`:
+the caller closes it, as without a window.
+
 A message counts as consumed once every listener has returned, or, for a listener that returns a
 promise, once it settles. A consumer that takes messages from its own queue returns a promise
 that settles when it takes them. **A listener whose promise never settles keeps its port's window

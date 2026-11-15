@@ -22,6 +22,15 @@ export type { ValueCodec };
 export const DEFAULT_PORT_PROTOCOL = "/webrun-ports/1.0.0";
 
 /**
+ * The protocol a windowed port's stream negotiates, for a mux whose ports
+ * negotiate `protocol`: `protocol` with `/window` appended. A mux with
+ * `window` dials it first and falls back to `protocol`, and serves both.
+ */
+export function windowProtocolOf(protocol: string): string {
+  return `${protocol}/window`;
+}
+
+/**
  * 256 KiB: what one message on a port may carry before `webrun-rpc`'s stream tier chunks a body.
  * A port waits for each chunk's confirmation, so a larger chunk means fewer round trips; well
  * under `messageTargetOverStream`'s 64 MiB frame ceiling.
@@ -69,6 +78,19 @@ export interface Libp2pPortMuxOptions {
   /** Default {@link DEFAULT_PORT_STREAM_LIMIT}. */
   maxOutboundStreams?: number;
   runOnLimitedConnection?: boolean;
+  /**
+   * Per-port flow control, in bytes (off when unset; at most
+   * `MAX_PORT_WINDOW` from `@statewalker/webrun-streams`): the most this end holds of a port's messages
+   * delivered and not yet consumed (statewalker/webrun-wire#153). A port
+   * whose two ends both set it negotiates {@link windowProtocolOf} `protocol`,
+   * and `webrun-rpc`'s stream tier then pipelines its chunks, up to the
+   * peer's window in flight, instead of waiting for each chunk's
+   * confirmation; against a mux without it (an older peer) the port
+   * negotiates `protocol` and runs as before. 1-4 MiB is a reasonable range:
+   * the most one call moves per round trip, and the most a producer runs
+   * ahead of a consumer that stopped reading.
+   */
+  window?: number;
 }
 
 /** A `webrun-rpc` `PortMux` by shape; this package imports nothing from it. */
@@ -102,11 +124,20 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
   const maxOutboundStreams = options.maxOutboundStreams ?? DEFAULT_PORT_STREAM_LIMIT;
   const protocol = options.protocol ?? DEFAULT_PORT_PROTOCOL;
   const maxMessageSize = options.maxMessageSize ?? DEFAULT_PORT_MAX_MESSAGE_SIZE;
+  // Checked by the shared lifecycle, before the protocols are handled.
+  const { window } = options;
+  const windowProtocol = windowProtocolOf(protocol);
 
-  /** A stream as a channel: framed bytes, and a reset to break it off (the peer hears it). */
+  /**
+   * A stream as a channel: framed bytes, and a reset to break it off (the peer hears it). The
+   * protocol it negotiated says whether both ends run the window.
+   */
   const channelOf = (stream: Stream): NativeChannel => ({
     pipe: messageTargetOverStream(stream, { maxMessageBytes }).target,
     fail: (reason) => stream.abort(reason),
+    ...(window !== undefined && stream.protocol === windowProtocol
+      ? { window: "agreed" as const }
+      : {}),
   });
 
   const dialOptions: DialProtocolOptions = { maxOutboundStreams };
@@ -119,13 +150,17 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
     codec,
     maxMessageSize,
     onPort,
+    window,
     async open(signal) {
       if (!peer) throw new Error("webrun-streams-libp2p: openPort needs `peer`");
-      const stream = await openGatedStream(node, peer, protocol, { ...dialOptions, signal });
+      const protocols = window !== undefined ? [windowProtocol, protocol] : protocol;
+      const stream = await openGatedStream(node, peer, protocols, { ...dialOptions, signal });
       return channelOf(stream);
     },
     async stopAccepting() {
-      if (handled) await node.unhandle(protocol).catch(() => undefined);
+      if (!handled) return;
+      const served = window !== undefined ? [protocol, windowProtocol] : [protocol];
+      await node.unhandle(served).catch(() => undefined);
     },
   });
 
@@ -133,8 +168,9 @@ export async function libp2pPortMux(options: Libp2pPortMuxOptions): Promise<Libp
     const handleOptions: StreamHandlerOptions = { maxInboundStreams, maxOutboundStreams };
     if (runOnLimitedConnection !== undefined)
       handleOptions.runOnLimitedConnection = runOnLimitedConnection;
+    const served = window !== undefined ? [protocol, windowProtocol] : [protocol];
     await node.handle(
-      protocol,
+      served,
       (stream: Stream, connection: Connection) => {
         if (control.closed) {
           stream.abort(new Error("webrun-streams-libp2p: port mux closed"));
