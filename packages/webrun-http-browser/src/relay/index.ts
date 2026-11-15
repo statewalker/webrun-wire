@@ -302,12 +302,56 @@ export interface RelayWindowHandlerOptions {
   scopeUrl?: string;
   /** Passed to `initServiceWorker`: how long to wait for the relay worker to activate. */
   timeout?: number;
+  /**
+   * The origins of the pages that may embed this relay and use it. A CONNECT
+   * from any other embedder is refused: its acknowledgement and every call it
+   * makes are answered with an error. Default: every origin, as before.
+   */
+  allowedOrigins?: readonly string[];
+  /**
+   * Decides whether the embedder at `origin` may use this relay; consulted
+   * after `allowedOrigins`. Default: every origin may.
+   */
+  canConnect?: (origin: string) => boolean | Promise<boolean>;
+}
+
+/** The calls the relay iframe stamps with its embedder's origin. */
+const STAMPED_CALLS = new Set(["REGISTER", "UNREGISTER", "CONNECT"]);
+
+/**
+ * `data` with `params.origin` set to `origin` when it is a call the relay
+ * worker vets by origin. The stamp REPLACES any `origin` the embedder sent:
+ * the embedder is the party the stamp is about, so its word counts for
+ * nothing.
+ */
+function stampEmbedderOrigin(data: unknown, origin: string): unknown {
+  if (typeof data !== "object" || data === null) return data;
+  const { type, params } = data as { type?: unknown; params?: unknown };
+  if (typeof type !== "string" || !STAMPED_CALLS.has(type)) return data;
+  const base = typeof params === "object" && params !== null ? params : {};
+  return { ...data, params: { ...base, origin } };
+}
+
+/** Answers every call on `port` with `error`, so the embedder's calls reject. */
+function answerWithError(port: MessagePort, error: unknown): void {
+  const serialized = serializeError(error);
+  port.onmessage = (event) => event.ports[0]?.postMessage({ error: serialized });
 }
 
 /**
  * Returns a `window.onmessage` handler for use inside the relay iframe:
  * it accepts a CONNECT message from the parent window, starts the relay
- * ServiceWorker, and bridges the parent's MessagePort with the SW. If the
+ * ServiceWorker, and bridges the parent's MessagePort with the SW.
+ *
+ * EVERY EMBEDDER REACHES THE WORKER THROUGH ITS OWN RELAY IFRAME, so to the
+ * worker they all look alike: a client at `relay.html`. The iframe is the one
+ * place that knows who embeds it (`ev.origin`, which the parent cannot forge),
+ * so it stamps that origin into each `REGISTER`, `UNREGISTER` and `CONNECT` it
+ * bridges, as `params.origin`. The worker hands it to `canRegister` and
+ * `canConnect` (`RelayServiceWorkerOptions`). `allowedOrigins` and
+ * `canConnect` here refuse an embedder outright, before the worker starts.
+ *
+ * If the
  * worker cannot be started, every call the parent makes on that port is
  * answered with the error, so the parent's `initHttpService` /
  * `callHttpService` reject instead of waiting, and a later CONNECT is accepted
@@ -321,6 +365,8 @@ export function getRelayWindowMessageHandler({
   swUrl = `${new URL("./relay-sw.js", moduleUrl)}`,
   scopeUrl = `${new URL("./", moduleUrl)}`,
   timeout,
+  allowedOrigins,
+  canConnect,
 }: RelayWindowHandlerOptions = {}): (ev: MessageEvent) => Promise<void> {
   let externalPort: MessagePort | undefined;
   return async (ev) => {
@@ -338,12 +384,29 @@ export function getRelayWindowMessageHandler({
     }
     const port = newExternalPort;
     externalPort = port;
+    const origin = ev.origin;
+    let allowed: boolean;
+    try {
+      allowed =
+        (allowedOrigins == null || allowedOrigins.includes(origin)) &&
+        (canConnect == null || (await canConnect(origin)));
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) {
+      const error = new Error(`The embedder at ${origin} may not use this relay`);
+      answerWithError(port, error);
+      ackPort?.postMessage({ error: serializeError(error) });
+      ackPort?.close();
+      externalPort = undefined;
+      return;
+    }
     let registration: ServiceWorkerRegistration;
     try {
       ({ registration } = await registerServiceWorker({ swUrl, scopeUrl, timeout }));
     } catch (error) {
       const serialized = serializeError(error);
-      port.onmessage = (event) => event.ports[0]?.postMessage({ error: serialized });
+      answerWithError(port, error);
       ackPort?.postMessage({ error: serialized });
       ackPort?.close();
       // Not rethrown: nothing awaits this handler, so a rethrow is only an
@@ -358,7 +421,7 @@ export function getRelayWindowMessageHandler({
       port.postMessage(event.data, [...event.ports]);
     };
     port.onmessage = (event) => {
-      serviceWorkerPort.postMessage(event.data, [...event.ports]);
+      serviceWorkerPort.postMessage(stampEmbedderOrigin(event.data, origin), [...event.ports]);
     };
     ackPort?.postMessage({ ok: true });
     ackPort?.close();

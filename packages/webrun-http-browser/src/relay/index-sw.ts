@@ -16,6 +16,12 @@ export interface RegisteredClient {
   clientId: string;
   /** Where the service is mounted. Absent means `/~<key>/`, as before mounts. */
   path?: string;
+  /**
+   * The origin of the page that registered the key, as its relay iframe
+   * stamped it. Absent for a registration from a page of the relay origin
+   * itself, or one made through a relay page older than this field.
+   */
+  origin?: string;
 }
 
 /**
@@ -28,9 +34,16 @@ export interface RegisteredClient {
 export function readStoredEntry(value: unknown): RegisteredClient | undefined {
   if (typeof value === "string") return { clientId: value };
   if (typeof value !== "object" || value === null) return undefined;
-  const { clientId, path } = value as { clientId?: unknown; path?: unknown };
+  const { clientId, path, origin } = value as {
+    clientId?: unknown;
+    path?: unknown;
+    origin?: unknown;
+  };
   if (typeof clientId !== "string" || clientId === "") return undefined;
-  return typeof path === "string" ? { clientId, path } : { clientId };
+  const entry: RegisteredClient = { clientId };
+  if (typeof path === "string") entry.path = path;
+  if (typeof origin === "string") entry.origin = origin;
+  return entry;
 }
 
 /**
@@ -124,6 +137,31 @@ export function removeRegisteredMount(
   table.remove(key);
 }
 
+/** What `canConnect` is asked about one `CONNECT`. */
+export interface ConnectRequest {
+  /** The service key the caller asks for. */
+  key: string;
+  /**
+   * The caller's embedder, as its relay iframe stamped it. `undefined` when
+   * the call came from a page of the relay origin itself, or through a relay
+   * page older than the stamp.
+   */
+  origin?: string;
+  /** The embedder that registered `key`, stamped the same way. */
+  registeredOrigin?: string;
+  /** The client the call arrived from: the caller's relay iframe. */
+  client: ServiceWorkerClientLike;
+}
+
+/**
+ * A `canConnect` that lets a caller reach a service only when both were
+ * embedded by the same origin: an embedder's services are its own. An unknown
+ * origin on either side never matches.
+ */
+export function onlyRegistrantOrigin({ origin, registeredOrigin }: ConnectRequest): boolean {
+  return origin != null && origin === registeredOrigin;
+}
+
 export interface RelayServiceWorkerOptions {
   /** A fixed table, for a host that knows its services at build time. */
   mounts?: Array<{ key: string } & MountSpec>;
@@ -137,12 +175,28 @@ export interface RelayServiceWorkerOptions {
    * takes it: on an origin whose name is not a secret, a page could otherwise
    * mount an allowed key at `/index.html` and outrank `/` on longest-prefix.
    * Also consulted for `UNREGISTER`, with the path the key is mounted at.
+   *
+   * `origin` is the registrant's embedder: every embedder arrives through the
+   * same client (its relay iframe, at `relay.html`), so `client` alone cannot
+   * tell them apart. The iframe stamps the origin of the page embedding it;
+   * `undefined` for a page of the relay origin itself, or through a relay page
+   * older than the stamp.
    */
   canRegister?: (
     client: ServiceWorkerClientLike,
     key: string,
     path?: string,
+    origin?: string,
   ) => boolean | Promise<boolean>;
+  /**
+   * Refuse a `CONNECT` to a service, before it reaches the service. Default:
+   * everyone may, as before this option existed, which means EVERY PAGE THAT
+   * EMBEDS THE RELAY CAN CALL EVERY SERVICE REGISTERED ON IT. Pass
+   * `onlyRegistrantOrigin` to keep each embedder's services to that embedder.
+   * Requests the relay origin's own pages `fetch` are not CONNECTs and are
+   * not consulted: those pages are inside the relay's trust boundary.
+   */
+  canConnect?: (request: ConnectRequest) => boolean | Promise<boolean>;
   /** Per-stream inactivity timeout of the links to services, in ms. Default none. */
   streamTimeout?: number;
   /**
@@ -266,9 +320,12 @@ export function startRelayServiceWorker(
     handleChannelCalls(self, "REGISTER", async (event, data) => {
       const source = event.source as Client | null;
       if (!source) return false;
-      const { key, path } = data as { key: string; path?: string };
+      const { key, path, origin } = data as { key: string; path?: string; origin?: string };
       return await serializeByKey(key, async () => {
-        if (options.canRegister != null && !(await options.canRegister(source, key, path))) {
+        if (
+          options.canRegister != null &&
+          !(await options.canRegister(source, key, path, origin))
+        ) {
           throw new Error(
             path == null
               ? `this client may not register "${key}"`
@@ -288,7 +345,7 @@ export function startRelayServiceWorker(
           }
         }
 
-        const added = await clientsRegistry.addClient(key, source, path);
+        const added = await clientsRegistry.addClient(key, source, path, origin);
         applyRegisteredMount(mounts, key, path, hostKeys);
         return added;
       });
@@ -301,7 +358,7 @@ export function startRelayServiceWorker(
       // here, including foreign content the host serves there.
       const source = event.source as Client | null;
       if (!source) return false;
-      const { key } = data as { key: string };
+      const { key, origin } = data as { key: string; origin?: string };
       return await serializeByKey(key, async () => {
         const current = await clientsRegistry.getMount(key);
         if (current == null) return false;
@@ -311,7 +368,7 @@ export function startRelayServiceWorker(
         }
         if (
           options.canRegister != null &&
-          !(await options.canRegister(source, key, current.path))
+          !(await options.canRegister(source, key, current.path, origin))
         ) {
           throw new Error(`this client may not unregister "${key}"`);
         }
@@ -321,8 +378,25 @@ export function startRelayServiceWorker(
     }),
   );
   register(
-    handleChannelCalls(self, "CONNECT", async (_event, data, port: MessagePort) => {
-      const { key } = data as { key: string };
+    handleChannelCalls(self, "CONNECT", async (event, data, port: MessagePort) => {
+      const { key, origin } = data as { key: string; origin?: string };
+      if (options.canConnect != null) {
+        const source = event.source as Client | null;
+        const registered = await clientsRegistry.getMount(key);
+        const allowed =
+          source != null &&
+          (await options.canConnect({
+            key,
+            origin,
+            registeredOrigin: registered?.origin,
+            client: source,
+          }));
+        if (!allowed) {
+          // The transferred port would otherwise stay open on this side.
+          port?.close();
+          throw new Error(`this caller may not connect to "${key}"`);
+        }
+      }
       const client = await clientsRegistry.getClient(key);
       if (!client) throw new Error(`Target client was not found. Target key: "${key}".`);
       const reply = await callChannel<unknown>(client, "CONNECT", data, port);
@@ -436,7 +510,7 @@ interface ClientsRegistryOptions {
 }
 
 interface ClientsRegistry {
-  addClient(clientKey: string, client: Client, path?: string): Promise<boolean>;
+  addClient(clientKey: string, client: Client, path?: string, origin?: string): Promise<boolean>;
   removeClient(clientKey: string): Promise<boolean>;
   getClient(clientKey: string): Promise<Client | undefined>;
   getMount(clientKey: string): Promise<RegisteredClient | undefined>;
@@ -470,11 +544,21 @@ function newClientsRegistry({
     return index;
   }
 
-  async function addClient(clientKey: string, client: Client, path?: string): Promise<boolean> {
+  async function addClient(
+    clientKey: string,
+    client: Client,
+    path?: string,
+    origin?: string,
+  ): Promise<boolean> {
     const index = await loadClientsIndex();
     const current = index[clientKey];
-    if (current?.clientId === client.id && current.path === path) return false;
-    index[clientKey] = path == null ? { clientId: client.id } : { clientId: client.id, path };
+    if (current?.clientId === client.id && current.path === path && current.origin === origin) {
+      return false;
+    }
+    const entry: RegisteredClient = { clientId: client.id };
+    if (path != null) entry.path = path;
+    if (origin != null) entry.origin = origin;
+    index[clientKey] = entry;
     await storeClientsIndex();
     return true;
   }
