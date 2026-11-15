@@ -45,6 +45,8 @@ export interface NativeChannel {
    * back while it is still opening (a WebRTC data channel). The port is
    * built first, so what the peer sends meanwhile is held for it; `openPort`
    * resolves once this does, and rejects (closing the port) if it rejects.
+   * It should reject when `open`'s signal aborts; `openPort` rejects anyway
+   * once the port ends (the mux closing, the connection going).
    */
   ready?: Promise<void>;
   /**
@@ -245,14 +247,34 @@ export function newNativePortMux<I = unknown>(
         }
         throw err;
       }
+      // Handled from here on: a `ready` that rejects while this function is
+      // not awaiting it (the mux closing in this very tick) is no unhandled rejection.
+      channel.ready?.catch(() => undefined);
       if (closed) {
         await channel.pipe.close().catch(() => undefined);
         throw new Error(`${name}: port mux closed`);
       }
       const { port } = wrap(channel);
       if (channel.ready) {
+        const { ready } = channel;
         try {
-          await channel.ready;
+          // Raced against the port's own end: a `ready` that does not watch
+          // the open signal must not hand back a port the mux already closed.
+          await new Promise<void>((resolve, reject) => {
+            const onEnd = () => reject(port.closeSignal.reason);
+            if (port.closeSignal.aborted) return onEnd();
+            port.closeSignal.addEventListener("abort", onEnd, { once: true });
+            ready.then(
+              () => {
+                port.closeSignal.removeEventListener("abort", onEnd);
+                resolve();
+              },
+              (err: unknown) => {
+                port.closeSignal.removeEventListener("abort", onEnd);
+                reject(err);
+              },
+            );
+          });
         } catch (err) {
           void port.close();
           if (closing.signal.aborted && !signal?.aborted) {
@@ -260,6 +282,13 @@ export function newNativePortMux<I = unknown>(
           }
           throw err;
         }
+      }
+      // The mux closed in the microtasks since: reject as `openPort` on a
+      // closed mux does. (A port whose channel already ended is handed back
+      // as before: its `closeSignal` says why.)
+      if (closed) {
+        void port.close();
+        throw new Error(`${name}: port mux closed`);
       }
       if (signal) {
         const onAbort = () => void port.close();

@@ -167,3 +167,57 @@ describe("newNativePortMux: a channel still opening (webrun-wire#182 follow-up)"
     await expect(control.mux.openPort()).rejects.toThrow(/never opened/);
   });
 });
+
+describe("newNativePortMux: closing while a channel opens (review of #183)", () => {
+  const codec = { encode: () => new Uint8Array(0), decode: () => null };
+
+  it("openPort then close() in the same tick: openPort rejects, and no rejection goes unhandled", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => void unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const [near] = channelPair();
+      const control = newNativePortMux({
+        name: "memory",
+        codec,
+        maxMessageSize: 1,
+        // As webrtc's: `ready` rejects when the open signal aborts.
+        open: async (signal) => ({
+          ...near,
+          ready: new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+        }),
+      });
+      const pending = control.mux.openPort();
+      const closing = control.mux.close();
+      await expect(pending).rejects.toThrow(/closed/);
+      await closing;
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("a ready that ignores the signal: close() still rejects openPort rather than hand back a closed port", async () => {
+    const [near] = channelPair();
+    let markReady!: () => void;
+    const control = newNativePortMux({
+      name: "memory",
+      codec,
+      maxMessageSize: 1,
+      open: async () => ({
+        ...near,
+        ready: new Promise<void>((r) => {
+          markReady = r;
+        }),
+      }),
+    });
+    const pending = control.mux.openPort();
+    await new Promise((r) => setTimeout(r, 5));
+    await control.mux.close();
+    await expect(pending).rejects.toThrow(/closed/);
+    markReady();
+  });
+});
