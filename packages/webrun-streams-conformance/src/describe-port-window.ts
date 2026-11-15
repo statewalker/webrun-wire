@@ -1,4 +1,5 @@
 import {
+  MIN_PORT_WINDOW,
   type NativePort,
   type NativePortMux,
   portFlow,
@@ -20,6 +21,14 @@ export interface PortWindowHarness {
   serve(onPort: (port: NativePort) => boolean | undefined): Promise<NativePortMux>;
   /** Releases the connection. */
   dispose(): void | Promise<void>;
+}
+
+export interface DescribePortWindowOptions {
+  /**
+   * The largest encoded message the transport carries (WebRTC: 16 KiB). The
+   * case of a message larger than the window is skipped below 64 KiB.
+   */
+  maxFrameBytes?: number;
 }
 
 /** Builds two connected ends whose muxes use `codec` and the given windows. */
@@ -95,7 +104,12 @@ const agreed = (port: NativePort) => !!portFlow(port)?.agreement()?.enforced;
  * `@statewalker/webrun-streams`) implements it once; each transport runs this
  * suite with its own negotiation.
  */
-export function describePortWindow(name: string, make: MakePortWindowHarness): void {
+export function describePortWindow(
+  name: string,
+  make: MakePortWindowHarness,
+  options: DescribePortWindowOptions = {},
+): void {
+  const { maxFrameBytes = Number.POSITIVE_INFINITY } = options;
   async function withPair(
     windows: PortWindows,
     body: (h: PortWindowHarness, inbound: NativePort[]) => Promise<void>,
@@ -130,19 +144,19 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
 
   describe(`${name}: per-port windows`, () => {
     it("both ends with a window agree it: each end reports pipeline and its own window", () =>
-      withPair({ opener: 8192, server: 4096 }, async (h, inbound) => {
+      withPair({ opener: 128 * 1024, server: 64 * 1024 }, async (h, inbound) => {
         const { port, server } = await agreedPort(h, inbound);
         const mine = portFlow(port)?.agreement();
         const theirs = portFlow(server)?.agreement();
         expect(mine?.caps.has("pipeline")).toBe(true);
         expect(theirs?.caps.has("pipeline")).toBe(true);
         // The window an end polices is the one it grants.
-        expect(mine?.window).toBe(8192);
-        expect(theirs?.window).toBe(4096);
+        expect(mine?.window).toBe(128 * 1024);
+        expect(theirs?.window).toBe(64 * 1024);
       }));
 
     it("control frames never reach listeners; values cross both ways intact", () =>
-      withPair({ opener: 8192, server: 8192 }, async (h, inbound) => {
+      withPair({ opener: 64 * 1024, server: 64 * 1024 }, async (h, inbound) => {
         const { port, server } = await agreedPort(h, inbound);
         const fromServer = received(port);
         const fromClient = received(server);
@@ -158,7 +172,7 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
 
     it("a frame whose encoding starts with the control byte still arrives as a value", () =>
       withPair(
-        { opener: 8192, server: 8192 },
+        { opener: 64 * 1024, server: 64 * 1024 },
         async (h, inbound) => {
           const { port, server } = await agreedPort(h, inbound);
           const fromServer = received(port);
@@ -173,18 +187,18 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
       ));
 
     it("a stalled consumer holds the sender to the window; consuming returns the credit", () =>
-      withPair({ opener: 8192, server: 8192 }, async (h, inbound) => {
+      withPair({ opener: 64 * 1024, server: 64 * 1024 }, async (h, inbound) => {
         const { port, server } = await agreedPort(h, inbound);
         const consumer = stalled(server);
         // "hello" was consumed before the listener existed: nothing is outstanding.
         await until(() => consumer.got.length === 1, "the held hello");
         consumer.got.length = 0;
-        const body = "x".repeat(1000); // 1002 bytes in JSON
+        const body = "x".repeat(8000); // 8002 bytes in JSON
         for (let i = 0; i < 30; i++) port.postMessage(body);
         await tick(200);
         const flow = portFlow(port);
-        // 8 messages fit 8192; the rest wait in the sender's queue.
-        expect(consumer.got.length * 1002).toBeLessThanOrEqual(8192);
+        // 8 messages fit 64 KiB; the rest wait in the sender's queue.
+        expect(consumer.got.length * 8002).toBeLessThanOrEqual(64 * 1024);
         expect(consumer.got.length).toBeGreaterThan(0);
         expect(flow?.bufferedAmount()).toBeGreaterThan(0);
         let drained = false;
@@ -197,23 +211,43 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
         expect(flow?.bufferedAmount()).toBe(0);
       }));
 
-    it("a message larger than the window goes once nothing is outstanding", () =>
-      withPair({ opener: 1024, server: 1024 }, async (h, inbound) => {
-        const { port, server } = await agreedPort(h, inbound);
-        const got = received(server);
-        await until(() => got.length === 1, "the hello");
-        const big = "y".repeat(5000);
-        port.postMessage(big);
-        port.postMessage(big);
-        await until(() => got.length === 3, "both large messages");
-        expect(got.slice(1)).toEqual([big, big]);
+    it("a port opened once the mux has heard a peer's hello is agreed at once, holding back by the floor", () =>
+      withPair({ opener: 1024 * 1024, server: 1024 * 1024 }, async (h, inbound) => {
+        await agreedPort(h, inbound);
+        const second = await h.opener.openPort();
+        // No round trip: the peer's mux speaks the window, and grants at least the floor.
+        expect(agreed(second)).toBe(true);
+        expect(portFlow(second)?.stats().peerWindow).toBeGreaterThanOrEqual(MIN_PORT_WINDOW);
+        const body = "p".repeat(15000);
+        for (let i = 0; i < 6; i++) second.postMessage(body);
+        // Before the peer's hello, only the floor goes out: four of six.
+        expect(portFlow(second)?.bufferedAmount()).toBeGreaterThan(0);
+        await until(() => inbound.length === 2, "the second inbound port");
+        const got = received(inbound[1] as NativePort);
+        await until(() => got.length === 6, "every message, once the hello raised the window");
+        expect(portFlow(second)?.stats().peerWindow).toBe(1024 * 1024);
       }));
 
+    it.skipIf(maxFrameBytes < 128 * 1024)(
+      "a message larger than the window goes once nothing is outstanding",
+      () =>
+        withPair({ opener: 64 * 1024, server: 64 * 1024 }, async (h, inbound) => {
+          const { port, server } = await agreedPort(h, inbound);
+          const got = received(server);
+          await until(() => got.length === 1, "the hello");
+          const big = "y".repeat(200 * 1024);
+          port.postMessage(big);
+          port.postMessage(big);
+          await until(() => got.length === 3, "both large messages");
+          expect(got.slice(1)).toEqual([big, big]);
+        }),
+    );
+
     it("closing a port sends what the window held back before the close", () =>
-      withPair({ opener: 8192, server: 8192 }, async (h, inbound) => {
+      withPair({ opener: 64 * 1024, server: 64 * 1024 }, async (h, inbound) => {
         const { port, server } = await agreedPort(h, inbound);
         const consumer = stalled(server);
-        const body = "z".repeat(1000);
+        const body = "z".repeat(8000);
         for (let i = 0; i < 20; i++) port.postMessage(body);
         await tick(50);
         expect(portFlow(port)?.bufferedAmount()).toBeGreaterThan(0);
@@ -223,7 +257,7 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
       }));
 
     it("an opener with a window and a serving end without: no agreement, messages flow as before", () =>
-      withPair({ opener: 1024 }, async (h, inbound) => {
+      withPair({ opener: 64 * 1024 }, async (h, inbound) => {
         const port = await h.opener.openPort();
         port.postMessage("hello");
         await until(() => inbound.length === 1, "the inbound port");
@@ -242,7 +276,7 @@ export function describePortWindow(name: string, make: MakePortWindowHarness): v
       }));
 
     it("a serving end with a window and an opener without: no agreement, messages flow as before", () =>
-      withPair({ server: 1024 }, async (h, inbound) => {
+      withPair({ server: 64 * 1024 }, async (h, inbound) => {
         const port = await h.opener.openPort();
         const fromServer = received(port);
         port.postMessage("hello");

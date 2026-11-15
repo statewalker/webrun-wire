@@ -24,9 +24,16 @@
  * end says `hello` at once; `"offered"` when this end asked and only an
  * answer can tell (a WebRTC opener), so this end says nothing until the
  * peer's `hello`, and an older peer, which never says it, is never sent a
- * control frame. An end holds its sends to the peer's window from the peer's
- * `hello` on; until then it counts but does not wait, as a port without a
- * window.
+ * control frame.
+ *
+ * **No round trip where it is known.** Every windowed end grants at least
+ * {@link MIN_PORT_WINDOW}, and a `hello` below it is refused. So an end that
+ * knows its peer speaks the window (`"agreed"`, or an `"offered"` port on a
+ * mux that has already heard a peer's `hello`: `presume`) holds its sends to
+ * that floor from the start, and needs no confirmation per message, until the
+ * peer's `hello` raises the window to what it grants. An `"offered"` port
+ * without that knowledge counts but does not wait until the peer's `hello`,
+ * as a port without a window.
  */
 
 /** The first byte of a control frame on a windowed channel. */
@@ -38,6 +45,12 @@ const TYPE_CREDIT = 0x02;
 
 /** The largest window a `hello` can carry: 4 GiB less one byte. */
 export const MAX_PORT_WINDOW = 0xffffffff;
+
+/**
+ * The smallest window an end may grant: 64 KiB. What a peer may send before
+ * this end's `hello` arrives, where it knows this end speaks the window.
+ */
+export const MIN_PORT_WINDOW = 64 * 1024;
 
 /** What two ends have agreed on one windowed native port, once the peer's `hello` arrived. */
 export interface NativePortAgreement {
@@ -115,12 +128,12 @@ function readValue(frame: Uint8Array): number {
   return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(2);
 }
 
-/** @internal Checks a `window` option: a positive integer, at most {@link MAX_PORT_WINDOW}. */
+/** @internal Checks a `window` option: an integer from {@link MIN_PORT_WINDOW} to {@link MAX_PORT_WINDOW}. */
 export function checkPortWindow(name: string, window: number | undefined): void {
   if (window === undefined) return;
-  if (!Number.isSafeInteger(window) || window <= 0 || window > MAX_PORT_WINDOW) {
+  if (!Number.isSafeInteger(window) || window < MIN_PORT_WINDOW || window > MAX_PORT_WINDOW) {
     throw new RangeError(
-      `${name}: \`window\` must be a positive integer of at most ${MAX_PORT_WINDOW} bytes, got ${window}`,
+      `${name}: \`window\` must be an integer from ${MIN_PORT_WINDOW} to ${MAX_PORT_WINDOW} bytes, got ${window}`,
     );
   }
 }
@@ -130,13 +143,23 @@ export function newPortWindow(options: {
   /** The window this end grants. */
   window: number;
   mode: "agreed" | "offered";
+  /**
+   * An `"offered"` port whose peer is known to speak the window (its mux
+   * heard a peer's `hello` before): treated as `"agreed"`.
+   */
+  presume?: boolean;
+  /** The peer's `hello` arrived, with the window it grants. */
+  onHello?(window: number): void;
   /** Puts one frame on the channel; throws what the channel throws. */
   send(frame: Uint8Array): void;
   /** A queued frame failed to go out: the port is broken. */
   fail(reason: Error): void;
 }): PortWindow {
-  const { window: own, mode, send, fail } = options;
-  let peerWindow: number | undefined;
+  const { window: own, send, fail, onHello } = options;
+  const mode = options.presume ? "agreed" : options.mode;
+  /** The window the peer grants: the floor until its `hello`, where it is known to speak the window. */
+  let peerWindow: number | undefined = mode === "agreed" ? MIN_PORT_WINDOW : undefined;
+  let heard = false;
   let helloSent = false;
   let outstanding = 0;
   const queue: { frame: Uint8Array; size: number }[] = [];
@@ -249,9 +272,11 @@ export function newPortWindow(options: {
       if (type === TYPE_DATA) return frame.subarray(2);
       if (type === TYPE_HELLO) {
         const granted = readValue(frame);
-        if (granted <= 0) throw new Error("a hello with an empty window");
-        if (peerWindow !== undefined) throw new Error("a second hello");
+        if (granted < MIN_PORT_WINDOW) throw new Error(`a hello below the floor: ${granted}`);
+        if (heard) throw new Error("a second hello");
+        heard = true;
         peerWindow = granted;
+        onHello?.(granted);
         // An opener that asked learns here that the peer reads control frames.
         sayHello();
         if (toGrant > 0) sendGrant();

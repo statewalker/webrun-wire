@@ -120,7 +120,8 @@ export interface NativePortMuxOptions<Info> {
   /** Stops the transport offering inbound channels; runs once, on `close()`. */
   stopAccepting?(): void | Promise<void>;
   /**
-   * Per-port flow control, in bytes (off when unset): on each channel the
+   * Per-port flow control, in bytes (off when unset; from `MIN_PORT_WINDOW`,
+   * 64 KiB, to `MAX_PORT_WINDOW`): on each channel the
    * transport marks `window`, the most this end holds of the peer's messages
    * delivered and not yet consumed. See `native-port-window.ts`. Both ends'
    * codecs must not produce frames that start with byte 0xC1 for an older
@@ -154,6 +155,8 @@ export function newNativePortMux<I = unknown>(
   let closed = false;
   /** Aborts on `close()`: a channel still opening is given up, and its `openPort` rejects. */
   const closing = new AbortController();
+  /** A peer's `hello` arrived on some port: the peer's muxes speak the window (`presume`). */
+  let heardHello = false;
 
   const wrap = (channel: NativeChannel): { port: NativePort; fail(reason: Error): void } => {
     const { pipe } = channel;
@@ -281,6 +284,10 @@ export function newNativePortMux<I = unknown>(
       win = newPortWindow({
         window: options.window,
         mode: channel.window,
+        presume: heardHello,
+        onHello: () => {
+          heardHello = true;
+        },
         send: (frame) => pipe.postMessage(frame),
         fail: (reason) => {
           if (!local.signal.aborted) local.abort(reason);

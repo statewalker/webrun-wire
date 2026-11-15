@@ -79,8 +79,8 @@ export interface Libp2pPortMuxOptions {
   maxOutboundStreams?: number;
   runOnLimitedConnection?: boolean;
   /**
-   * Per-port flow control, in bytes (off when unset; at most
-   * `MAX_PORT_WINDOW` from `@statewalker/webrun-streams`): the most this end holds of a port's messages
+   * Per-port flow control, in bytes (off when unset; from 64 KiB,
+   * `MIN_PORT_WINDOW` in `@statewalker/webrun-streams`): the most this end holds of a port's messages
    * delivered and not yet consumed (statewalker/webrun-wire#153). A port
    * whose two ends both set it negotiates {@link windowProtocolOf} `protocol`,
    * and `webrun-rpc`'s stream tier then pipelines its chunks, up to the

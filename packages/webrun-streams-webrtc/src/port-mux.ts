@@ -52,7 +52,7 @@ export interface WebRtcPortMuxOptions {
   /** Default {@link DEFAULT_PORT_MAX_FRAME_BYTES}. */
   maxFrameBytes?: number;
   /**
-   * Per-port flow control, in bytes (off when unset): the most this end holds
+   * Per-port flow control, in bytes (off when unset; from 64 KiB): the most this end holds
    * of a port's messages delivered and not yet consumed
    * (statewalker/webrun-wire#153). A port whose two ends both set it agrees
    * the window over its data channel ({@link WINDOW_CHANNEL_PROTOCOL}, then

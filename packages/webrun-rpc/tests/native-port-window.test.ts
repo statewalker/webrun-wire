@@ -163,7 +163,7 @@ describe("native ports with a window: the stream tier", () => {
   });
 
   it("portBufferedAmount and the producer's wait follow a native port's window", async () => {
-    const t = memoryTransport({ opener: 4 * KiB, server: 4 * KiB });
+    const t = memoryTransport({ opener: 64 * KiB, server: 64 * KiB });
     const inbound: never[] = [];
     const server = t.serving((port) => {
       inbound.push(port);
@@ -185,7 +185,7 @@ describe("native ports with a window: the stream tier", () => {
     // Never consumed: credit never comes back.
     far.addEventListener("message", () => new Promise(() => {}));
     await new Promise((r) => setTimeout(r, 20));
-    for (let i = 0; i < 8; i++) port.postMessage(body(1024));
+    for (let i = 0; i < 8; i++) port.postMessage(body(16 * KiB));
     expect(portBufferedAmount(port as never)).toBeGreaterThan(0);
   });
 });

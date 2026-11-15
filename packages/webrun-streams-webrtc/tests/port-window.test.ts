@@ -20,28 +20,36 @@ if (isBrowser) {
   type MakePair = import("@statewalker/webrun-streams-conformance").MakePair;
   const codec = { encode: serialize, decode: deserialize };
 
-  describePortWindow("webrtcPortMux", async (portCodec, windows) => {
-    const { clientPc, serverPc } = await connectedPeers();
-    const opener = await webrtcPortMux({ pc: clientPc, codec: portCodec, window: windows.opener });
-    let serving: Awaited<ReturnType<typeof webrtcPortMux>> | undefined;
-    return {
-      opener,
-      async serve(onPort) {
-        serving = await webrtcPortMux({
-          pc: serverPc,
-          codec: portCodec,
-          onPort,
-          window: windows.server,
-        });
-        return serving;
-      },
-      async dispose() {
-        await serving?.close();
-        clientPc.close();
-        serverPc.close();
-      },
-    };
-  });
+  describePortWindow(
+    "webrtcPortMux",
+    async (portCodec, windows) => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const opener = await webrtcPortMux({
+        pc: clientPc,
+        codec: portCodec,
+        window: windows.opener,
+      });
+      let serving: Awaited<ReturnType<typeof webrtcPortMux>> | undefined;
+      return {
+        opener,
+        async serve(onPort) {
+          serving = await webrtcPortMux({
+            pc: serverPc,
+            codec: portCodec,
+            onPort,
+            window: windows.server,
+          });
+          return serving;
+        },
+        async dispose() {
+          await serving?.close();
+          clientPc.close();
+          serverPc.close();
+        },
+      };
+    },
+    { maxFrameBytes: 16 * 1024 },
+  );
 
   describe("webrtcPortMux: the windowed channel", () => {
     it("a port of a mux with a window opens its data channel with the windowed protocol", async () => {

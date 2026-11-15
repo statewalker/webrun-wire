@@ -10,6 +10,7 @@ export * from "./native-port-mux.js";
 export {
   CONTROL_BYTE,
   MAX_PORT_WINDOW,
+  MIN_PORT_WINDOW,
   type NativePortAgreement,
   PORT_FLOW,
   type PortFlow,
