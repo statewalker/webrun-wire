@@ -269,11 +269,12 @@ describe("a hostile opener", () => {
 });
 
 describe("mixed versions keep working", () => {
-  it("an older opener (0.10, no window capability) keeps its own window, and completes", async () => {
+  it("an older opener (0.10, no window capability) is held to the responder's window (#202), and completes", async () => {
     const { link, client, served } = pair({ kit: OLD, window: LARGE }, { kit: NEW, window: SMALL });
     expect(await uploadCount(OLD, client, 200, 1000)).toBe("200000");
+    // The ack still carries no window: an older opener would not read it.
     expect(acks(link)[0]?.window).toBeUndefined();
-    expect(portAgreement(served[0] as MessageTarget)?.window).toBe(LARGE);
+    expect(portAgreement(served[0] as MessageTarget)?.window).toBe(SMALL);
   });
 
   it("a new opener against an older responder (0.10) keeps its own window, and completes", async () => {

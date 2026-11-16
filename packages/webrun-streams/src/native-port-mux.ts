@@ -248,6 +248,17 @@ export function newNativePortMux<I = unknown>(
         if (!payload) return;
         bytes = payload;
       }
+      const size = bytes.byteLength;
+      if (win) {
+        try {
+          win.arrived(size);
+        } catch (err) {
+          // A peer that ignores the window this end grants (#197): its port
+          // fails before the message is decoded or held.
+          fail(new Error(`${name}: ${(err as Error).message}`, { cause: err }));
+          return;
+        }
+      }
       let data: unknown;
       try {
         data = codec.decode(bytes);
@@ -257,8 +268,6 @@ export function newNativePortMux<I = unknown>(
         fail(new Error(`${name}: a frame the port's codec cannot decode`, { cause: err }));
         return;
       }
-      const size = bytes.byteLength;
-      win?.arrived(size);
       if (held) held.push({ data, size });
       else deliver(data, size);
     };

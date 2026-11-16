@@ -66,7 +66,10 @@ export const DEFAULT_MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
  * What a message costs a port's window when the codec cannot say
  * (`PortCodec.encode`): its bytes and string lengths, found in its values up
  * to 4 levels deep (at most 256 values), and at least 64. Both ends compute it
- * from the same structured value, so they agree.
+ * from the same structured value, so they agree: a windowed port sends a
+ * payload without the keys whose value is `undefined` where this estimate
+ * reaches ({@link withoutUndefinedKeys}), so a transport that drops such keys
+ * and one that keeps them deliver the same value (statewalker/webrun-wire#203).
  */
 export function estimateMessageSize(payload: unknown): number {
   let budget = 256;
@@ -82,6 +85,58 @@ export function estimateMessageSize(payload: unknown): number {
     return n;
   };
   return Math.max(64, walk(payload, 0));
+}
+
+/**
+ * @internal `payload` without the keys whose value is `undefined`, in plain
+ * objects within the reach of {@link estimateMessageSize} (4 levels): itself
+ * when it has none, else a copy of what holds them (other values shared).
+ *
+ * A transport may drop such keys (a msgpack round trip does) or keep them
+ * (structured clone does). The receiver of a windowed port counts what it
+ * gets, and the sender what it sent: with such a key in reach, they disagree
+ * on a dropping transport, the receiver credits back less than the sender
+ * counted, and the port stalls for ever once a message near the window waits
+ * for credit that never comes (statewalker/webrun-wire#203). Without them,
+ * both transports deliver what was sent, and the two ends agree whatever
+ * their versions. Reading a dropped key gives `undefined` as before; only
+ * `"key" in payload` tells the difference. Objects that are not plain (class
+ * instances, `Map`, `Date`) are left as they are.
+ */
+export function withoutUndefinedKeys(payload: unknown): unknown {
+  const strip = (v: unknown, depth: number): unknown => {
+    if (depth >= 4 || v === null || typeof v !== "object") return v;
+    if (Array.isArray(v)) {
+      let copy: unknown[] | undefined;
+      for (let i = 0; i < v.length; i++) {
+        const x = strip(v[i], depth + 1);
+        if (x !== v[i]) {
+          copy ??= v.slice();
+          copy[i] = x;
+        }
+      }
+      return copy ?? v;
+    }
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return v;
+    const record = v as Record<string, unknown>;
+    let copy: Record<string, unknown> | undefined;
+    for (const k of Object.keys(record)) {
+      const x = record[k];
+      if (x === undefined) {
+        copy ??= { ...record };
+        delete copy[k];
+        continue;
+      }
+      const y = strip(x, depth + 1);
+      if (y !== x) {
+        copy ??= { ...record };
+        copy[k] = y;
+      }
+    }
+    return copy ?? v;
+  };
+  return strip(payload, 0);
 }
 
 /**
@@ -561,18 +616,20 @@ export function multiplexPort(
           }
         : undefined;
     const self = newVirtualPort(
-      (payload, transfer) => {
+      (sent, transfer) => {
         // This side's direction has ended: nothing more goes out on it.
         if (c?.ending) return;
         touch(id);
         if (c?.presumed) c.sentPresumed = true;
-        const envelope: PortEnvelope = { type: "message", id, payload };
         // Without a window nothing frames or waits: post at once, so the
         // payload is read now, while the caller still expects it to be.
         if (!c) {
-          post(envelope, transfer);
+          post({ type: "message", id, payload: sent }, transfer);
           return;
         }
+        // Both ends must count the same value, whatever the transport drops (#203).
+        const payload = c.exact ? sent : withoutUndefinedKeys(sent);
+        const envelope: PortEnvelope = { type: "message", id, payload };
         // Encoded once, here, when the codec can: the exact wire size is then
         // what the window counts, on both ends, and the bytes are what frames split.
         const bytes = c.exact ? codec.encode?.(envelope) : undefined;
@@ -813,16 +870,18 @@ export function multiplexPort(
         post({ type: "close", id: envelope.id, reason: "max-ports" });
         return;
       }
-      // The opener asked for a window and is known to speak it. AN OPENER
-      // THAT LISTS `"window"` IS HELD TO THIS END'S OWN, WHEN THAT IS SMALLER:
-      // its ack says so, and the opener takes it. One that does not list it
-      // (any earlier version) would keep counting against its own and fail
-      // this end's checks, so it keeps the window it asked for, as before.
+      // THE OPENER IS HELD TO THIS END'S OWN WINDOW, WHEN THAT IS SMALLER.
+      // One that lists `"window"` hears it in the ack and takes it. One that
+      // does not (any earlier version, or a hostile peer) is clamped all the
+      // same (#202): granting what it asked would let it make this end hold
+      // up to that much per port. Such an opener keeps counting against the
+      // window it asked for, so one that really fills more than this end's
+      // window gets its port failed by this end's checks; honest older peers
+      // asking for no more than this end's window are unaffected.
       const listed = sharedCaps(caps, envelope.caps);
       const asked = validWindow(envelope.window);
       const own = validWindow(windows.grant);
-      const portWindow =
-        asked != null && own != null && listed?.has("window") ? Math.min(asked, own) : asked;
+      const portWindow = asked != null && own != null ? Math.min(asked, own) : asked;
       const handle = attach(
         envelope.id,
         envelope.meta,

@@ -292,7 +292,7 @@ port cannot grow memory here.
 | `maxPorts` | Ceiling on concurrently open ports, default `DEFAULT_MAX_PORTS` (1024). Closing a port frees its slot. It bounds the id table, never the total over time, and never delays a message. A peer `open` past the limit is answered with `close` reason `"max-ports"`. |
 | `maxMessageSize` | Largest payload a chunk may carry, if the transport has a limit. Reported to the stream tier, never enforced. See below. |
 | `signal` | The transport's life. On abort the mux closes with `signal.reason`; an already-aborted signal gives a closed mux. See below. |
-| `window` | Per-port flow control in bytes, off when unset. On a port the peer opens, it is also the most this end grants: a larger window asked for by an opener that speaks `"window"` is clamped to it. See "A port with a window holds only its own bytes" and "The responder bounds the window" below. `{ initial, min?, max, budget? }` or `"auto"` adapts it after the ack: see "A port's window adapts after the ack" below. |
+| `window` | Per-port flow control in bytes, off when unset. On a port the peer opens, it is also the most this end grants: a larger window asked for by an opener is clamped to it, whether or not it speaks `"window"` (#202). See "A port with a window holds only its own bytes" and "The responder bounds the window" below. `{ initial, min?, max, budget? }` or `"auto"` adapts it after the ack: see "A port's window adapts after the ack" below. |
 | `frameSize` | Fair framing in bytes, off when unset; needs `window`. See "Large messages take turns with small ones" below. |
 | `maxReassembledBytes` | Ceiling on what the peer's framed messages hold past their ports' windows, summed over all ports, default `DEFAULT_MAX_REASSEMBLED_BYTES` (64 MiB). Past it, or past what a port's window leaves, the port closes. See "Large messages take turns with small ones" below. |
 | `keepalive` | `{ intervalMs, misses? }`, off when unset: ping the peer and close the mux after `misses` unanswered pings from a peer that answered before. See "A port lives until its transport or its user lets go" below. |
@@ -336,7 +336,14 @@ when it is posted. Each end says so in its `open` or its ack (`exact: true`); if
 both count an estimate computed from the same value: byte length for `ArrayBuffer`s and typed
 arrays, a string's length, an object's values 4 levels deep and at most 256 of them, and at least
 64 bytes. Two ends counting different sizes would leak window on every message until the port
-wedged. A message larger than the window is sent once nothing else is outstanding.
+wedged. So that both count the same value over any transport, a windowed port sends a payload
+without the keys whose value is `undefined`, in plain objects within those 4 levels: a transport
+that drops such keys (a msgpack round trip) then delivers what one that keeps them (structured
+clone) does (statewalker/webrun-wire#203). Reading such a key on the receiving end still gives
+`undefined`; only `"key" in payload` tells the difference. A sender of 0.15.1 or earlier still
+counts those keys, and stalls over a transport that drops them once a message near the window
+waits: upgrade the sending end. A message larger than the window is sent once nothing else is
+outstanding.
 
 **Older peers.** A peer from before the window reads `window` in an `open` but never sends
 credit, and a codec from before it drops `credit` envelopes. So neither end holds back until the
@@ -407,9 +414,15 @@ smaller of the opener's window and its own (`window`), and its ack names it,
 `{ type: "credit", id, bytes: 0, caps, window }`; the opener takes it, so both ends count against
 the same window. An ack can only shrink the opener's window, never widen it. A responder with no
 `window` of its own takes the opener's, as before. An opener that does not list `"window"` (any
-version before it) keeps the window it asked for: clamping it unannounced would fail this end's
-checks on its honest traffic. So a peer bounded this way is one that runs this version or later.
-`tests/port-window-clamp.test.ts` covers it, against the published 0.10 too.
+version before it, or a hostile peer) is clamped too (statewalker/webrun-wire#202), without being
+told: the ack carries no window it would not read. It keeps counting against the window it asked
+for, so an honest older opener that asks for more than this end's window, and really fills more
+than that before its credit returns, has its port failed by this end's checks (pipelined chunks
+past the window, or a framed message that passes what the window left); one that asks for no
+more, or never fills more, runs as before (statewalker/webrun-wire#207 tracks lifting this).
+Before this, such an opener was granted whatever it asked, so a peer could have this end hold up
+to that much on each of `maxPorts` ports. `tests/port-window-clamp.test.ts` and
+`tests/port-window-clamp-no-caps.test.ts` cover it, against the published 0.10 too.
 
 **A port's window adapts after the ack** (statewalker/webrun-wire#188). With `window: { initial,
 min?, max, budget? }`, or `"auto"` (`DEFAULT_AUTO_WINDOW`: initial 256 KiB, min 64 KiB, max

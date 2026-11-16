@@ -228,3 +228,38 @@ describe("a peer that uploads and never reads (review of #196)", () => {
     expect(String((port?.closeSignal.reason as Error | undefined)?.message)).toMatch(/drain/);
   }, 90_000);
 });
+
+// statewalker/webrun-wire#201: a caller that takes the response head and never
+// reads the body, while its transport keeps reading. Nothing waits for drain:
+// the server's port waits for the caller's credit, which never comes. Before
+// the fix the stall timer was armed only while a write waited for drain, so
+// the handler stayed live for ever (45 s observed in the httpeers report).
+describe("a caller that takes the response and never reads it (statewalker/webrun-wire#201)", () => {
+  it("the server's port fails after `drainTimeoutMs` and its handler is released", async () => {
+    const server = await createNode();
+    const client = await createNode();
+    cleanups.push(async () => {
+      await Promise.allSettled([client.stop(), server.stop()]);
+    });
+    await client.dial(server.getMultiaddrs()[0] as Parameters<Libp2p["dial"]>[0]);
+    const { state, handler } = bigResponse();
+    const stop = await serve({ node: server, drainTimeoutMs: STALL_MS }, handler);
+    cleanups.push(stop);
+    const conn = await connect({ node: client, peer: server.peerId });
+    cleanups.push(() => conn.close());
+    const it = conn.call([])[Symbol.asyncIterator]();
+    cleanups.push(() => void it.return?.(undefined).catch(() => undefined));
+    const head = await it.next();
+    expect(head.done).toBe(false);
+    const stoppedAt = Date.now();
+    // Never read again. The handler is released once the stall bound passes.
+    const deadline = stoppedAt + STALL_MS + 10_000;
+    while (!state.released && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(state.released).toBe(true);
+    expect(state.releasedAt - stoppedAt).toBeGreaterThanOrEqual(STALL_MS - 500);
+    // Memory stayed bounded: the producer stopped at about one window.
+    expect(state.produced).toBeLessThan(16 * MiB);
+  }, 30_000);
+});
