@@ -192,7 +192,9 @@ if (isBrowser) {
         .poll(() => serverPort?.closeSignal.aborted, { timeout: DRAIN_TIMEOUT_MS + 5_000 })
         .toBe(true);
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(DRAIN_TIMEOUT_MS - 500);
-      expect(String((serverPort?.closeSignal.reason as Error).message)).toMatch(/credit/);
+      expect(String((serverPort?.closeSignal.reason as Error | undefined)?.message)).toMatch(
+        /credit/,
+      );
       // Bounded by the window while it waited.
       expect(posted).toBeLessThanOrEqual(1024 * 1024 + 2 * body.byteLength);
       clientPc.close();
