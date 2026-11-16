@@ -1,5 +1,16 @@
 # @statewalker/webrun-streams-libp2p
 
+## 0.7.2
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-rpc ^0.15.1 -> ^0.15.2
+  - @statewalker/webrun-streams ^0.6.1 -> ^0.6.2
+- Updated dependencies
+  - @statewalker/webrun-msgpack@0.14.2
+
 ## 0.7.1
 
 ### Patch Changes
