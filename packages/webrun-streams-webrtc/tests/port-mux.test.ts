@@ -323,7 +323,11 @@ if (isBrowser) {
       expect(await got).toEqual({ x: 1 });
       await new Promise((r) => setTimeout(r, 200));
       expect(other.readyState).toBe("open");
-      expect(rawCalls).toBe(1); // only the foreign channel reached serve()
+      // Only the foreign channel reached serve(). It sends nothing, so serve() answers it once its
+      // wait for the caller's first frame times out (`HELLO_FALLBACK_MS`, statewalker/statewalker-root#51).
+      await expect.poll(() => rawCalls, { timeout: 2_000 }).toBe(1);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(rawCalls).toBe(1);
       clientPc.close();
       serverPc.close();
     });
@@ -442,10 +446,22 @@ if (isBrowser) {
         });
       });
       const mux = await webrtcPortMux({ pc: clientPc, codec });
-      await mux.openPort();
+      // The serving end fails the port, and closes its channel, inside its `datachannel` handler.
+      // The opener may see that close before its own channel's `open` event runs (the spec skips
+      // announcing `open` on a channel already closing), and its `openPort` then rejects with
+      // "the data channel closed" (statewalker/webrun-wire#194): either outcome is right for the
+      // opener. What this test checks is the serving end, which is deterministic.
+      const opened = mux.openPort().then(
+        () => "opened",
+        (err: unknown) => err,
+      );
       const { thrown, aborted } = await outcome;
       expect(thrown).toBeInstanceOf(RangeError);
       expect(aborted).toBe(true);
+      const openerOutcome = await opened;
+      if (openerOutcome !== "opened") {
+        expect(String((openerOutcome as Error).message)).toMatch(/the data channel closed/);
+      }
       clientPc.close();
       serverPc.close();
     });

@@ -127,7 +127,15 @@ DATA   0x00  body bytes, at most 16 KiB - 1 per message
 END    0x01  this side has finished sending (half-close)
 ERROR  0x02  JSON of serializeError(err): message, stack, custom fields
 CREDIT 0x03  big-endian u32: payload bytes the receiver's consumer pulled
+HELLO  0x04  empty; the caller's first frame, sent as soon as its channel opens
 ```
+
+Receivers ignore types they do not know, so `HELLO` works with older peers
+either way. The responder sends nothing on a call's channel before a frame of
+the caller's has arrived, or `HELLO_FALLBACK_MS` (250 ms) passed for a caller
+from before `HELLO`: Chromium can lose what the answering side sends before
+then, when the caller's `open` came before the responder's `datachannel` event
+(statewalker/statewalker-root#51).
 
 ### Flow control
 
