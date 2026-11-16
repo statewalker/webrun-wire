@@ -1,5 +1,15 @@
 # @statewalker/webrun-http-browser
 
+## 0.17.2
+
+### Patch Changes
+
+- ae37e5a: `SwHttpAdapter.start()`: a controlling worker that never answers the handshake now always rejects with `ServiceWorkerControlError` (`reason: "unresponsive"`). When control came at once (a page that loaded controlled, or Firefox activating and claiming within a millisecond of `register()`), the attach call's own timeout could fire before `start()`'s deadline and reject with a plain `Error: No answer to UPDATE_COMMUNICATION_PORT within … ms`.
+- Updated dependencies [ae60cf6]
+- Updated dependencies [b7d1181]
+  - @statewalker/webrun-streams@0.6.2
+  - @statewalker/webrun-rpc@0.15.2
+
 ## 0.17.1
 
 ### Patch Changes
