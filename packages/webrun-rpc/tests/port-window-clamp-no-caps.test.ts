@@ -39,7 +39,7 @@ const v8Codec: PortCodec = {
 };
 
 /** A responder with a small window whose ports' listeners never finish a message. */
-function responder(codec: PortCodec) {
+function responder(codec: PortCodec, maxReassembledBytes?: number) {
   const ch = new MessageChannel();
   cleanups.push(() => {
     ch.port1.close();
@@ -50,6 +50,7 @@ function responder(codec: PortCodec) {
     codec,
     side: "responder",
     window: SMALL,
+    ...(maxReassembledBytes !== undefined ? { maxReassembledBytes } : {}),
     onPort: (port) => {
       served.push(port);
       port.addEventListener("message", () => new Promise<void>(() => {}));
@@ -103,4 +104,64 @@ describe("an opener without the window capability (statewalker/webrun-wire#202)"
     >;
     expect(String(close.reason)).toMatch(/max-reassembled-bytes/);
   });
+});
+
+// Review of #205: an opener from before `"window"` keeps counting against the
+// window it asked for. Asking for no more than the responder's, it runs as
+// before; asking for more and really filling more before its credit returns
+// (pipelined chunks to a slow consumer), it has its port failed: the
+// documented cost of the clamp (#202). Follow-up: statewalker/webrun-wire#207.
+describe("an honest 0.10 opener against a new responder that clamps (review of #205)", () => {
+  async function uploadFrom010(openerWindow: number): Promise<string> {
+    const v010 = (await import("webrun-rpc-0-10")) as unknown as typeof import("../src/index.js");
+    const { serveDuplexOverPort } = await import("../src/index.js");
+    const ch = new MessageChannel();
+    cleanups.push(() => {
+      ch.port1.close();
+      ch.port2.close();
+    });
+    const server = multiplexPort(ch.port2, {
+      codec: v8Codec,
+      side: "responder",
+      window: SMALL,
+      onPort: (port) => {
+        serveDuplexOverPort(port, async function* (input) {
+          let n = 0;
+          for await (const chunk of input) {
+            n += chunk.byteLength;
+            await new Promise((r) => setTimeout(r, 1));
+          }
+          yield new TextEncoder().encode(String(n));
+        });
+        return true;
+      },
+    });
+    const client = v010.multiplexPort(ch.port1, {
+      codec: v8Codec,
+      side: "initiator",
+      window: openerWindow,
+      frameSize: 4096,
+    });
+    cleanups.push(async () => {
+      await client.close();
+      await server.close();
+    });
+    async function* upload() {
+      for (let i = 0; i < 100; i++) yield new Uint8Array(12000).fill(i & 0xff);
+    }
+    const port = await client.openPort();
+    let answer = "";
+    for await (const chunk of v010.duplexOverPort(port)(upload())) {
+      answer += new TextDecoder().decode(chunk);
+    }
+    return answer;
+  }
+
+  it("asking for no more than the responder's window: a pipelined upload to a slow consumer completes", async () => {
+    expect(await uploadFrom010(SMALL)).toBe("1200000");
+  }, 20_000);
+
+  it("asking for more, and filling more before its credit returns: its port is failed, not held", async () => {
+    await expect(uploadFrom010(1024 * KiB)).rejects.toThrow(/closed the port/);
+  }, 20_000);
 });

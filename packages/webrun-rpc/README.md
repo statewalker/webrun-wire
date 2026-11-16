@@ -417,8 +417,9 @@ the same window. An ack can only shrink the opener's window, never widen it. A r
 version before it, or a hostile peer) is clamped too (statewalker/webrun-wire#202), without being
 told: the ack carries no window it would not read. It keeps counting against the window it asked
 for, so an honest older opener that asks for more than this end's window, and really fills more
-than that before its credit returns, has its port failed by this end's checks (a framed message
-that passes what the window left); one that asks for no more, or never fills more, runs as before.
+than that before its credit returns, has its port failed by this end's checks (pipelined chunks
+past the window, or a framed message that passes what the window left); one that asks for no
+more, or never fills more, runs as before (statewalker/webrun-wire#207 tracks lifting this).
 Before this, such an opener was granted whatever it asked, so a peer could have this end hold up
 to that much on each of `maxPorts` ports. `tests/port-window-clamp.test.ts` and
 `tests/port-window-clamp-no-caps.test.ts` cover it, against the published 0.10 too.
