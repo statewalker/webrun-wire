@@ -77,9 +77,17 @@ export function handleChannelCalls(
 }
 
 /**
+ * The rejection of a `callChannelWithin` that got no answer in time. Its
+ * `name` stays `"Error"`, as before this class existed; it is here so a caller
+ * that races its own deadline against the call's can tell the call's timeout
+ * from the peer's own errors (`instanceof`, within one bundle). Internal.
+ */
+export class ChannelCallTimeoutError extends Error {}
+
+/**
  * `callChannel`, failing after `ms` instead of waiting for ever: a peer that
  * died (a ServiceWorker stopped mid-call) or that does not know `callType` (an
- * older version) never answers.
+ * older version) never answers. Rejects with a `ChannelCallTimeoutError` then.
  */
 export function callChannelWithin<T = unknown>(
   ms: number,
@@ -91,6 +99,6 @@ export function callChannelWithin<T = unknown>(
   return withDeadline(
     Date.now() + ms,
     callChannel<T>(target, callType, params, ...transfers),
-    () => new Error(`No answer to ${callType} within ${ms} ms`),
+    () => new ChannelCallTimeoutError(`No answer to ${callType} within ${ms} ms`),
   );
 }
