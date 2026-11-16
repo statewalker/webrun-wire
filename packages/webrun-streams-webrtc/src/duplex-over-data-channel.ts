@@ -9,6 +9,53 @@ const TYPE_DATA = 0x00;
 const TYPE_END = 0x01;
 const TYPE_ERROR = 0x02;
 const TYPE_CREDIT = 0x03;
+/**
+ * The caller's first frame on a call's channel, sent as soon as it opens, and ignored by every
+ * receiver (unknown types always were): it tells the responder that the channel carries its
+ * answers (see {@link callerHello}).
+ */
+const TYPE_HELLO = 0x04;
+
+/**
+ * How long a responder waits for a caller's first frame before it answers anyway: a caller from
+ * before {@link TYPE_HELLO} sends nothing until its input yields or ends.
+ */
+export const HELLO_FALLBACK_MS = 250;
+
+/** Sends the caller's {@link TYPE_HELLO} on a channel that has just opened. */
+export function sendHello(dc: RTCDataChannel): void {
+  try {
+    (dc as unknown as { send: (data: Uint8Array) => void }).send(new Uint8Array([TYPE_HELLO]));
+  } catch {
+    /* closing: the stream sees it */
+  }
+}
+
+/**
+ * Resolves once the caller's first frame has reached an answering channel (or the channel ends,
+ * or {@link HELLO_FALLBACK_MS} passed). Call it inside the `datachannel` event.
+ *
+ * Chromium can lose what a responder sends on an answering channel before the caller's first
+ * frame reached it, when the caller's `open` event came before the responder's `datachannel`
+ * event: the frame is sent on an `"open"` channel, nothing is buffered, and the caller never gets
+ * it, while later frames arrive (statewalker/statewalker-root#51, the conformance L4 handler that
+ * throws at once: its `ERROR` was lost and the caller waited for ever). A caller's frame having
+ * arrived shows the channel carries the responder's frames too.
+ */
+export function callerHello(dc: RTCDataChannel): Promise<void> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      dc.removeEventListener("message", done);
+      dc.removeEventListener("close", done);
+      resolve();
+    };
+    dc.addEventListener("message", done);
+    dc.addEventListener("close", done);
+    timer = setTimeout(done, HELLO_FALLBACK_MS);
+  });
+}
 
 const DC_MTU = 16 * 1024; // conservative across browsers
 

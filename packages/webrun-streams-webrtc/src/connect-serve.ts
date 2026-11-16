@@ -1,9 +1,11 @@
 import type { Connect, Duplex, Serve } from "@statewalker/webrun-streams";
 import {
+  callerHello,
   duplexOverDataChannel,
   holdEvents,
   markAnswering,
   runStream,
+  sendHello,
 } from "./duplex-over-data-channel.js";
 import { PORT_LABEL_PREFIX } from "./port-mux.js";
 
@@ -40,6 +42,8 @@ export const connect: Connect<WebRtcParams> = async ({ pc }) => {
     dc.addEventListener("close", () => open.delete(dc));
     return (async function* () {
       await waitForOpen(dc);
+      // First, before anything else: the responder answers once a frame of ours has arrived.
+      sendHello(dc);
       yield* duplexOverDataChannel(dc, toAsyncIterable(input));
     })();
   };
@@ -72,8 +76,12 @@ export const serve: Serve<WebRtcParams> = async ({ pc }, handler: Duplex) => {
     holdEvents(dc);
     markAnswering(dc); // the caller closes the channel once the call is over
     let inputFromPeer: PeekInput | null = null;
+    // Listening from now on, inside the `datachannel` event: nothing the caller sends is missed.
+    const hello = callerHello(dc);
     void (async () => {
       await waitForOpen(dc);
+      // Nothing goes out before the caller's first frame arrived (`callerHello`).
+      await hello;
       const peek = peekInput(dc);
       inputFromPeer = peek;
       // Once the handler's output ends (or throws) the handler is done with its input: what the

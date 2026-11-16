@@ -1,5 +1,10 @@
 import type { HttpHandler } from "@statewalker/webrun-http-streams";
-import { callChannel, callChannelWithin, handleChannelCalls } from "../core/data-calls.js";
+import {
+  ChannelCallTimeoutError,
+  callChannel,
+  callChannelWithin,
+  handleChannelCalls,
+} from "../core/data-calls.js";
 import { withDeadline } from "../core/deadline.js";
 import {
   awaitServiceWorkerControl,
@@ -237,17 +242,27 @@ export class SwHttpAdapter {
             reloadIfUncontrolled: this.options.reloadIfUncontrolled,
           });
           this._releaseOwner ??= await holdLock(this._ownerLock);
+          const unresponsive = () =>
+            new ServiceWorkerControlError(
+              "unresponsive",
+              `ServiceWorker "${this._serviceWorker?.scriptURL}" controls this page but did ` +
+                `not answer the UPDATE_COMMUNICATION_PORT handshake within ${timeout} ms. ` +
+                "Check that the worker script runs this package's same-origin dispatcher " +
+                "(it importScripts `sw-worker.js`, or calls `startHttpDispatcher`).",
+            );
+          // Two timers bound the handshake: this deadline, and the attach
+          // call's own (`_callTimeout()`, the same `timeout`, armed later).
+          // When control came at once — a page that loaded controlled, or
+          // Firefox activating and claiming within a millisecond of
+          // `register()` — both are due in the same millisecond and the
+          // call's, armed first, can fire first. Either one means the worker
+          // did not answer, so both reject as `unresponsive`.
           await withDeadline(
             deadline,
-            this._attachPage(),
-            () =>
-              new ServiceWorkerControlError(
-                "unresponsive",
-                `ServiceWorker "${this._serviceWorker?.scriptURL}" controls this page but did ` +
-                  `not answer the UPDATE_COMMUNICATION_PORT handshake within ${timeout} ms. ` +
-                  "Check that the worker script runs this package's same-origin dispatcher " +
-                  "(it importScripts `sw-worker.js`, or calls `startHttpDispatcher`).",
-              ),
+            this._attachPage().catch((error: unknown) => {
+              throw error instanceof ChannelCallTimeoutError ? unresponsive() : error;
+            }),
+            unresponsive,
           );
         } catch (error) {
           // Forget this attempt so a later start() retries. Keep the

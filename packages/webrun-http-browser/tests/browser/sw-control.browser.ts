@@ -284,6 +284,26 @@ for (const [browserName, browserType] of Object.entries(browsers)) {
         expect(result.message).toMatch(/UPDATE_COMMUNICATION_PORT handshake within 1000 ms/);
       });
 
+      it("the same, reloaded (controlled from the start): still rejects as unresponsive", async () => {
+        // Control comes at once here, so `start()`'s deadline and the attach
+        // call's own timeout are due in the same millisecond. The call's used
+        // to win now and then (and, in Firefox, sometimes on a first visit
+        // too: activation and claim land within a millisecond of
+        // `register()`), rejecting with a plain "No answer to …" Error.
+        const page = await freshPage();
+        await page.goto(`${origin}${SAME_ORIGIN}?sw=./silent-sw.js&timeout=1000`);
+        await outcome(page);
+        await page.reload();
+        expect(await initiallyControlled(page)).toBe(true);
+        const result = await outcome(page);
+        expect(result).toMatchObject({
+          ok: false,
+          name: "ServiceWorkerControlError",
+          reason: "unresponsive",
+        });
+        expect(result.message).toMatch(/UPDATE_COMMUNICATION_PORT handshake within 1000 ms/);
+      });
+
       it("an uncontrolled page and a worker that will not claim it: rejects, naming the hard reload", async () => {
         const page = await freshPage();
         await page.goto(`${origin}${SAME_ORIGIN}?sw=./legacy-sw.js&timeout=1000`);
