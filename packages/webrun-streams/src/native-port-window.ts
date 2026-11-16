@@ -46,10 +46,28 @@
  * back too, and goes as one combined frame once the transport drains: a peer
  * that uploads and never reads cannot grow this end's buffer with credit
  * frames. A write or credit that has waited for drain longer than
- * `drainTimeoutMs` breaks the port off (`stall`); a quiet port, with nothing
- * waiting to go, is never timed out. Withholding credit cannot deadlock past
- * that bound: a peer waiting for credit while this end waits for its
- * transport to drain ends in the stall timeout, as any stalled peer does.
+ * `drainTimeoutMs` breaks the port off (`stall`); so does a write that has
+ * waited that long for the peer's credit (statewalker/webrun-wire#201): a
+ * peer that takes a message and never consumes past it cannot park the
+ * sender (and whatever its producer holds) for ever. Credit that arrives
+ * restarts the bound. A quiet port, with nothing waiting to go, is never
+ * timed out. Withholding credit cannot deadlock past that bound: a peer
+ * waiting for credit while this end waits for its transport to drain ends in
+ * the stall timeout, as any stalled peer does.
+ *
+ * **The inbound window is enforced** (statewalker/webrun-wire#197): a peer
+ * that sends past the window this end grants, without waiting for credit,
+ * gets its port failed, so a slow listener holds at most about one window of
+ * a peer that ignores it. An honest peer never makes the unconsumed bytes
+ * pass the window, except with one message larger than the window sent while
+ * nothing else was outstanding: so the port fails once the unconsumed bytes
+ * pass both the window and the message that just arrived. The bound holds
+ * from the first frame: a windowed peer that knows this end speaks the
+ * window holds its sends to the 64 KiB floor until this end's `hello`, and
+ * this end grants at least that. (A WebRTC opener learns that its peer speaks
+ * the window only from the peer's `hello`, and sends without a bound until
+ * then: it must not post more than the peer's window before its port has
+ * heard the peer. The stream tier never does.)
  */
 
 /** The first byte of a control frame on a windowed channel. */
@@ -122,7 +140,10 @@ export interface PortWindow {
    * control frame, handled here. Throws on a control frame it cannot read.
    */
   receive(frame: Uint8Array): Uint8Array | undefined;
-  /** A data frame of `size` bytes reached the port. */
+  /**
+   * A data frame of `size` bytes reached the port. Throws when it takes the
+   * peer past the window this end grants: the peer ignored the window (#197).
+   */
   arrived(size: number): void;
   /** A message of `size` bytes was consumed: its credit goes back. */
   consumed(size: number): void;
@@ -253,6 +274,32 @@ export function newPortWindow(options: {
   /** Set while a wait for the transport to drain is armed. */
   let draining = false;
   let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Armed while a queued write waits for the peer's credit (#201). */
+  let creditTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const stopCreditTimer = (): void => {
+    if (creditTimer !== undefined) clearTimeout(creditTimer);
+    creditTimer = undefined;
+  };
+
+  /** A queued write waits for the peer's credit: bounded by `drainTimeoutMs`, restarted by credit. */
+  const awaitCredit = (): void => {
+    if (drainTimeoutMs === undefined || creditTimer !== undefined || ended) return;
+    creditTimer = setTimeout(
+      () => {
+        creditTimer = undefined;
+        if (ended || queue.length === 0) return;
+        stall(
+          new Error(
+            `a write waited for the peer's credit for more than ${drainTimeoutMs} ms: the peer stopped reading`,
+          ),
+        );
+      },
+      Math.min(drainTimeoutMs, MAX_TIMER_MS),
+    );
+    // A peer that stops reading must not keep Node alive.
+    (creditTimer as { unref?: () => void }).unref?.();
+  };
 
   const stopStallTimer = (): void => {
     if (stallTimer !== undefined) clearTimeout(stallTimer);
@@ -312,7 +359,10 @@ export function newPortWindow(options: {
         awaitDrain();
         break;
       }
-      if (blocked(next.size)) break;
+      if (blocked(next.size)) {
+        awaitCredit();
+        break;
+      }
       queue.shift();
       queued -= next.size;
       outstanding += next.size;
@@ -323,6 +373,7 @@ export function newPortWindow(options: {
         return;
       }
     }
+    if (queue.length === 0) stopCreditTimer();
     settleWaiters();
   };
 
@@ -364,6 +415,7 @@ export function newPortWindow(options: {
         queue.push({ frame, size });
         queued += size;
         if (transportFull()) awaitDrain();
+        else awaitCredit();
         return;
       }
       outstanding += size;
@@ -390,6 +442,8 @@ export function newPortWindow(options: {
       }
       if (type === TYPE_CREDIT) {
         outstanding = Math.max(0, outstanding - readValue(frame));
+        // Credit is progress: the bound restarts (armed again by `flush` if a write still waits).
+        stopCreditTimer();
         flush();
         return undefined;
       }
@@ -397,6 +451,11 @@ export function newPortWindow(options: {
     },
     arrived(size) {
       unconsumed += size;
+      // An honest peer stays within the window, or sends one message larger
+      // than it with nothing else outstanding (#197).
+      if (unconsumed > own && unconsumed > size) {
+        throw new Error(`the peer sent past the window (${own} bytes) without waiting for credit`);
+      }
     },
     consumed(size) {
       if (ended) return;
@@ -428,11 +487,13 @@ export function newPortWindow(options: {
       queue.length = 0;
       queued = 0;
       stopStallTimer();
+      stopCreditTimer();
       settleWaiters();
     },
     end() {
       ended = true;
       stopStallTimer();
+      stopCreditTimer();
       queue.length = 0;
       queued = 0;
       settleWaiters();

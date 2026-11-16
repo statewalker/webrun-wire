@@ -153,6 +153,52 @@ if (isBrowser) {
       serverPc.close();
     }, 30_000);
   });
+
+  describe("webrtcPortMux: a sender stalled on credit (statewalker/webrun-wire#201)", () => {
+    it("a peer that takes messages and never consumes them: the sender's port fails after `drainTimeoutMs`", async () => {
+      const { clientPc, serverPc } = await connectedPeers();
+      const { portFlow } = await import("@statewalker/webrun-streams");
+      const body = new Uint8Array(15 * 1024).fill(3);
+      let serverPort: { closeSignal: AbortSignal } | undefined;
+      let posted = 0;
+      const DRAIN_TIMEOUT_MS = 1_000;
+      await webrtcPortMux({
+        pc: serverPc,
+        codec,
+        window: 1024 * 1024,
+        drainTimeoutMs: DRAIN_TIMEOUT_MS,
+        onPort: (port) => {
+          serverPort = port;
+          void (async () => {
+            const flow = portFlow(port);
+            // A producer that waits only on the port's queue, as the stream tier does.
+            while (!port.closeSignal.aborted) {
+              port.postMessage(body);
+              posted += body.byteLength;
+              if ((flow?.bufferedAmount() ?? 0) > 0) await flow?.ready();
+            }
+          })();
+          return true;
+        },
+      });
+      // The caller reads at the transport, but its listener never finishes: no credit goes back.
+      const opener = await webrtcPortMux({ pc: clientPc, codec, window: 1024 * 1024 });
+      const port = await opener.openPort();
+      port.addEventListener("message", () => new Promise<void>(() => {}));
+      port.postMessage(new Uint8Array(1));
+      await expect.poll(() => posted, { timeout: 5_000 }).toBeGreaterThan(0);
+      const startedAt = Date.now();
+      await expect
+        .poll(() => serverPort?.closeSignal.aborted, { timeout: DRAIN_TIMEOUT_MS + 5_000 })
+        .toBe(true);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(DRAIN_TIMEOUT_MS - 500);
+      expect(String((serverPort?.closeSignal.reason as Error).message)).toMatch(/credit/);
+      // Bounded by the window while it waited.
+      expect(posted).toBeLessThanOrEqual(1024 * 1024 + 2 * body.byteLength);
+      clientPc.close();
+      serverPc.close();
+    }, 30_000);
+  });
 } else {
   describe.skip("webrtcPortMux windows (browser-only)", () => {
     it("skipped — run via pnpm test:browser", () => {});
