@@ -337,3 +337,131 @@ describe("native port window: `drainTimeoutMs` values (review of #196)", () => {
     });
   }
 });
+
+describe("native port window: the inbound window is enforced at the mux (statewalker/webrun-wire#197)", () => {
+  /** A port the peer opened, with a listener that never finishes a message: nothing is consumed. */
+  function slowServingPort(window = MIN_PORT_WINDOW) {
+    const raw = rawChannel();
+    const ports: import("../src/index.js").NativePort[] = [];
+    let delivered = 0;
+    const control = newNativePortMux({
+      name: "t",
+      codec: json,
+      maxMessageSize: 1,
+      window,
+      onPort: (port) => {
+        ports.push(port);
+        port.addEventListener("message", () => {
+          delivered++;
+          return new Promise<void>(() => {});
+        });
+        return true;
+      },
+      open: async () => raw.channel,
+    });
+    control.accept({ ...raw.channel, window: "agreed" }, {});
+    // biome-ignore lint/style/noNonNullAssertion: `onPort` ran in `accept`.
+    return { raw, port: ports[0]!, delivered: () => delivered };
+  }
+
+  it("a peer that ignores the window against a slow listener gets its port failed", async () => {
+    const { raw, port, delivered } = slowServingPort();
+    raw.deliver(hello(MIN_PORT_WINDOW));
+    const frame = json.encode("x".repeat(8 * 1024));
+    // 64 frames of 8 KiB: 8 windows' worth, with no credit ever waited for.
+    for (let i = 0; i < 64 && !port.closeSignal.aborted; i++) raw.deliver(frame);
+    await tick();
+    expect(port.closeSignal.aborted).toBe(true);
+    expect(String((port.closeSignal.reason as Error).message)).toMatch(/past the window/);
+    // At most about one window reached the listener.
+    expect(delivered() * frame.byteLength).toBeLessThanOrEqual(MIN_PORT_WINDOW + frame.byteLength);
+  });
+
+  it("a peer that never says hello is held to the window too", async () => {
+    const { raw, port } = slowServingPort();
+    const frame = json.encode("x".repeat(8 * 1024));
+    for (let i = 0; i < 64 && !port.closeSignal.aborted; i++) raw.deliver(frame);
+    await tick();
+    expect(port.closeSignal.aborted).toBe(true);
+  });
+
+  it("an honest peer within the window, and one message larger than it, are not failed", async () => {
+    const { raw, port } = slowServingPort();
+    raw.deliver(hello(MIN_PORT_WINDOW));
+    // One message alone larger than the window: it goes once nothing else is outstanding.
+    raw.deliver(json.encode("y".repeat(2 * MIN_PORT_WINDOW)));
+    await tick();
+    expect(port.closeSignal.aborted).toBe(false);
+  });
+
+  it("messages that fill the window exactly are not failed", async () => {
+    const { raw, port } = slowServingPort();
+    raw.deliver(hello(MIN_PORT_WINDOW));
+    const frame = json.encode("z".repeat(8 * 1024 - 2)); // 8 KiB with the quotes
+    for (let i = 0; i < MIN_PORT_WINDOW / frame.byteLength; i++) raw.deliver(frame);
+    await tick();
+    expect(port.closeSignal.aborted).toBe(false);
+    raw.deliver(frame);
+    await tick();
+    expect(port.closeSignal.aborted).toBe(true);
+  });
+});
+
+describe("native port window: a sender stalled on the peer's credit is time-bound (statewalker/webrun-wire#201)", () => {
+  async function creditStalledPort(drainTimeoutMs?: number) {
+    const raw = rawChannel();
+    const control = newNativePortMux({
+      name: "t",
+      codec: json,
+      maxMessageSize: 1,
+      window: MIN_PORT_WINDOW,
+      ...(drainTimeoutMs !== undefined ? { drainTimeoutMs } : {}),
+      open: async () => ({ ...raw.channel, window: "agreed" }),
+    });
+    const port = await control.mux.openPort();
+    raw.deliver(hello(MIN_PORT_WINDOW));
+    return { raw, port };
+  }
+
+  it("a write that waits for credit longer than `drainTimeoutMs` fails the port", async () => {
+    const { port } = await creditStalledPort(50);
+    const body = "a".repeat(16 * 1024);
+    for (let i = 0; i < 8; i++) port.postMessage(body); // 128 KiB: half of it waits for credit
+    expect(port[PORT_FLOW]?.bufferedAmount()).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(port.closeSignal.aborted).toBe(true);
+    expect(String((port.closeSignal.reason as Error).message)).toMatch(/credit/);
+  });
+
+  it("credit that comes in time restarts the bound", async () => {
+    const { raw, port } = await creditStalledPort(80);
+    const body = "a".repeat(16 * 1024);
+    for (let i = 0; i < 8; i++) port.postMessage(body);
+    const credit = (bytes: number) => {
+      const f = new Uint8Array(6);
+      f[0] = CONTROL_BYTE;
+      f[1] = 2;
+      new DataView(f.buffer).setUint32(2, bytes);
+      return f;
+    };
+    // Three went at once; five wait. Credit for one every 50 ms: 250 ms in all, past the 80 ms bound.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      raw.deliver(credit(json.encode(body).byteLength));
+    }
+    expect(port.closeSignal.aborted).toBe(false);
+    expect(port[PORT_FLOW]?.bufferedAmount()).toBe(0);
+    // Nothing waits any more: a quiet port is never timed out.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(port.closeSignal.aborted).toBe(false);
+  });
+
+  it("without `drainTimeoutMs`, a write waiting for credit is not timed out", async () => {
+    const { port } = await creditStalledPort();
+    const body = "a".repeat(16 * 1024);
+    for (let i = 0; i < 8; i++) port.postMessage(body);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(port.closeSignal.aborted).toBe(false);
+    await port.close();
+  });
+});
