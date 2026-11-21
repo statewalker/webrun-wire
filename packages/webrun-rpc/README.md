@@ -8,8 +8,8 @@ ones; a **stream tier** (`duplexOverPort` / `serveDuplexOverPort`) that runs one
 `@statewalker/webrun-streams` `Duplex` over one port with backpressure built into the protocol; a
 **`connect` / `serve` adapter** that plugs a source of ports into the `webrun-streams` `Connect` /
 `Serve` shape; and a **typed-JSON RPC tier** (`callPort` / `listenPort`, `callBidi` / `listenBidi`,
-`ioSend` / `ioHandle`, `send` / `receive`) for request/response and iterator exchange over any
-`MessageTarget`.
+`ioSend` / `ioHandle`, `send` / `receive`, and `serveMethods` / `methodsClient` on top) for
+request/response, an object's methods, and iterator exchange over any `MessageTarget`.
 
 ## Why it exists
 
@@ -93,6 +93,9 @@ Typed-JSON RPC:
 | `callBidi(port, input, args?)` / `listenBidi(port, action, accept?)` | Streaming call: send an iterable, receive an async generator. |
 | `ioSend(port, output, options?)` / `ioHandle(port, handler, options?)` | The full-duplex iterator exchange `callBidi` / `listenBidi` run on. |
 | `send(port, output, options?)` / `receive(port, options?)` | One `callPort` per iterator chunk, and its receiving side. |
+| `serveMethods(port, impl, options)` | Serves the listed methods of `impl` on `port`; any other name is refused (`ENOSYS`). Returns the teardown. Options: `channelName`, `methods`, `timeout` (longest a method may run before the caller gets `ETIMEDOUT`; default none). |
+| `methodsClient<T>(port, options)` | An object with the listed methods of `T`, each one `callPort` to `serveMethods`. Options: `channelName`, `methods`, `timeout` (default `DEFAULT_METHODS_TIMEOUT`, 30 s). |
+| `ServeMethodsOptions`, `MethodsClientOptions`, `MethodNames<T>`, `DEFAULT_METHODS_TIMEOUT` | Supporting types and the client's default deadline. |
 | `NO_TIMEOUT` | `Number.POSITIVE_INFINITY`; as `callPort`'s `timeout`, installs no deadline. |
 | `CallPortOptions` | `timeout` (default 1000 ms), `channelName`, `log`, `newCallId`, `signal`. |
 | `CallBidiOptions`, `CallBidiArgs` | Adds `bidiTimeout` (default 2147483647 ms) for the outer call; `timeout` bounds each chunk call (default none). |
@@ -229,6 +232,54 @@ off();
 
 A handler that throws rejects the caller with the deserialised error. A call with no reply rejects
 after `timeout` with `Call timeout. CallId: "<id>".`
+
+### An object's methods
+
+`serveMethods` serves the methods of an object; `methodsClient` gives the other end an object with
+the same methods. Arguments and results are plain values, `Uint8Array` included: over a
+`MessagePort` they are structured-cloned, over a pipe of bytes (a WebSocket, a data channel) they
+cross as msgpack on a port of `overPipe(pipe, { codec: msgpackCodec })` (the full WebSocket
+example is in `@statewalker/webrun-streams-ws`' README).
+
+```ts
+import { methodsClient, serveMethods } from "@statewalker/webrun-rpc";
+
+interface Store {
+  put(key: string, data: Uint8Array): Promise<number>;
+  get(key: string): Promise<Uint8Array | undefined>;
+}
+const methods = ["put", "get"] as const;
+
+const { port1, port2 } = new MessageChannel();
+const data = new Map<string, Uint8Array>();
+const stop = serveMethods<Store>(
+  port2,
+  {
+    async put(key, bytes) {
+      data.set(key, bytes);
+      return bytes.byteLength;
+    },
+    async get(key) {
+      return data.get(key);
+    },
+  },
+  { channelName: "store", methods },
+);
+
+const store = methodsClient<Store>(port1, { channelName: "store", methods });
+await store.put("a", new Uint8Array([1, 2, 3])); // 3
+await store.get("a"); // Uint8Array [1, 2, 3]
+
+stop();
+```
+
+Only the names in `methods` are looked up on the object: a call to anything else
+(`constructor`, `__proto__`, an unlisted method) is refused with an error whose `code` is
+`ENOSYS`, and arguments that are not an array with `EINVAL`. A method that throws rejects the
+caller with an `Error` carrying the thrown error's `name`, `message` and `code` (a string or a
+number), and nothing else: the server's stack and other properties stay on the server. A server
+`timeout` answers `ETIMEDOUT` once a method runs past it (the method is not stopped); the client's
+`timeout` rejects a call left unanswered as `callPort` does.
 
 ### A streaming call
 
@@ -923,6 +974,9 @@ rejects the call at once.
 `undefined`. A raw `MessagePort` never reports its peer closing, so an adapter that does know when
 its transport closed can register a signal and pending calls reject instead of waiting for their
 timeout. The ports of `multiplexPort` register one, which fires when the port closes.
+
+`serveMethods` is a `listenPort` handler and `methodsClient` one `callPort` per method call; the
+call's `params` are `{ method, args }`, with `args` the arguments array.
 
 `send` sends an iterable as one `callPort` per chunk and ends with `{ done: true }`. Its chunk
 calls default to `NO_TIMEOUT`, since a chunk's reply waits for the consumer: a slow consumer is

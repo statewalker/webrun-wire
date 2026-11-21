@@ -140,6 +140,69 @@ const [a, b] = await Promise.all([
 await close();
 ```
 
+### Serve an object's methods: a FilesRpc
+
+`webrun-rpc`'s `serveMethods` serves an object's methods on each port the client opens, and
+`methodsClient` calls them. Here the object is a `FilesRpc` from `@statewalker/webrun-files-rpc`,
+whose chunks are `Uint8Array`s; `msgpackCodec` carries them as bytes. The test
+`tests/files-rpc-over-ws.test.ts` runs this example.
+
+```ts
+import { MemFilesApi } from "@statewalker/webrun-files-mem";
+import { type FilesRpc, newFilesRpcClient, newFilesRpcServer } from "@statewalker/webrun-files-rpc";
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { methodsClient, overPipe, serveMethods } from "@statewalker/webrun-rpc";
+import {
+  messageTargetOverWebSocket,
+  openWebSocket,
+  type WebSocketLike,
+} from "@statewalker/webrun-streams-ws";
+import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
+
+const channelName = "files";
+const methods = [
+  "openRead", "readChunk", "closeRead", "openWrite", "writeChunk", "closeWrite", "abortWrite",
+  "list", "stats", "exists", "mkdir", "remove", "move", "copy",
+] as const;
+
+// server: one FilesRpc, served on every port a client opens
+const files = newFilesRpcServer({ fs: new MemFilesApi() });
+const wss = new WebSocketServer({ port: 8080 });
+wss.on("connection", (socket) => {
+  const { target, signal } = messageTargetOverWebSocket(socket as unknown as WebSocketLike);
+  void overPipe(target, { codec: msgpackCodec, side: "responder", signal })((port) => {
+    serveMethods(port, files, { channelName, methods });
+    return true;
+  });
+});
+
+// client: one port, and a FilesApi over its methods
+const ws = await openWebSocket({
+  url: "ws://127.0.0.1:8080",
+  WebSocketCtor: NodeWebSocket as unknown as new (url: string) => WebSocketLike,
+});
+const pipe = messageTargetOverWebSocket(ws);
+const mux = await overPipe(pipe.target, {
+  codec: msgpackCodec,
+  side: "initiator",
+  signal: pipe.signal,
+})();
+const rpc = methodsClient<FilesRpc>(await mux.openPort({ kind: "methods" }), {
+  channelName,
+  methods,
+});
+const remote = newFilesRpcClient({ rpc });
+
+await remote.write("/hello.txt", [new TextEncoder().encode("hello")]);
+for await (const chunk of remote.read("/hello.txt")) console.log(new TextDecoder().decode(chunk));
+
+await mux.close();
+wss.close();
+```
+
+A method the server does not list is refused (`ENOSYS`); a `FilesRpcError` keeps its `code`
+(`errorCode(e)` reads it).
+
 ### HTTP over the socket
 
 `@statewalker/webrun-http-streams` carries `Request` / `Response` over any

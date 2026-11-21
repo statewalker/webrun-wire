@@ -43,6 +43,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-files-rpc": "catalog:",
     "@statewalker/webrun-msgpack": "workspace:^",
     "@statewalker/webrun-rpc": "workspace:^",
     "@statewalker/webrun-streams-conformance": "workspace:^",
