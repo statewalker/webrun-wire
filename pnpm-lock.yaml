@@ -33,6 +33,12 @@ catalogs:
     '@roamhq/wrtc':
       specifier: ^0.10.0
       version: 0.10.0
+    '@statewalker/webrun-files-mem':
+      specifier: ^0.12.0
+      version: 0.12.0
+    '@statewalker/webrun-files-rpc':
+      specifier: ^0.3.0
+      version: 0.3.0
     '@types/node':
       specifier: ^26.6.4
       version: 26.6.4
@@ -662,6 +668,12 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.5.15
+      '@statewalker/webrun-files-mem':
+        specifier: 'catalog:'
+        version: 0.12.0
+      '@statewalker/webrun-files-rpc':
+        specifier: 'catalog:'
+        version: 0.3.0
       '@statewalker/webrun-msgpack':
         specifier: workspace:^
         version: link:../webrun-msgpack
@@ -1321,6 +1333,15 @@ packages:
   '@sindresorhus/fnv1a@3.1.0':
     resolution: {integrity: sha512-KV321z5m/0nuAg83W1dPLy85HpHDk7Sdi4fJbwvacWsEhAh+rZUW4ZfGcXmUIvjZg4ss2bcwNlRhJ7GBEUG08w==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  '@statewalker/webrun-files-mem@0.12.0':
+    resolution: {integrity: sha512-q8UZAUs3YIvJDPkYKHFvOhBTas0IKP41SJKDVQwxJbmcGrMyH2AbNRltX086VfA6PhO5TXoQW/UQNAEhUOGGUA==}
+
+  '@statewalker/webrun-files-rpc@0.3.0':
+    resolution: {integrity: sha512-t4/kfztc8eVU6A7RiiLvc8Ip1nlXYAHqfqmEKcnEarUGNNT97TQaDfOfzNyOga0CiKdXtKxAnFWx468LBaIzYA==}
+
+  '@statewalker/webrun-files@0.12.0':
+    resolution: {integrity: sha512-8Ygw0JjouDAJ2nNXx8plZkZQ/Pesfdmdtrsyi97sArvjAmzyZ4xZ2e3eyqXEt4MUlc6oG4Q7bVnOvzzQpVWMaA==}
 
   '@statewalker/webrun-rpc@0.10.2':
     resolution: {integrity: sha512-li7QgZ7mA8XDuGnqI5wRKBy1Z5MUXB0PhjPZo9PE8azQzlZBMfX6N9BcTY3laV82O2EDcbpAVyynrHMh3m21BQ==}
@@ -4021,6 +4042,16 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@sindresorhus/fnv1a@3.1.0': {}
+
+  '@statewalker/webrun-files-mem@0.12.0':
+    dependencies:
+      '@statewalker/webrun-files': 0.12.0
+
+  '@statewalker/webrun-files-rpc@0.3.0':
+    dependencies:
+      '@statewalker/webrun-files': 0.12.0
+
+  '@statewalker/webrun-files@0.12.0': {}
 
   '@statewalker/webrun-rpc@0.10.2':
     dependencies:

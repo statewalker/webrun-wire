@@ -37,6 +37,7 @@ export type {
 } from "./port-types.js";
 export * from "./receive.js";
 export * from "./send.js";
+export * from "./serve-methods.js";
 export { structuredCodec } from "./structured-codec.js";
 export * from "./transfer-port-mux.js";
 export {

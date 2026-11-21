@@ -12,6 +12,10 @@ catalog:
   "@libp2p/utils": ^7.4.1
   "@multiformats/multiaddr": ^13.0.3
   "@roamhq/wrtc": "^0.10.0"
+  # Higher-layer packages (webrun-files) used only by webrun-streams-ws' FilesRpc-over-WebSocket
+  # test and example; never a dependency of a published package here.
+  "@statewalker/webrun-files-mem": "^0.12.0"
+  "@statewalker/webrun-files-rpc": "^0.3.0"
   "@types/ws": "^8.18.2"
   "@vitest/browser-playwright": "^5.0.5"
   "esbuild": "^0.28.2"
