@@ -1,5 +1,13 @@
 # @statewalker/webrun-streams-ws
 
+## 0.5.3
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+
 ## 0.5.2
 
 ### Patch Changes

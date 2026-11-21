@@ -1,5 +1,21 @@
 # @statewalker/webrun-streams-libp2p
 
+## 0.8.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-msgpack crosses a breaking line
+  - @statewalker/webrun-rpc crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [0b79298]
+  - @statewalker/webrun-msgpack@0.15.0
+  - @statewalker/webrun-rpc@0.16.0
+
 ## 0.7.2
 
 ### Patch Changes
