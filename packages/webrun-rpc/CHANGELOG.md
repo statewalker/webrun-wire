@@ -1,5 +1,15 @@
 # @statewalker/webrun-rpc
 
+## 0.17.0
+
+### Minor Changes
+
+- 027ca67: `callBidi` takes `options.closePort`: set, it closes the port once the stream is over (ended, the handler failed, or the consumer stopped early), so a port opened on a mux for one subscription is not left in the mux. Off by default: the caller owns the port, as documented now (#217).
+
+### Patch Changes
+
+- dde348f: `throughAbort` returns its source when its consumer stops early without an abort (a `break`, or a chunk send that rejected because the port closed), so a `listenBidi` producer suspended at `yield` runs its `finally` instead of leaking its listeners and timers (#216).
+
 ## 0.16.0
 
 ### Minor Changes
