@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-streams-chrome",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
   "description": "chrome.runtime.Port and extension MessagePort pipes for the webrun-streams-* family",
