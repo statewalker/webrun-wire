@@ -99,6 +99,21 @@ describe("callBidi's closePort option (statewalker/webrun-wire#217)", () => {
     expect(client.ports().length).toBe(0);
   });
 
+  it("closes the mux port when the call is stopped before its first next()", async () => {
+    const { client } = muxPair();
+    const returned = await client.openPort("subscription");
+    const call = callBidi<undefined, number>(returned, [], { options: { closePort: true } });
+    expect(await call.return(undefined)).toEqual({ done: true, value: undefined });
+    expect(client.ports().length).toBe(0);
+    // Once: a second return() closes nothing more and still answers done.
+    expect(await call.return(undefined)).toEqual({ done: true, value: undefined });
+
+    const thrown = await client.openPort("subscription");
+    const failing = callBidi<undefined, number>(thrown, [], { options: { closePort: true } });
+    await expect(failing.throw(new Error("stopped"))).rejects.toThrow("stopped");
+    expect(client.ports().length).toBe(0);
+  });
+
   it("leaves the port open by default: the caller owns it", async () => {
     const { client } = muxPair();
     const port = await client.openPort("subscription");

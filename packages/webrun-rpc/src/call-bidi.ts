@@ -1,3 +1,4 @@
+import { asyncDisposable } from "./async-dispose.js";
 import { type CallPortOptions, callPort } from "./call-port.js";
 import { ioSend } from "./io-send.js";
 import type { MessageTarget } from "./message-target.js";
@@ -41,13 +42,69 @@ export interface CallBidiArgs {
  * The caller owns `port`: `callBidi` leaves it open unless
  * `options.closePort` is set (statewalker/webrun-wire#217).
  */
-export async function* callBidi<TIn, TOut>(
+export function callBidi<TIn, TOut>(
   port: MessageTarget,
   input: AsyncIterable<TIn> | Iterable<TIn>,
-  { options = {}, ...params }: CallBidiArgs = {},
+  args: CallBidiArgs = {},
+): AsyncGenerator<TOut> {
+  if (!args.options?.closePort) return runCallBidi<TIn, TOut>(port, input, args, async () => {});
+  let closed = false;
+  const closeOnce = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    try {
+      await port.close?.();
+    } catch {
+      /* the port is gone either way; the stream's own outcome wins */
+    }
+  };
+  const inner = runCallBidi<TIn, TOut>(port, input, args, closeOnce);
+  // An async generator stopped before its first `next()` never runs its body,
+  // so its `finally` cannot close the port: the wrapper does it then.
+  let started = false;
+  // An AsyncGenerator but for `Symbol.asyncDispose`, which `asyncDisposable` adds below where
+  // the runtime has it (as in `returningAtOnce`).
+  const wrapper: Pick<
+    AsyncGenerator<TOut>,
+    "next" | "return" | "throw" | typeof Symbol.asyncIterator
+  > = {
+    next(...value: [] | [unknown]) {
+      started = true;
+      return inner.next(...value);
+    },
+    async return(value) {
+      if (started) return inner.return(value);
+      started = true;
+      try {
+        return await inner.return(value);
+      } finally {
+        await closeOnce();
+      }
+    },
+    async throw(error) {
+      if (started) return inner.throw(error);
+      started = true;
+      try {
+        return await inner.throw(error);
+      } finally {
+        await closeOnce();
+      }
+    },
+    [Symbol.asyncIterator]() {
+      return wrapper as AsyncGenerator<TOut>;
+    },
+  };
+  return asyncDisposable(wrapper as AsyncGenerator<TOut>, () => wrapper.return(undefined));
+}
+
+async function* runCallBidi<TIn, TOut>(
+  port: MessageTarget,
+  input: AsyncIterable<TIn> | Iterable<TIn>,
+  { options = {}, ...params }: CallBidiArgs,
+  closePort: () => Promise<void>,
 ): AsyncGenerator<TOut> {
   const channelName = `${+String(Math.random()).substring(2)}`;
-  const { bidiTimeout = 2147483647, closePort = false } = options;
+  const { bidiTimeout = 2147483647 } = options;
   const promise = callPort(port, { ...params, channelName }, { ...options, timeout: bidiTimeout });
 
   const cancelInner = new AbortController();
@@ -77,13 +134,7 @@ export async function* callBidi<TIn, TOut>(
     } catch {
       /* surfaced via outerError */
     }
-    if (closePort) {
-      try {
-        await port.close?.();
-      } catch {
-        /* the port is gone either way; the stream's own outcome wins */
-      }
-    }
+    await closePort();
   }
   if (outerError !== undefined) throw outerError;
 }
