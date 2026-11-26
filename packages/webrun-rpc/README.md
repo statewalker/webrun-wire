@@ -305,6 +305,18 @@ off();
 reserved for `CallBidiOptions`. The optional `accept(params)` predicate on `listenBidi` declines
 calls.
 
+The caller owns the port: `callBidi` leaves it open when the stream ends, so one port can carry
+many calls. A port opened on a mux for one subscription is a different case, since the mux keeps
+it until someone closes it. Pass `closePort: true` and `callBidi` closes it once the stream is
+over, whether it ended, the handler failed or the consumer broke out of the loop:
+
+```ts
+const port = await mux.openPort("events");
+for await (const event of callBidi(port, [], { topic: "tabs", options: { closePort: true } })) {
+  if (event.done) break; // the mux drops the port here
+}
+```
+
 ## Internals
 
 ### Layers
