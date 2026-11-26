@@ -10,6 +10,14 @@ export interface CallBidiOptions extends CallPortOptions {
   timeout?: number;
   /** Timeout for the outer stream (default: `Number.MAX_SAFE_INTEGER` / max int). */
   bidiTimeout?: number;
+  /**
+   * Close `port` once the stream is over: it ended, the handler failed, or
+   * the consumer stopped early (default: `false`, the caller owns the port).
+   * For a port opened on a mux for this one call (`mux.openPort(meta)`), so
+   * the mux does not keep it after the subscription ends. Leave it off for a
+   * port that carries other calls.
+   */
+  closePort?: boolean;
 }
 
 export interface CallBidiArgs {
@@ -29,6 +37,9 @@ export interface CallBidiArgs {
  * receiveIterator is force-closed via an internal cancel signal so the
  * consumer doesn't hang waiting for chunks that will never come. The outer
  * error is then re-thrown to the caller.
+ *
+ * The caller owns `port`: `callBidi` leaves it open unless
+ * `options.closePort` is set (statewalker/webrun-wire#217).
  */
 export async function* callBidi<TIn, TOut>(
   port: MessageTarget,
@@ -36,7 +47,7 @@ export async function* callBidi<TIn, TOut>(
   { options = {}, ...params }: CallBidiArgs = {},
 ): AsyncGenerator<TOut> {
   const channelName = `${+String(Math.random()).substring(2)}`;
-  const { bidiTimeout = 2147483647 } = options;
+  const { bidiTimeout = 2147483647, closePort = false } = options;
   const promise = callPort(port, { ...params, channelName }, { ...options, timeout: bidiTimeout });
 
   const cancelInner = new AbortController();
@@ -65,6 +76,13 @@ export async function* callBidi<TIn, TOut>(
       await promise;
     } catch {
       /* surfaced via outerError */
+    }
+    if (closePort) {
+      try {
+        await port.close?.();
+      } catch {
+        /* the port is gone either way; the stream's own outcome wins */
+      }
     }
   }
   if (outerError !== undefined) throw outerError;
