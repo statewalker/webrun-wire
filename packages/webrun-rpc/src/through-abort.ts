@@ -9,6 +9,11 @@
  * behind a pending `next()`, so a producer that waits for something to send
  * (a tunnel) would otherwise keep whoever awaits this wrapper — the caller's
  * teardown, once its port died — waiting for ever (statewalker/webrun-wire#153).
+ *
+ * A consumer that stops early without the signal (it breaks, or throws: a
+ * chunk send rejected because the port closed) returns the source too, so a
+ * producer suspended at `yield` runs its `finally` (statewalker/webrun-wire#216).
+ * A source that finished or threw is not returned.
  */
 export async function* throughAbort<T>(
   input: AsyncIterable<T> | Iterable<T>,
@@ -25,15 +30,32 @@ export async function* throughAbort<T>(
     return;
   }
   signal.addEventListener("abort", onAbort, { once: true });
+  // Whether the source is finished: it said `done`, or its `next()` threw.
+  let sourceDone = false;
   try {
     while (true) {
-      const r = await nextOrAbort(iter, signal);
-      if (r.done) return;
+      let r: IteratorResult<T>;
+      try {
+        r = await nextOrAbort(iter, signal);
+      } catch (error) {
+        sourceDone = true;
+        throw error;
+      }
+      if (r.done) {
+        sourceDone = true;
+        return;
+      }
       if (signal.aborted) return;
       yield r.value;
     }
   } finally {
     signal.removeEventListener("abort", onAbort);
+    // On an abort `onAbort` (or the abort check above) has returned the source
+    // already. Not awaited: a producer whose `finally` waits must not hold up
+    // the consumer's teardown, as with an abort.
+    if (!sourceDone && !signal.aborted) {
+      Promise.resolve(iter.return?.(undefined as never)).catch(() => {});
+    }
   }
 }
 
