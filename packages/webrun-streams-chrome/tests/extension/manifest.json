@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "webrun-streams-chrome test",
+  "version": "0.0.1",
+  "background": { "service_worker": "worker.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

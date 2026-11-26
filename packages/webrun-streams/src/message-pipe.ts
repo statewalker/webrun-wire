@@ -99,8 +99,13 @@ export interface MessagePipeTarget {
    * ending the pipe, past `maxFrameBytes`; a no-op once the pipe ended.
    */
   postMessage(message: unknown): void;
-  /** Ends the pipe on this side and releases the transport. */
-  close(): Promise<void>;
+  /**
+   * Ends the pipe on this side and releases the transport. `reason` (an
+   * `Error`, or anything else, wrapped in one) becomes the signal's reason
+   * and reaches the transport's `close`, so a relay can end one side with the
+   * reason the other side ended with. Default: a "closed locally" `Error`.
+   */
+  close(reason?: unknown): Promise<void>;
   /** The transport's buffered bytes. */
   readonly bufferedAmount: number;
   /** Resolves once the transport can take more, or the pipe ended. */
@@ -240,13 +245,20 @@ export function newMessagePipe(
       }
       transport.send(copyOnSend ? bytes.slice() : bytes);
     },
-    async close() {
+    async close(reason?: unknown) {
       listeners.clear();
       if (life.signal.aborted) return;
       try {
         await transport.flush?.();
       } catch {}
-      finish(new Error(`${name}: closed locally`), true);
+      finish(
+        reason === undefined
+          ? new Error(`${name}: closed locally`)
+          : reason instanceof Error
+            ? reason
+            : new Error(String(reason)),
+        true,
+      );
     },
     get bufferedAmount() {
       return buffered();
