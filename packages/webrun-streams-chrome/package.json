@@ -1,0 +1,62 @@
+{
+  "name": "@statewalker/webrun-streams-chrome",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "description": "chrome.runtime.Port and extension MessagePort pipes for the webrun-streams-* family",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-wire/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-wire/tree/main/packages/webrun-streams-chrome#readme",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-wire.git",
+    "directory": "packages/webrun-streams-chrome"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
+    "test": "vitest run",
+    "test:extension": "node tests/extension/run.mjs",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
+    "lint": "biome check src tests",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@statewalker/webrun-streams": "workspace:^"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "@statewalker/webrun-http-streams": "workspace:^",
+    "@statewalker/webrun-msgpack": "workspace:^",
+    "@statewalker/webrun-rpc": "workspace:^",
+    "@statewalker/webrun-streams-conformance": "workspace:^",
+    "@types/node": "catalog:",
+    "playwright": "catalog:",
+    "rimraf": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "types": "./dist/index.d.ts"
+}

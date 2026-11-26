@@ -27,13 +27,13 @@ WebRTC channel by changing the adapter. Iterator semantics carry every signal: a
   seam:                         webrun-streams  (Duplex, Connect, Serve, TransportClosedError)
                                    ^             ^             ^                ^
                                   /              |              \                \
-           adapters:  webrun-streams-ws  -webrtc  -libp2p  -livekit  -peerjs   (+ -signaling to set up P2P)
+           adapters:  webrun-streams-ws  -webrtc  -libp2p  -livekit  -peerjs  -chrome   (+ -signaling to set up P2P)
 
   standalone:  webrun-rpc-http (needs only webrun-streams)   webrun-http-events, webrun-http-proxy (no deps)
   testing:     webrun-streams-conformance (the suite every adapter passes)
 ```
 
-Message-oriented transports (WebSocket, MessagePort, LiveKit, PeerJS, a signaled P2P channel)
+Message-oriented transports (WebSocket, MessagePort, a Chrome extension port, LiveKit, PeerJS, a signaled P2P channel)
 supply only a pipe of messages, and `webrun-rpc`'s port stack runs many concurrent streams over
 it: `overPipe(pipe, { codec: msgpackCodec, side, signal, maxMessageSize })` opens a port per call,
 and `webrun-rpc`'s `connect` / `serve` turn each port into a `Duplex`. Transports that multiplex
@@ -53,6 +53,7 @@ byte-channel multiplexer `emulateMux` that used to sit in `webrun-streams` was r
 | [`@statewalker/webrun-http-events`](./packages/webrun-http-events) | Publish/subscribe over Server-Sent Events: a fetch handler and a client | nothing |
 | [`@statewalker/webrun-http-proxy`](./packages/webrun-http-proxy) | Re-issue a request to an outside origin safely | nothing |
 | [`@statewalker/webrun-streams-ws`](./packages/webrun-streams-ws) | A WebSocket as a pipe for `webrun-rpc`'s port stack | nothing |
+| [`@statewalker/webrun-streams-chrome`](./packages/webrun-streams-chrome) | A `chrome.runtime.Port` and an extension `MessagePort` as pipes for `webrun-rpc`'s port stack, and the content script's relay between them | webrun-streams |
 | [`@statewalker/webrun-streams-webrtc`](./packages/webrun-streams-webrtc) | WebRTC data channel adapter, one channel per call | webrun-streams |
 | [`@statewalker/webrun-streams-libp2p`](./packages/webrun-streams-libp2p) | libp2p stream adapter | webrun-streams; peers `@libp2p/interface`, `@multiformats/multiaddr`, optional `libp2p` |
 | [`@statewalker/webrun-streams-livekit`](./packages/webrun-streams-livekit) | A LiveKit participant as a pipe for `webrun-rpc`'s port stack | peer `livekit-client` |

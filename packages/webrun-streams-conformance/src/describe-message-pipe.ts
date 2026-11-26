@@ -131,6 +131,23 @@ export function describeMessagePipe(
         await h.pipe.target.close();
       }));
 
+    it("close(reason) ends the pipe with that reason, an Error as given and anything else wrapped", async () => {
+      await withHarness(make, async (h) => {
+        const reason = new Error("the other side ended");
+        await h.pipe.target.close(reason);
+        expect(h.pipe.signal.aborted).toBe(true);
+        expect(h.pipe.signal.reason).toBe(reason);
+        // A later close keeps the first reason.
+        await h.pipe.target.close(new Error("later"));
+        expect(h.pipe.signal.reason).toBe(reason);
+      });
+      await withHarness(make, async (h) => {
+        await h.pipe.target.close("gone");
+        expect(h.pipe.signal.reason).toBeInstanceOf(Error);
+        expect((h.pipe.signal.reason as Error).message).toBe("gone");
+      });
+    });
+
     if (options.withMaxFrameBytes) {
       const build = () => options.withMaxFrameBytes?.(100) as Promise<MessagePipeHarness>;
       it("a message of exactly maxFrameBytes is sent; one byte past it ends the pipe with RangeError", () =>
