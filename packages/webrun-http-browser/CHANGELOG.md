@@ -1,5 +1,23 @@
 # @statewalker/webrun-http-browser
 
+## 0.20.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: dist/index.js
+  - @statewalker/webrun-streams crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies [10c546a]
+  - @statewalker/webrun-http-streams@0.9.0
+  - @statewalker/webrun-rpc@0.18.0
+  - @statewalker/webrun-streams@0.7.0
+
 ## 0.19.0
 
 ### Minor Changes
